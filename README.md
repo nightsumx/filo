@@ -37,7 +37,7 @@ Try it once without installing: `pi -e npm:pi-cc-tui`
 
 **Assistant text** — `⏺ ` marker with a 2-column hanging indent. Code blocks without ``` fences, quotes with a dim `▎`, links as OSC 8 hyperlinks.
 
-**Tool calls** — `⏺ Bash(cmd)` / `Update(file)` / `Write(file)`, dot green / red / gray by state, results under `  ⎿  `. Edits show `Added N lines, removed N lines` with the red/green row diff and word highlight; failures show `Error: Exit code N` plus stderr in red. Consecutive reads, searches and listings collapse into `Read 2 files, listed 1 directory (ctrl+o to expand)`.
+**Tool calls** — `⏺ Bash(cmd)` / `Read(file)`, dot green / red / gray by state, results under `  ⎿  `. Failures show `Error: Exit code N` plus stderr in red. Consecutive reads, searches and listings collapse into `Read 2 files, listed 1 directory (ctrl+o to expand)`.
 
 **Working line** — `✻ Brewing… (12s · ↓ 1.2k tokens)` above the input instead of inside its border, and `✻ Brewed for 34s · done 7:09 PM` when the turn ends.
 
@@ -58,10 +58,15 @@ Try it once without installing: `pi -e npm:pi-cc-tui`
 
 ## Pairs well with
 
-This package draws tool calls itself. If you also run [pi-cc-extensions](https://github.com/minuque/pi-cc-extensions), turn off the parts that overlap in `~/.pi/agent/pi-cc-extensions.json`:
+Edit and write diffs come from [pi-cc-extensions](https://github.com/minuque/pi-cc-extensions). This package draws the other tools, so hand them over in `~/.pi/agent/pi-cc-extensions.json`:
 
 ```json
-{ "mode": "off", "enableCustomFooter": false, "enableWorkingMessage": false, "enableAgentSummary": false }
+{
+  "excludeRenderers": ["bash", "read", "grep", "find", "ls"],
+  "enableCustomFooter": false,
+  "enableWorkingMessage": false,
+  "enableAgentSummary": false
+}
 ```
 
 Terminals pi doesn't recognise (JetBrains, for one) get links as `text (url)`. Turn on hyperlinks in `~/.pi/agent/settings.json`:

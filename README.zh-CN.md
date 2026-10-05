@@ -39,7 +39,7 @@ pi install npm:pi-cc-tui
 
 **回复正文**：`⏺ ` 开头，折行缩进 2 格。代码块不画 ``` 围栏，引用用暗色 `▎`，链接用 OSC 8 超链接。
 
-**工具调用**：`⏺ Bash(命令)` / `Update(文件)` / `Write(文件)`，圆点按状态绿 / 红 / 灰，结果挂在 `  ⎿  ` 下面。编辑显示 `Added N lines, removed N lines` 和红绿整行 diff、改动词高亮；失败显示红色 `Error: Exit code N` 加 stderr。连续的读文件、搜索、列目录合成一行 `Read 2 files, listed 1 directory (ctrl+o to expand)`。
+**工具调用**：`⏺ Bash(命令)` / `Read(文件)`，圆点按状态绿 / 红 / 灰，结果挂在 `  ⎿  ` 下面。失败显示红色 `Error: Exit code N` 加 stderr。连续的读文件、搜索、列目录合成一行 `Read 2 files, listed 1 directory (ctrl+o to expand)`。
 
 **进度行**：`✻ Brewing… (12s · ↓ 1.2k tokens)` 放在输入框上方，不再嵌进边框；回合结束留一行 `✻ Brewed for 34s · done 7:09 PM`。
 
@@ -60,10 +60,15 @@ pi install npm:pi-cc-tui
 
 ## 推荐搭配
 
-工具调用由本插件自己画。如果同时装了 [pi-cc-extensions](https://github.com/minuque/pi-cc-extensions)，在 `~/.pi/agent/pi-cc-extensions.json` 里关掉重叠的部分：
+编辑和写文件的 diff 用 [pi-cc-extensions](https://github.com/minuque/pi-cc-extensions) 的。其他工具由本插件画，在 `~/.pi/agent/pi-cc-extensions.json` 里把它们让出来：
 
 ```json
-{ "mode": "off", "enableCustomFooter": false, "enableWorkingMessage": false, "enableAgentSummary": false }
+{
+  "excludeRenderers": ["bash", "read", "grep", "find", "ls"],
+  "enableCustomFooter": false,
+  "enableWorkingMessage": false,
+  "enableAgentSummary": false
+}
 ```
 
 pi 认不出的终端（比如 JetBrains）会把链接显示成 `文字 (url)`。在 `~/.pi/agent/settings.json` 里打开超链接：
