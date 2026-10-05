@@ -44,21 +44,14 @@ userMessage.rebuild = function () {
 };
 
 const assistant = AssistantMessageComponent.prototype;
+const assistantRender = assistant.render;
 assistant.render = function (width: number) {
-	const lines: string[] = [];
 	for (const child of this.contentContainer.children) {
-		const text = child instanceof Markdown && !child.defaultTextStyle;
-		if (!text && !(child instanceof Text)) continue;
-		if (text && !child.ccHang) {
-			child.ccHang = true;
-			hang(child, `${fg(231, "⏺")} `, "  ");
-		}
-		lines.push("", ...child.render(width));
+		if (!(child instanceof Markdown) || child.defaultTextStyle || child.ccHang) continue;
+		child.ccHang = true;
+		hang(child, `${fg(231, "⏺")} `, "  ");
 	}
-	if (this.hasToolCalls || lines.length === 0) return lines;
-	lines[0] = `\x1b]133;A\x07${lines[0]}`;
-	lines[lines.length - 1] = `\x1b]133;B\x07\x1b]133;C\x07${lines[lines.length - 1]}`;
-	return lines;
+	return assistantRender.call(this, width);
 };
 
 const loader = Loader.prototype;

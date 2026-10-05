@@ -1,7 +1,7 @@
 {
   "name": "pi-cc-tui",
   "version": "0.1.0",
-  "description": "Make pi's TUI look like Claude Code: tool calls, diffs, messages, spinner, input box, status line and dark theme",
+  "description": "Make pi's TUI look like Claude Code: messages, markdown, spinner, input box, status line and dark theme",
   "keywords": [
     "pi-package",
     "pi-extension",
@@ -21,7 +21,6 @@
   "pi": {
     "extensions": [
       "./extensions/cc-tui.ts",
-      "./extensions/cc-tools.ts",
       "./extensions/cc-statusline.ts"
     ],
     "themes": [
