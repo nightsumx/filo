@@ -1,0 +1,331 @@
+/* Copied from chat/src/styles/index.css; theme variables inlined from chat/src/styles/theme.less.
+   Markdown and highlight.js themes are swapped per theme by src/lib/theme.ts. */
+
+@import '@fontsource-variable/inter/index.css';
+@import '@fontsource-variable/jetbrains-mono/index.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+    :root {
+        --color-primary: rgba(69, 89, 164, 1);
+        --text-color-a: #1e1f22;
+        --text-color-b: rgba(0, 0, 0, 0.6);
+        --text-color-c: rgba(0, 0, 0, 0.3);
+        --bg-main: #fff;
+        --bg-side: #f7f8fa;
+        --bg-hover: rgba(0, 0, 0, 0.05);
+        --bg-selected: #dfe1e5;
+        --bg-active: #dfe1e5;
+        --border-color: #ebecf0;
+
+        /* WebStorm "Islands" chrome. Light = Int UI Light, dark = Islands Dark (sampled). */
+        --ide-frame: #e9eaee;
+        --ide-panel: #f7f8fa;
+        --ide-editor: #ffffff;
+        --ide-border: #dfe1e5;
+        --ide-line: #ebecf0;
+        --ide-hover: rgba(0, 0, 0, 0.05);
+        --ide-sel: #d4e2ff;
+        --ide-sel-muted: #dfe1e5;
+        --ide-tab: #ffffff;
+        --ide-accent: #3574f0;
+        --ide-accent-hover: #2d63cf;
+        /* Tool success mark. pi-cc-extensions' #99d58f is too faint on white, so light uses a deeper shade of it. */
+        --ide-success: #5c9e51;
+        --ide-fg: #1e1f22;
+        --ide-muted: #6c707e;
+        --ide-dim: #818594;
+        --ide-radius: 10px;
+        --box-shadow: rgba(0, 0, 0, 0.15);
+        --background: 0 0% 100%;
+        --foreground: 0 0% 3.9%;
+        --card: 0 0% 100%;
+        --card-foreground: 0 0% 3.9%;
+        --popover: 0 0% 100%;
+        --popover-foreground: 0 0% 3.9%;
+        --primary: 0 0% 15%;
+        --primary-foreground: 0 0% 98%;
+        --secondary: 0 0% 96.1%;
+        --secondary-foreground: 0 0% 9%;
+        --muted: 0 0% 96.1%;
+        --muted-foreground: 0 0% 45.1%;
+        --accent: 0 0% 96.1%;
+        --accent-foreground: 0 0% 9%;
+        --destructive: 0 84.2% 60.2%;
+        --destructive-foreground: 0 0% 98%;
+        --border: 0 0% 89.8%;
+        --input: 0 0% 89.8%;
+        --ring: 0 0% 3.9%;
+        --chart-1: 12 76% 61%;
+        --chart-2: 173 58% 39%;
+        --chart-3: 197 37% 24%;
+        --chart-4: 43 74% 66%;
+        --chart-5: 27 87% 67%;
+        --radius: 0.5rem;
+        --scrollbar: rgba(0, 0, 0, 0.18);
+        --scrollbar-hover: rgba(0, 0, 0, 0.3);
+        --shimmer-dim: rgba(0, 0, 0, 0.35);
+        --shimmer-bright: rgba(0, 0, 0, 0.85);
+        --sidebar-width: 58px;
+        --app-font-size: 13.5px;
+    }
+
+    .dark {
+        color-scheme: dark;
+        --color-primary: rgba(129, 146, 214, 1);
+        --text-color-a: #dfe1e5;
+        --text-color-b: rgba(255, 255, 255, 0.6);
+        --text-color-c: rgba(255, 255, 255, 0.32);
+        --bg-main: #1e1f22;
+        --bg-side: #191a1c;
+        --bg-hover: rgba(255, 255, 255, 0.05);
+        --bg-selected: #33353a;
+        --bg-active: #393b40;
+        --border-color: #393b40;
+
+        --ide-frame: #26282c;
+        --ide-panel: #191a1c;
+        --ide-editor: #1e1f22;
+        --ide-border: #141517;
+        --ide-line: #2b2d30;
+        --ide-hover: rgba(255, 255, 255, 0.05);
+        --ide-sel: #2e436e;
+        --ide-sel-muted: #33353a;
+        --ide-tab: #2b2d30;
+        --ide-accent: #3574f0;
+        --ide-accent-hover: #4682fa;
+        /* BRIGHT_GREEN in pi-cc-extensions (default-mode.ts). */
+        --ide-success: #99d58f;
+        --ide-fg: #dfe1e5;
+        --ide-muted: #9da0a8;
+        --ide-dim: #6f737a;
+        --box-shadow: rgba(0, 0, 0, 0.5);
+        --scrollbar: rgba(255, 255, 255, 0.14);
+        --scrollbar-hover: rgba(255, 255, 255, 0.24);
+        --shimmer-dim: rgba(255, 255, 255, 0.35);
+        --shimmer-bright: rgba(255, 255, 255, 0.9);
+        --background: 225 6% 12.7%;
+        --foreground: 220 8% 89%;
+        --card: 225 6% 12.7%;
+        --card-foreground: 220 8% 89%;
+        --popover: 216 5% 18%;
+        --popover-foreground: 0 0% 92.5%;
+        --primary: 0 0% 92.5%;
+        --primary-foreground: 0 0% 9%;
+        --secondary: 0 0% 17%;
+        --secondary-foreground: 0 0% 92.5%;
+        --muted: 0 0% 17%;
+        --muted-foreground: 0 0% 60%;
+        --accent: 0 0% 17%;
+        --accent-foreground: 0 0% 92.5%;
+        --destructive: 0 72% 51%;
+        --destructive-foreground: 0 0% 98%;
+        --border: 223 5% 23.7%;
+        --input: 0 0% 100% / 0.12;
+        --ring: 0 0% 83.1%;
+        --chart-1: 220 70% 50%;
+        --chart-2: 160 60% 45%;
+        --chart-3: 30 80% 55%;
+        --chart-4: 280 65% 60%;
+        --chart-5: 340 75% 55%;
+    }
+
+    * {
+        @apply border-border;
+    }
+
+    html, body, #root {
+        width: 100%;
+        height: 100%;
+        min-height: 100% !important;
+        font-size: 16px;
+        @apply font-sans;
+        font-feature-settings: "cv11", "ss01";
+        overscroll-behavior: none;
+    }
+
+    body {
+        @apply bg-background text-foreground;
+        margin: 0;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+        overscroll-behavior: none;
+        -webkit-user-select: none;
+        -moz-user-select: none;
+        -ms-user-select: none;
+        user-select: none;
+    }
+
+    textarea {
+        border: none;
+    }
+
+    @keyframes msg-flash {
+        0% { background-color: transparent; }
+        20% { background-color: rgba(0, 122, 255, 0.12); }
+        100% { background-color: transparent; }
+    }
+
+    .msg-flash {
+        animation: msg-flash 1.5s ease-out;
+        border-radius: 8px;
+    }
+
+    @keyframes breath {
+        0%, 100% { opacity: 0.4; }
+        50% { opacity: 1; }
+    }
+
+    /* 运行中节点：一束高光从左扫到右，循环 */
+    @keyframes node-shimmer {
+        0% { background-position: -150% 0; }
+        100% { background-position: 250% 0; }
+    }
+    .node-running {
+        background-image: linear-gradient(110deg, transparent 25%, rgba(255,255,255,0.14) 50%, transparent 75%);
+        background-size: 200% 100%;
+        animation: node-shimmer 2.2s linear infinite;
+    }
+
+    textarea:focus {
+        border-color: inherit;
+        box-shadow: none;
+        outline-color: transparent;
+    }
+
+    h1 {
+        font-size: 1.875rem;
+        line-height: 2.25rem;
+        font-weight: 600;
+    }
+
+    h2, h3 {
+        font-size: 1.5rem;
+        line-height: 2rem;
+        font-weight: 600;
+    }
+
+    .markdown-body strong {
+        font-weight: 500;
+    }
+
+    code, pre, kbd, .markdown-body code, .markdown-body pre {
+        @apply font-mono;
+        font-variant-ligatures: none;
+    }
+
+    /* Terminal-style rows (tool calls, diffs) print === and => as typed, like the TUI. */
+    .font-mono {
+        font-variant-ligatures: none;
+    }
+}
+
+/* 滚动条样式：JetBrains-style thin overlay thumb */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background-color: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+    border-radius: 16px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+    background-color: var(--scrollbar);
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background-color: var(--scrollbar-hover);
+}
+
+@media (min-width: 768px) {
+    .scrollbar-trigger ::-webkit-scrollbar-thumb {
+        visibility: hidden;
+    }
+
+    .scrollbar-trigger:hover ::-webkit-scrollbar-thumb {
+        visibility: visible;
+    }
+}
+
+/* 其他样式 */
+::highlight(highlight) {
+    background-color: rgb(255, 255, 0);
+    color: #000;
+}
+
+ol, ul, menu {
+    display: block;
+    list-style-type: disc; /* ul 默认为 disc，ol 默认为 decimal */
+    margin-block-start: 1em;
+    margin-block-end: 1em;
+    margin-inline-start: 0px;
+    margin-inline-end: 0px;
+    padding-inline-start: 40px;
+}
+
+ol {
+    list-style-type: decimal;
+}
+
+ul {
+    list-style-type: disc;
+}
+
+.monaco-editor, .monaco-editor-background {
+    /*background-color: transparent !important;*/
+    /*outline: none !important;*/
+}
+
+.markdown-body {
+    background-color: transparent;
+    font-size: var(--app-font-size);
+    line-height: 1.65;
+}
+
+/* ---- pi-gui additions ---- */
+
+/* Frameless macOS window: header strips drag the window, controls inside them do not. */
+.app-drag {
+    -webkit-app-region: drag;
+}
+.app-drag button,
+.app-drag input,
+.app-drag [role='button'],
+.app-no-drag {
+    -webkit-app-region: no-drag;
+}
+
+/* Codex-style shimmer on "Thinking…" labels. */
+@keyframes text-shimmer {
+    0% { background-position: 100% 0; }
+    100% { background-position: -100% 0; }
+}
+.text-shimmer {
+    background-image: linear-gradient(90deg, var(--shimmer-dim) 0%, var(--shimmer-dim) 40%, var(--shimmer-bright) 50%, var(--shimmer-dim) 60%, var(--shimmer-dim) 100%);
+    background-size: 200% 100%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    animation: text-shimmer 2s linear infinite;
+}
+
+.select-text, .select-text * {
+    -webkit-user-select: text;
+    user-select: text;
+}
+
+/* Island: a rounded panel floating on the window frame (WebStorm 2025 "Islands" UI). */
+.ide-island {
+    border-radius: var(--ide-radius);
+    overflow: hidden;
+}
+.dark .ide-island {
+    box-shadow: 0 0 0 1px var(--ide-border), 0 1px 2px rgba(0, 0, 0, 0.25);
+}
