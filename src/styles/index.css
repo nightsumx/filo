@@ -35,6 +35,13 @@
         --ide-accent-hover: #2d63cf;
         /* Tool success mark. pi-cc-extensions' #99d58f is too faint on white, so light uses a deeper shade of it. */
         --ide-success: #5c9e51;
+        /* Composer status line (cc-statusline palette, darkened for white). */
+        --sl-ok: #4f8a4f;
+        --sl-dir: #3b70a6;
+        --sl-model: #7a4fd0;
+        --sl-muted: #8a8d96;
+        --sl-warn: #a6791c;
+        --sl-danger: #c0504d;
         --ide-fg: #1e1f22;
         --ide-muted: #6c707e;
         --ide-dim: #818594;
@@ -99,6 +106,13 @@
         --ide-accent-hover: #4682fa;
         /* BRIGHT_GREEN in pi-cc-extensions (default-mode.ts). */
         --ide-success: #99d58f;
+        /* xterm-256 colours 108 / 110 / 141 / 244 / 179 / 174 from cc-statusline. */
+        --sl-ok: #87af87;
+        --sl-dir: #87afd7;
+        --sl-model: #af87ff;
+        --sl-muted: #808080;
+        --sl-warn: #d7af5f;
+        --sl-danger: #d78787;
         --ide-fg: #dfe1e5;
         --ide-muted: #9da0a8;
         --ide-dim: #6f737a;

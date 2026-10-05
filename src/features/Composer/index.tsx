@@ -9,7 +9,8 @@ import { ArrowUp, ImagePlus, Square, X } from 'lucide-react'
 import { observer } from 'mobx-react-lite'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
-import { ContextGauge, ModelPicker, ThinkingPicker } from './Pickers'
+import { StatusLine } from '../Thread/StatusLine'
+import { ModelPicker, ThinkingPicker } from './Pickers'
 
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024
 
@@ -252,7 +253,6 @@ export const Composer = observer(({ thread }: { thread: Thread }) => {
                         <ModelPicker thread={thread} />
                         <ThinkingPicker thread={thread} />
                         <span className="flex-1" />
-                        <ContextGauge thread={thread} />
                         {thread.running && !canSend
                             ? (
                                     <button
@@ -280,6 +280,8 @@ export const Composer = observer(({ thread }: { thread: Thread }) => {
                     </div>
                 </div>
             </div>
+
+            <StatusLine thread={thread} />
 
             {(statuses.length > 0 || widgetsBelow.length > 0 || thread.agentStatus === 'error' || thread.agentStatus === 'exited') && (
                 <div className="mt-1.5 flex flex-col gap-1 px-2 text-[11.5px] text-gray-500">

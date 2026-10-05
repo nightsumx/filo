@@ -1,7 +1,7 @@
 // Bottom status bar, as in WebStorm: navigation breadcrumbs on the left, widgets on the right.
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { APP_INFO } from '@shared/app'
-import { cn, formatTokens } from '@/lib/utils'
+import { cn } from '@/lib/utils'
 import { appStore } from '@/store/app'
 import { Check, ChevronRight, Loader2, Monitor, Moon, Settings, Sun } from 'lucide-react'
 import { observer } from 'mobx-react-lite'
@@ -40,9 +40,6 @@ export const StatusBar = observer(() => {
     const thread = appStore.active
     const env = appStore.env
     const running = [...appStore.threads.values()].filter(t => t.running).length
-    const model = thread?.state?.model
-    const usage = thread?.stats?.contextUsage
-    const percent = usage?.percent
 
     return (
         <footer className="flex h-[26px] shrink-0 items-center gap-0.5 px-2 text-[12px]">
@@ -68,15 +65,6 @@ export const StatusBar = observer(() => {
                 <span className={cn(widget, 'cursor-default')}>
                     <Loader2 size={12} className="animate-spin" />
                     {`${running} 个线程运行中`}
-                </span>
-            )}
-            {model && <span className={cn(widget, 'cursor-default')} title={`${model.provider}/${model.id}`}>{model.name}</span>}
-            {usage?.contextWindow && (
-                <span
-                    className={cn(widget, 'cursor-default tabular-nums', percent != null && percent > 80 ? 'text-red-500' : percent != null && percent > 50 ? 'text-amber-600' : '')}
-                    title="上下文用量"
-                >
-                    {`${percent == null ? '—' : `${Math.round(percent)}%`} / ${formatTokens(usage.contextWindow)}`}
                 </span>
             )}
             <span className={cn(widget, 'cursor-default')} title={`${APP_INFO.name} ${__APP_VERSION__} · ${APP_INFO.tagline}`}>

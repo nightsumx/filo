@@ -1,16 +1,10 @@
-// cn / formatCost / formatTokens copied from chat/src/lib/utils/index.ts; the rest is pi-gui specific.
+// cn / formatTokens copied from chat/src/lib/utils/index.ts; the rest is pi-gui specific.
 import type { ClassValue } from 'clsx'
 import { clsx } from 'clsx'
 import { twMerge } from 'tailwind-merge'
 
 export function cn(...inputs: ClassValue[]) {
     return twMerge(clsx(inputs))
-}
-
-export function formatCost(cost: number | undefined | null): string {
-    if (cost == null || !Number.isFinite(cost))
-        return '$0.000'
-    return `$${cost.toFixed(3)}`
 }
 
 export function formatTokens(tokens: number | undefined | null): string {
