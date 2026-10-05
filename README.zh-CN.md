@@ -5,7 +5,9 @@
 ```
 ❯ 你好，只回一个字
 
- 好
+⏺ 好
+
+✻ Worked for 3s · done 7:11 PM
 
 ────────────────────────────────────────────────────────────────────────────────
 ❯ █
@@ -33,7 +35,13 @@ pi install npm:pi-cc-tui
 
 **输入框**：`❯ ` 提示符，折行缩进对齐，上下两条通栏灰线。鼠标点击位置照常准确。
 
-**用户消息**：灰底块紧贴文字，去掉上下空行。
+**用户消息**：灰底块带暗色 `❯ `，去掉上下空行。
+
+**回复正文**：`⏺ ` 开头，折行缩进 2 格。代码块不画 ``` 围栏，引用用暗色 `▎`，链接用 OSC 8 超链接。
+
+**工具调用**：`⏺ Bash(命令)` / `Update(文件)` / `Write(文件)`，圆点按状态绿 / 红 / 灰，结果挂在 `  ⎿  ` 下面。编辑显示 `Added N lines, removed N lines` 和红绿整行 diff、改动词高亮；失败显示红色 `Error: Exit code N` 加 stderr。连续的读文件、搜索、列目录合成一行 `Read 2 files, listed 1 directory (ctrl+o to expand)`。
+
+**进度行**：`✻ Brewing… (12s · ↓ 1.2k tokens)` 放在输入框上方，不再嵌进边框；回合结束留一行 `✻ Brewed for 34s · done 7:09 PM`。
 
 **状态栏**：一行，段落、符号、配色都和 Claude Code 常见的 `statusLine` 脚本一致：
 
@@ -48,21 +56,26 @@ pi install npm:pi-cc-tui
 | `⏱ 12s` | 距上次回复 | 4 分钟琥珀，5 分钟变 `✗` 珊瑚红（提示缓存过期） |
 | `55% until auto-compact` | 右对齐，按 pi 的 `compaction.reserveTokens` 计算 | 灰 |
 
-**主题 `claude-code`**：Claude Code 暗色配色。正文用终端默认前景色，行内代码和链接用和 Claude Code 相同的 256 色号（153 / 12），同一个终端里两边渲染完全一致。代码高亮是 Monokai，和 Claude Code 暗色一样。
+**主题 `claude-code`**：Claude Code 暗色配色。正文用终端默认前景色，行内代码和链接用和 Claude Code 相同的 256 色号（153 / 12），同一个终端里两边渲染完全一致。代码块用 16 色 ANSI 调色板，diff 用 Monokai，和 Claude Code 暗色一样。
 
 ## 推荐搭配
 
-[pi-cc-extensions](https://github.com/minuque/pi-cc-extensions) 把工具调用、diff、思考过程渲染成 Claude Code 风格。它自带的底栏会盖掉本插件的状态栏，在 `~/.pi/agent/pi-cc-extensions.json` 里关掉：
+工具调用由本插件自己画。如果同时装了 [pi-cc-extensions](https://github.com/minuque/pi-cc-extensions)，在 `~/.pi/agent/pi-cc-extensions.json` 里关掉重叠的部分：
 
 ```json
-{ "enableCustomFooter": false }
+{ "mode": "off", "enableCustomFooter": false, "enableWorkingMessage": false, "enableAgentSummary": false }
 ```
 
-想让 pi-cc-extensions 的 diff 也用 Monokai，在 shell 配置里加 `export DIFF_THEME=monokai`。
+pi 认不出的终端（比如 JetBrains）会把链接显示成 `文字 (url)`。在 `~/.pi/agent/settings.json` 里打开超链接：
+
+```json
+{ "terminal": { "hyperlinks": true } }
+```
 
 ## 说明
 
-- 输入框和用户消息的调整是在加载时给 pi 内置组件打补丁。如果 pi 以后改名了 `Editor.render` 或 `UserMessageComponent.rebuild`，补丁只会失效，不会崩。
+- 输入框、消息、markdown、进度行的调整是在加载时给 pi 内置组件打补丁。pi 以后改了这些方法名，补丁只会失效，不会崩。
+- 思考过程默认显示（点击或 Shift+Tab 折叠），Claude Code 是隐藏的。想一致就在设置里加 `"hideThinkingBlock": true`。
 - Claude Code 状态栏的第二行（`⏵⏵ bypass permissions on …`）pi 没有对应概念，不画。
 
 ## 许可证

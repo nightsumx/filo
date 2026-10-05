@@ -1,20 +1,42 @@
 {
   "name": "pi-cc-tui",
   "version": "0.1.0",
-  "description": "Make pi's TUI look like Claude Code: input box, status line, user messages and dark theme",
-  "keywords": ["pi-package", "pi-extension", "pi-coding-agent", "claude-code", "theme", "statusline"],
+  "description": "Make pi's TUI look like Claude Code: tool calls, diffs, messages, spinner, input box, status line and dark theme",
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "pi-coding-agent",
+    "claude-code",
+    "theme",
+    "statusline"
+  ],
   "license": "MIT",
   "author": "nightsumx",
-  "repository": { "type": "git", "url": "git+https://github.com/nightsumx/pi-cc-tui.git" },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nightsumx/pi-cc-tui.git"
+  },
   "homepage": "https://github.com/nightsumx/pi-cc-tui#readme",
   "type": "module",
   "pi": {
-    "extensions": ["./extensions/cc-tui.ts", "./extensions/cc-statusline.ts"],
-    "themes": ["./themes/claude-code.json"]
+    "extensions": [
+      "./extensions/cc-tui.ts",
+      "./extensions/cc-tools.ts",
+      "./extensions/cc-statusline.ts"
+    ],
+    "themes": [
+      "./themes/claude-code.json"
+    ]
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*",
     "@earendil-works/pi-tui": "*"
   },
-  "files": ["extensions", "themes", "README.md", "README.zh-CN.md", "LICENSE"]
+  "files": [
+    "extensions",
+    "themes",
+    "README.md",
+    "README.zh-CN.md",
+    "LICENSE"
+  ]
 }
