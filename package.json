@@ -17,6 +17,7 @@
         "typecheck": "tsc -b",
         "test": "vitest run",
         "density": "bun --tsconfig-override=tsconfig.node.json test/density.ts",
+        "e2e:windows": "bun --tsconfig-override=tsconfig.node.json test/windows.ts",
         "preview": "vite preview",
         "dist": "bun run build && electron-builder --publish never",
         "dist:dir": "bun run build && electron-builder --dir --publish never"

@@ -1,18 +1,20 @@
-import type { AgentStartOptions, AppState, ThemePref } from '@shared/ipc'
+import type { AgentStartOptions, GlobalCompactionPatch, StateSave, ThemePref, WindowBounds, WindowReport } from '@shared/ipc'
 import { APP_INFO } from '@shared/app'
 import { resolveLang } from '@shared/i18n'
-import { mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
+import { stat } from 'node:fs/promises'
 import path from 'node:path'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
 import { DEFAULT_THEME, IPC, THEME_PREFS } from '@shared/ipc'
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, Notification, shell } from 'electron'
 import { AgentManager } from './agents'
+import { applySave, savedWindows, StateFile } from './appState'
 import { gitBranch, gitFileDiff, gitStatus } from './git'
 import { mainLang, setMainLang, tr } from './i18n'
 import { compactionInfo, globalCompaction, setGlobalCompaction } from './piSettings'
 import { resolvePiEnv } from './pi-env'
 import { assertInSessionsDir, listSessions, readSession } from './sessions'
+import { Windows } from './windows'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -21,18 +23,18 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 app.setPath('userData', process.env.PI_GUI_USER_DATA || path.join(app.getPath('appData'), 'pi-gui'))
 app.setName(APP_INFO.name)
 const DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL
-const statePath = () => path.join(app.getPath('userData'), 'state.json')
-
-let win: BrowserWindow | null = null
+const store = new StateFile(() => path.join(app.getPath('userData'), 'state.json'))
 
 // pi loads capability extensions from real files, so packaged builds keep the pi-capabilities package
 // (extensions plus the helpers they import) outside the asar, as Resources/capabilities.
 const extensionsDir = app.isPackaged ? path.join(process.resourcesPath, 'capabilities', 'extensions') : path.join(__dirname, '../../packages/capabilities/extensions')
 
 const agents = new AgentManager({
-    onEvent: (agentId, event) => win?.webContents.send(IPC.agentEvent, agentId, event),
-    onExit: (agentId, info) => win?.webContents.send(IPC.agentExit, agentId, info),
+    onEvent: (agentId, event) => windows.deliver(agentId, IPC.agentEvent, event),
+    onExit: (agentId, info) => windows.deliver(agentId, IPC.agentExit, info),
 }, extensionsDir)
+
+const windows = new Windows({ store, create: createWindow, stopAgent: id => agents.stop(id) })
 
 /** Shown notifications, kept referenced so their click handlers survive garbage collection. */
 const notices = new Set<Notification>()
@@ -45,15 +47,10 @@ function showNotice(notice: unknown) {
     const shown = new Notification({ title: n.title.slice(0, 200), body: n.body.slice(0, 500) })
     notices.add(shown)
     const drop = () => notices.delete(shown)
+    // Whichever window holds the thread now (it may have moved) focuses itself.
     shown.on('click', () => {
         drop()
-        if (win) {
-            if (win.isMinimized())
-                win.restore()
-            win.show()
-            win.focus()
-            win.webContents.send(IPC.notificationClick, key)
-        }
+        windows.broadcast(null, IPC.notificationClick, key)
     })
     shown.on('close', drop)
     shown.show()
@@ -94,10 +91,11 @@ function applyLang(pref: unknown) {
     buildMenu()
 }
 
-function createWindow() {
-    win = new BrowserWindow({
+function createWindow(bounds: Partial<WindowBounds>): BrowserWindow {
+    const win = new BrowserWindow({
         width: 1360,
         height: 880,
+        ...bounds,
         minWidth: 880,
         minHeight: 560,
         title: APP_INFO.name,
@@ -113,7 +111,7 @@ function createWindow() {
             sandbox: true,
         },
     })
-    win.once('ready-to-show', () => win?.show())
+    win.once('ready-to-show', () => win.show())
 
     // Links in agent output open in the system browser; the app window never navigates away.
     win.webContents.setWindowOpenHandler(({ url }) => {
@@ -132,18 +130,16 @@ function createWindow() {
     if (DEV_SERVER_URL)
         void win.loadURL(DEV_SERVER_URL)
     else
-        void win.loadFile(path.join(__dirname, '../../dist/index.html'))
+        // PI_GUI_TEST exposes the store to end-to-end scripts (test/windows.ts), as dev builds do.
+        void win.loadFile(path.join(__dirname, '../../dist/index.html'), process.env.PI_GUI_TEST ? { query: { test: '1' } } : undefined)
+    return win
 }
 
-const defaultState = (): AppState => ({ projects: [], hiddenProjects: [], tabs: {}, activeTabs: {}, layout: 'split' })
-
-async function loadState(): Promise<AppState> {
-    try {
-        return { ...defaultState(), ...JSON.parse(await readFile(statePath(), 'utf8')) }
-    }
-    catch {
-        return defaultState()
-    }
+const cwdList = (value: unknown): string[] => Array.isArray(value) ? value.filter((c): c is string => typeof c === 'string' && path.isAbsolute(c)) : []
+const absolutePath = (value: unknown): string => {
+    if (typeof value !== 'string' || !path.isAbsolute(value))
+        throw new Error('expected an absolute path')
+    return value
 }
 
 function registerIpc() {
@@ -155,27 +151,43 @@ function registerIpc() {
         await shell.trashItem(file)
     })
 
-    ipcMain.handle(IPC.loadState, () => loadState())
-    // Saves arrive in bursts (close tab, switch project, ...). Concurrent writeFile calls on one
-    // path can finish out of order, so writes are queued and each goes through a temp file + rename.
-    let saving: Promise<void> = Promise.resolve()
-    ipcMain.handle(IPC.saveState, (_e, state: AppState) => {
-        const json = JSON.stringify(state, null, 2)
-        saving = saving.catch(() => {}).then(async () => {
-            const file = statePath()
-            await mkdir(path.dirname(file), { recursive: true })
-            await writeFile(`${file}.tmp`, json)
-            await rename(`${file}.tmp`, file)
+    ipcMain.handle(IPC.loadState, () => store.state)
+    ipcMain.handle(IPC.saveState, (e, save: StateSave) => {
+        if (!save || typeof save !== 'object' || !save.prefs || !save.tabs || !save.activeTabs)
+            return
+        let changed = {}
+        const owned = windows.init(e.sender).projects
+        const written = store.update((state) => {
+            const result = applySave(state, save, owned)
+            changed = result.changed
+            return result.state
         })
-        return saving
+        if (Object.keys(changed).length)
+            windows.broadcast(e.sender, IPC.prefsChanged, changed)
+        return written
     })
-    ipcMain.handle(IPC.pickFolder, async () => {
-        const result = await dialog.showOpenDialog(win!, { properties: ['openDirectory', 'createDirectory'] })
+    ipcMain.handle(IPC.pickFolder, async (e) => {
+        const parent = BrowserWindow.fromWebContents(e.sender)
+        const options = { properties: ['openDirectory', 'createDirectory'] as ('openDirectory' | 'createDirectory')[] }
+        const result = parent ? await dialog.showOpenDialog(parent, options) : await dialog.showOpenDialog(options)
         return result.canceled ? null : result.filePaths[0] ?? null
     })
 
+    ipcMain.handle(IPC.windowInit, e => windows.init(e.sender))
+    ipcMain.handle(IPC.windowReady, e => windows.ready(e.sender))
+    ipcMain.handle(IPC.reportWindow, (e, report: WindowReport) => {
+        if (report && typeof report === 'object' && report.activity && typeof report.activity === 'object')
+            windows.report(e.sender, report)
+    })
+    ipcMain.handle(IPC.openProject, (e, cwd: unknown) => windows.openProject(e.sender, absolutePath(cwd)))
+    ipcMain.handle(IPC.attachProject, (e, cwd: unknown) => windows.attachProject(e.sender, absolutePath(cwd)))
+    ipcMain.handle(IPC.detachProject, (e, cwd: unknown) => windows.detachProject(e.sender, absolutePath(cwd)))
+    ipcMain.handle(IPC.closeProject, (e, cwd: unknown) => windows.closeProject(e.sender, absolutePath(cwd)))
+    ipcMain.handle(IPC.mergeAllWindows, e => windows.mergeAll(e.sender))
+    ipcMain.handle(IPC.focusWindow, e => windows.focusWindow(e.sender))
+
     const isDirectory = (dir: string) => stat(dir).then(s => s.isDirectory(), () => false)
-    ipcMain.handle(IPC.agentStart, async (_e, options: AgentStartOptions) => {
+    ipcMain.handle(IPC.agentStart, async (e, options: AgentStartOptions) => {
         const env = await resolvePiEnv()
         if (!env.ok)
             throw new Error(env.error)
@@ -184,7 +196,9 @@ function registerIpc() {
         // spawn reports a missing cwd as "spawn <node> ENOENT", which reads like node is missing.
         if (!(await isDirectory(options.cwd)))
             throw new Error(tr(`项目目录不存在：${options.cwd}`, `Project folder not found: ${options.cwd}`))
-        return agents.start(env.env, options)
+        const agentId = agents.start(env.env, options)
+        windows.addAgent(agentId, e.sender, options.cwd)
+        return agentId
     })
     ipcMain.handle(IPC.agentRequest, (_e, agentId: string, command: Record<string, unknown>) => agents.request(agentId, command))
     ipcMain.handle(IPC.agentSend, (_e, agentId: string, record: Record<string, unknown>) => agents.send(agentId, record))
@@ -193,10 +207,14 @@ function registerIpc() {
     ipcMain.handle(IPC.compactionInfo, (_e, cwd: unknown, modelKey: unknown) =>
         compactionInfo(typeof cwd === 'string' ? cwd : '', typeof modelKey === 'string' ? modelKey : undefined))
     ipcMain.handle(IPC.globalCompaction, (_e, cwd: unknown) => globalCompaction(typeof cwd === 'string' ? cwd : undefined))
-    ipcMain.handle(IPC.setGlobalCompaction, (_e, patch: unknown) => setGlobalCompaction(patch))
+    ipcMain.handle(IPC.setGlobalCompaction, async (e, patch: unknown) => {
+        await setGlobalCompaction(patch)
+        // pi reads settings.json at startup: the other windows restart their idle processes too.
+        windows.broadcast(e.sender, IPC.piSettingsChanged, patch as GlobalCompactionPatch)
+    })
     ipcMain.handle(IPC.gitStatus, (_e, cwd: string) => gitStatus(cwd))
     ipcMain.handle(IPC.gitBranches, async (_e, cwds: unknown) => {
-        const list = Array.isArray(cwds) ? cwds.filter((c): c is string => typeof c === 'string' && path.isAbsolute(c)).slice(0, 200) : []
+        const list = cwdList(cwds).slice(0, 200)
         return Object.fromEntries(await Promise.all(list.map(async cwd => [cwd, await gitBranch(cwd)] as const)))
     })
     ipcMain.handle(IPC.gitFileDiff, (_e, cwd: string, file: string, status: string) => gitFileDiff(cwd, file, status))
@@ -204,7 +222,7 @@ function registerIpc() {
     ipcMain.handle(IPC.setTheme, (_e, theme: unknown) => applyTheme(theme))
     ipcMain.handle(IPC.setLang, (_e, lang: unknown) => applyLang(lang))
     ipcMain.handle(IPC.missingFolders, async (_e, paths: unknown) => {
-        const list = Array.isArray(paths) ? paths.filter((p): p is string => typeof p === 'string' && path.isAbsolute(p)).slice(0, 500) : []
+        const list = cwdList(paths).slice(0, 500)
         const exists = await Promise.all(list.map(isDirectory))
         return list.filter((_, i) => !exists[i])
     })
@@ -214,9 +232,6 @@ function registerIpc() {
             throw new Error(error)
     })
     ipcMain.handle(IPC.notify, (_e, notice: unknown) => showNotice(notice))
-    ipcMain.handle(IPC.setBadge, (_e, count: unknown) => {
-        app.setBadgeCount(Number.isInteger(count) && (count as number) > 0 ? Math.min(count as number, 999) : 0)
-    })
     ipcMain.handle(IPC.openExternal, async (_e, url: string) => {
         if (isSafeExternalUrl(url))
             await shell.openExternal(url)
@@ -232,7 +247,7 @@ function buildMenu() {
     const settings = {
         label: tr('设置…', 'Settings…'),
         accelerator: 'CmdOrCtrl+,',
-        click: () => win?.webContents.send(IPC.openSettings),
+        click: () => windows.focusedWebContents()?.send(IPC.openSettings),
     }
     Menu.setApplicationMenu(Menu.buildFromTemplate([
         ...(isMac
@@ -272,6 +287,17 @@ function buildMenu() {
             submenu: [
                 { role: 'minimize' },
                 { role: 'zoom' },
+                { type: 'separator' },
+                {
+                    // WebStorm's "Merge All Project Windows": the other windows' projects join this one.
+                    label: tr('合并所有窗口', 'Merge All Windows'),
+                    click: () => {
+                        const target = windows.focusedWebContents()
+                        if (target)
+                            void windows.mergeAll(target).catch(error => dialog.showErrorBox(tr('合并窗口失败', 'Could not merge windows'), String(error?.message ?? error)))
+                    },
+                },
+                { role: 'close', label: tr('关闭窗口', 'Close Window'), accelerator: 'CmdOrCtrl+Shift+W' },
                 ...(isMac ? [{ type: 'separator' as const }, { role: 'front' as const }] : []),
             ],
         },
@@ -280,20 +306,23 @@ function buildMenu() {
 
 app.whenReady().then(async () => {
     // Apply the saved appearance before the window exists so the first frame already matches.
-    const state = await loadState()
+    const state = await store.load()
     applyTheme(state.theme)
-    nativeTheme.on('updated', () => win?.setBackgroundColor(windowBackground()))
+    nativeTheme.on('updated', () => {
+        for (const w of BrowserWindow.getAllWindows())
+            w.setBackgroundColor(windowBackground())
+    })
     // Packaged builds take the icon from build/icon.icns; in dev the Dock would show Electron's.
     if (process.platform === 'darwin' && !app.isPackaged)
         app.dock?.setIcon(path.join(__dirname, '../../build/icon.png'))
     applyLang(state.lang)
     registerIpc()
-    createWindow()
+    windows.restore(savedWindows(state))
     // Warm up env resolution so the first thread starts faster.
     void resolvePiEnv()
     app.on('activate', () => {
-        if (BrowserWindow.getAllWindows().length === 0)
-            createWindow()
+        if (!windows.count)
+            windows.restore([])
     })
 })
 
@@ -303,11 +332,10 @@ app.on('before-quit', (event) => {
         return
     quitting = true
     event.preventDefault()
-    void agents.stopAll().finally(() => app.quit())
+    void Promise.all([windows.prepareQuit(), agents.stopAll()]).finally(() => app.quit())
 })
 
 app.on('window-all-closed', () => {
-    win = null
     if (process.platform !== 'darwin')
         app.quit()
 })

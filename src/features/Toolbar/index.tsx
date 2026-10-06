@@ -5,7 +5,7 @@ import { ActivityBadge } from '@/components/StatusIcons'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { cn, shortPath } from '@/lib/utils'
 import { appStore } from '@/store/app'
-import { ChevronDown, Columns3, FolderOpen, FolderPlus, GitBranch, PanelLeft, PanelRight, Plus, Search, Square, X } from 'lucide-react'
+import { ChevronDown, Columns3, FolderOpen, FolderPlus, GitBranch, Merge, PanelLeft, PanelRight, Plus, Search, Square, X } from 'lucide-react'
 import { observer } from 'mobx-react-lite'
 import { useEffect, useRef, useState } from 'react'
 import { useGitStatus } from '../Review/useGitStatus'
@@ -15,8 +15,10 @@ import { newThreadLabel, tr } from '@/lib/i18n'
 export const toolbarBtn = 'flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-[13px] text-gray-800 outline-none transition-colors hover:bg-black/[0.06] data-[state=open]:bg-black/[0.08] focus-visible:ring-2 focus-visible:ring-ide-accent/50 disabled:opacity-40 disabled:hover:bg-transparent'
 const iconBtn = cn(toolbarBtn, 'w-7 justify-center px-0 text-gray-600')
 
+const rowAction = 'flex h-5 w-5 items-center justify-center rounded text-gray-500 hover:bg-black/[0.08] hover:text-gray-900'
+
 /** One project in the popup: badge, name, path and branch on three lines, like WebStorm's widget. */
-function ProjectItem({ project, branch, active, current, shortcut, onPick, onHover, onRemove }: {
+export function ProjectItem({ project, branch, active, current, shortcut, onPick, onHover, onRemove, onAttach }: {
     project: Project
     branch: string | null | undefined
     active: boolean
@@ -25,7 +27,10 @@ function ProjectItem({ project, branch, active, current, shortcut, onPick, onHov
     onPick: () => void
     onHover: () => void
     onRemove?: () => void
+    /** Bring the project into this window instead of opening its own. */
+    onAttach?: () => void
 }) {
+    const hasActions = !!(onRemove || onAttach)
     return (
         <div
             role="option"
@@ -49,20 +54,38 @@ function ProjectItem({ project, branch, active, current, shortcut, onPick, onHov
                     </div>
                 )}
             </div>
-            {shortcut != null && <span className={cn('shrink-0 pt-px text-[11px] text-gray-400', onRemove && 'group-hover/item:invisible')}>{`⌃${shortcut}`}</span>}
-            {onRemove && (
-                <button
-                    type="button"
-                    aria-label={tr(`从列表移除 ${project.name}`, `Remove ${project.name} from list`)}
-                    title={tr('从列表移除', 'Remove from list')}
-                    onClick={(e) => {
-                        e.stopPropagation()
-                        onRemove()
-                    }}
-                    className="absolute right-1.5 top-1.5 hidden h-5 w-5 items-center justify-center rounded text-gray-500 hover:bg-black/[0.08] hover:text-gray-900 group-hover/item:flex"
-                >
-                    <X size={13} />
-                </button>
+            {shortcut != null && <span className={cn('shrink-0 pt-px text-[11px] text-gray-400', hasActions && 'group-hover/item:invisible')}>{`⌃${shortcut}`}</span>}
+            {hasActions && (
+                <span className="absolute right-1.5 top-1.5 hidden items-center gap-0.5 group-hover/item:flex">
+                    {onAttach && (
+                        <button
+                            type="button"
+                            aria-label={tr(`把 ${project.name} 移入此窗口`, `Move ${project.name} into this window`)}
+                            title={tr('移入此窗口', 'Move into this window')}
+                            onClick={(e) => {
+                                e.stopPropagation()
+                                onAttach()
+                            }}
+                            className={rowAction}
+                        >
+                            <Merge size={13} />
+                        </button>
+                    )}
+                    {onRemove && (
+                        <button
+                            type="button"
+                            aria-label={tr(`从列表移除 ${project.name}`, `Remove ${project.name} from list`)}
+                            title={tr('从列表移除', 'Remove from list')}
+                            onClick={(e) => {
+                                e.stopPropagation()
+                                onRemove()
+                            }}
+                            className={rowAction}
+                        >
+                            <X size={13} />
+                        </button>
+                    )}
+                </span>
             )}
         </div>
     )
@@ -73,8 +96,9 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
 }
 
 /**
- * Project widget popup, laid out like WebStorm's: actions on top, then projects with open tabs, then
- * the rest. No search field; typing filters the list (JetBrains "speed search"). ⌘P toggles it.
+ * Project widget popup, laid out like WebStorm's: actions on top, then projects open in some window,
+ * then the rest. Picking one brings its window forward (or opens one). No search field; typing
+ * filters the list (JetBrains "speed search"). ⌘P toggles it.
  */
 const ProjectSwitcher = observer(() => {
     const [open, setOpen] = useState(false)
@@ -86,7 +110,9 @@ const ProjectSwitcher = observer(() => {
     const all = appStore.projects
     const q = query.trim().toLowerCase()
     const matches = q ? all.filter(p => p.name.toLowerCase().includes(q) || p.cwd.toLowerCase().includes(q)) : all
-    const isOpen = (p: Project) => appStore.tabsOf(p.cwd).length > 0
+    const isOpen = (p: Project) => appStore.isOpen(p.cwd)
+    const here = appStore.windowProjects
+    const otherWindows = appStore.openProjects.some(p => !here.includes(p.cwd))
     const openProjects = matches.filter(isOpen)
     const recentProjects = matches.filter(p => !isOpen(p))
 
@@ -96,6 +122,7 @@ const ProjectSwitcher = observer(() => {
         : [
                 { key: 'new', label: newThreadLabel(), hint: '⌘T', Icon: Plus, run: () => project && appStore.newThread(project.cwd), disabled: !project },
                 { key: 'open', label: tr('打开文件夹…', 'Open folder…'), hint: '', Icon: FolderOpen, run: () => void appStore.addProject(), disabled: false },
+                ...(otherWindows && here.length ? [{ key: 'merge', label: tr('合并所有窗口', 'Merge all windows'), hint: '', Icon: Merge, run: () => void appStore.mergeAllWindows(), disabled: false }] : []),
             ]
     const items = [...actions.map(a => ({ kind: 'action' as const, a })), ...[...openProjects, ...recentProjects].map(p => ({ kind: 'project' as const, p }))]
 
@@ -116,7 +143,7 @@ const ProjectSwitcher = observer(() => {
         setQuery('')
         // Start on the current project, like WebStorm.
         const ordered = [...all.filter(isOpen), ...all.filter(p => !isOpen(p))]
-        setIndex(2 + Math.max(0, ordered.findIndex(p => p.cwd === appStore.activeProject)))
+        setIndex(actions.length + Math.max(0, ordered.findIndex(p => p.cwd === appStore.activeProject)))
         let cancelled = false
         void window.pi.gitBranches(all.map(p => p.cwd)).then(b => !cancelled && setBranches(b))
         return () => {
@@ -172,6 +199,12 @@ const ProjectSwitcher = observer(() => {
             onHover={() => setIndex(i)}
             onPick={() => run(i)}
             onRemove={isOpen(p) ? undefined : () => void appStore.removeProject(p.cwd)}
+            onAttach={here.length && !here.includes(p.cwd)
+                ? () => {
+                        setOpen(false)
+                        void appStore.attachProject(p.cwd)
+                    }
+                : undefined}
         />
     )
 

@@ -1,9 +1,9 @@
 import type { ApprovalMode, CapabilityId } from '@shared/capabilities'
 import type { LangPref } from '@shared/i18n'
-import type { AppState, GlobalCompactionPatch, PiEnvResult, SessionSummary, ThemePref, TranscriptLang } from '@shared/ipc'
+import type { AppState, GlobalCompactionPatch, GlobalPrefs, OpenProject, PiEnvResult, ProjectActivity, ProjectTransfer, SessionSummary, StateSave, ThemePref, TranscriptLang, WindowReport } from '@shared/ipc'
 import { APPROVAL_MODES, DEFAULT_CAPABILITIES, normalizeCapabilities } from '@shared/capabilities'
 import { LANG_PREFS } from '@shared/i18n'
-import { DEFAULT_THEME, THEME_PREFS, TRANSCRIPT_LANGS } from '@shared/ipc'
+import { DEFAULT_THEME, GLOBAL_PREF_KEYS, THEME_PREFS, TRANSCRIPT_LANGS } from '@shared/ipc'
 import type { PiEvent, PiModel } from '@shared/pi'
 import type { ThreadHost } from './thread'
 import type { ModelWindow } from '@/lib/compactAt'
@@ -47,12 +47,9 @@ export interface Project {
     latest: number
 }
 
-export interface ProjectActivity {
-    open: number
-    running: number
-    unread: number
-    waiting: number
-}
+export type { ProjectActivity }
+
+const NO_ACTIVITY: ProjectActivity = { open: 0, running: 0, unread: 0, waiting: 0 }
 
 class AppStore implements ThreadHost {
     env: PiEnvResult | null = null
@@ -63,6 +60,13 @@ class AppStore implements ThreadHost {
     hiddenProjects: string[] = []
     /** Project folders that no longer exist on disk; refreshed with the session list. */
     missingProjects: string[] = []
+
+    /** Main's id for this window. */
+    windowId = 0
+    /** Projects this window shows: one, several after a merge, none in the welcome window. */
+    windowProjects: string[] = []
+    /** Projects every window shows, with their activity (this window's included). */
+    openProjects: OpenProject[] = []
 
     threads = observable.map<string, Thread>()
     /** Tab order per project (thread keys). New threads use "new:<uuid>" until pi writes a file. */
@@ -102,17 +106,20 @@ class AppStore implements ThreadHost {
     private agentThreads = new Map<string, Thread>()
     private eventQueue: [string, PiEvent][] = []
     private flushTimer: ReturnType<typeof setTimeout> | null = null
-    private savedState = ''
+    /** JSON of each shared setting as main last has it, so saves carry only what this window changed. */
+    private sentPrefs: Record<string, string> = {}
+    private sentTabs = ''
     /** Saved state has been applied; nothing is persisted before that. */
     private ready = false
 
     constructor() {
-        makeAutoObservable<this, 'agentThreads' | 'eventQueue' | 'flushTimer' | 'savedState' | 'ready' | 'reconciling'>(this, {
+        makeAutoObservable<this, 'agentThreads' | 'eventQueue' | 'flushTimer' | 'sentPrefs' | 'sentTabs' | 'ready' | 'reconciling'>(this, {
             agentThreads: false,
             reconciling: false,
             eventQueue: false,
             flushTimer: false,
-            savedState: false,
+            sentPrefs: false,
+            sentTabs: false,
             ready: false,
         }, { autoBind: true })
     }
@@ -154,7 +161,18 @@ class AppStore implements ThreadHost {
     }
 
     get project(): Project | null {
-        return this.projects.find(p => p.cwd === this.activeProject) ?? null
+        return this.windowProjectList.find(p => p.cwd === this.activeProject) ?? null
+    }
+
+    /** This window's projects, in the window's order. */
+    get windowProjectList(): Project[] {
+        const all = this.projects
+        return this.windowProjects.map(cwd => all.find(p => p.cwd === cwd) ?? { cwd, name: basename(cwd), sessions: [], latest: 0 })
+    }
+
+    /** Shown in some window (this one included). */
+    isOpen(cwd: string): boolean {
+        return this.windowProjects.includes(cwd) || this.openProjects.some(p => p.cwd === cwd)
     }
 
     tabsOf(cwd: string): Thread[] {
@@ -210,7 +228,10 @@ class AppStore implements ThreadHost {
         return this.visibleTabs.includes(thread)
     }
 
+    /** Live counts for this window's projects; other windows report theirs through main. */
     activity(cwd: string): ProjectActivity {
+        if (!this.windowProjects.includes(cwd))
+            return this.openProjects.find(p => p.cwd === cwd)?.activity ?? NO_ACTIVITY
         const tabs = this.tabsOf(cwd)
         return {
             open: tabs.filter(t => !t.isEmpty || t.persisted).length,
@@ -239,8 +260,21 @@ class AppStore implements ThreadHost {
                     this.notify(thread, tr('出错', 'Error'), thread.activity.text)
             }
         })
-        api().onNotificationClick(key => runInAction(() => this.focus(key, true)))
-        // A thread starts waiting for the user: notify once, and keep the Dock badge at the count.
+        // Every window hears the click; the one holding the thread comes forward.
+        api().onNotificationClick((key) => {
+            if (!this.threads.has(key))
+                return
+            void api().focusWindow()
+            runInAction(() => this.focus(key, true))
+        })
+        api().onPrefsChanged(prefs => runInAction(() => this.applyPrefs(prefs, true)))
+        api().onPiSettingsChanged(patch => runInAction(() => this.piSettingsChanged(patch)))
+        api().onWindowProjects(projects => runInAction(() => this.setWindowProjects(projects)))
+        api().onOpenProjects(projects => runInAction(() => (this.openProjects = projects)))
+        api().onSelectProject(cwd => runInAction(() => this.windowProjects.includes(cwd) && this.showProject(cwd)))
+        api().onExportProjects(this.exportProjects)
+        api().onImportProjects(this.importProjects)
+        // A thread starts waiting for the user: notify once. The Dock badge counts every window's.
         let waiting = new Set<string>()
         reaction(
             () => [...this.threads.values()].filter(t => t.waitingForUser).map(t => t.key),
@@ -251,7 +285,6 @@ class AppStore implements ThreadHost {
                         this.notify(thread, waitingLabel(thread.waitingKind), thread.waitingFor || tr('需要你的确认', 'Needs your approval'), true)
                 }
                 waiting = new Set(keys)
-                void api().setBadge(keys.length)
             },
         )
         // Gives models pi lists for the first time (or after an update) the global compaction point.
@@ -259,18 +292,30 @@ class AppStore implements ThreadHost {
         window.addEventListener('focus', () => void this.refreshSessions())
         setInterval(this.stopIdleAgents, IDLE_SWEEP_MS)
 
-        const [env, state] = await Promise.all([api().resolveEnv(), api().loadState()])
+        const [env, state, win] = await Promise.all([api().resolveEnv(), api().loadState(), api().windowInit()])
         await this.refreshSessions()
         runInAction(() => {
             this.env = env
+            this.windowId = win.id
+            this.windowProjects = win.projects
             this.restoreState(state)
+            this.activeProject = win.active && win.projects.includes(win.active) ? win.active : win.projects[0] ?? null
             this.ready = true
             this.projectOrder = this.projects.map(p => p.cwd)
         })
         await this.refreshMissing()
-        const cwd = this.activeProject ?? this.projects[0]?.cwd
-        if (env.ok && cwd)
-            this.selectProject(cwd)
+        if (env.ok && this.activeProject)
+            this.showProject(this.activeProject)
+        // Main tells other windows (project lists, Dock badge, close prompt) what this one is doing.
+        reaction(() => this.windowReport, report => void api().reportWindow(report), { fireImmediately: true, equals: (a, b) => JSON.stringify(a) === JSON.stringify(b) })
+        reaction(() => this.project?.name, (name) => {
+            document.title = name ?? 'Pi'
+        }, { fireImmediately: true })
+        await api().windowReady()
+    }
+
+    get windowReport(): WindowReport {
+        return { active: this.activeProject, activity: Object.fromEntries(this.windowProjects.map(cwd => [cwd, this.activity(cwd)])) }
     }
 
     async retryEnv() {
@@ -317,20 +362,61 @@ class AppStore implements ThreadHost {
     // ---------------------------------------------------------------- persistence
 
     private restoreState(state: AppState) {
-        this.projectOrder = state.projects ?? []
-        this.hiddenProjects = state.hiddenProjects ?? []
-        this.layout = state.layout === 'single' ? 'single' : 'split'
-        this.themePref = THEME_PREFS.includes(state.theme as ThemePref) ? state.theme! : DEFAULT_THEME
-        this.langPref = LANG_PREFS.includes(state.lang as LangPref) ? state.lang! : 'system'
-        applyLangPref(this.langPref)
-        this.transcriptLang = TRANSCRIPT_LANGS.includes(state.transcriptLang as TranscriptLang) ? state.transcriptLang! : 'en'
-        this.activeProject = state.activeProject ?? null
+        this.applyPrefs(state, false)
         this.capabilities = restoreCapabilities(state)
         this.approvalMode = restoreApprovalMode(state)
-        this.compactAt = state.compactAt === null || (typeof state.compactAt === 'number' && state.compactAt > 0) ? state.compactAt : undefined
         // Thread objects are created lazily per project (restoreTabs); keep the saved order for now.
         this.tabsByProject = { ...state.tabs }
         this.activeTabByProject = { ...state.activeTabs }
+    }
+
+    /**
+     * Shared settings, from state.json at startup or from another window. `live`: another window
+     * changed them while this one runs, so side effects (language, process restarts) follow.
+     */
+    private applyPrefs(prefs: Partial<GlobalPrefs>, live: boolean) {
+        const has = (key: keyof GlobalPrefs) => !live || Object.hasOwn(prefs, key)
+        if (has('projects'))
+            this.projectOrder = prefs.projects ?? []
+        if (has('hiddenProjects'))
+            this.hiddenProjects = prefs.hiddenProjects ?? []
+        if (has('layout'))
+            this.layout = prefs.layout === 'single' ? 'single' : 'split'
+        if (has('theme'))
+            this.themePref = THEME_PREFS.includes(prefs.theme as ThemePref) ? prefs.theme! : DEFAULT_THEME
+        if (has('lang')) {
+            this.langPref = LANG_PREFS.includes(prefs.lang as LangPref) ? prefs.lang! : 'system'
+            applyLangPref(this.langPref)
+        }
+        if (has('transcriptLang'))
+            this.transcriptLang = TRANSCRIPT_LANGS.includes(prefs.transcriptLang as TranscriptLang) ? prefs.transcriptLang! : 'en'
+        if (has('compactAt'))
+            this.compactAt = prefs.compactAt === null || (typeof prefs.compactAt === 'number' && prefs.compactAt > 0) ? prefs.compactAt : undefined
+        if (live && Object.hasOwn(prefs, 'capabilities') && Array.isArray(prefs.capabilities)) {
+            this.capabilities = normalizeCapabilities(prefs.capabilities)
+            for (const thread of this.threads.values())
+                void thread.applyConfig()
+        }
+        if (live && APPROVAL_MODES.includes(prefs.approvalMode as ApprovalMode))
+            this.approvalMode = prefs.approvalMode!
+        // Main has these values now; only later changes need sending.
+        for (const key of GLOBAL_PREF_KEYS) {
+            if (!live || Object.hasOwn(prefs, key))
+                this.sentPrefs[key] = JSON.stringify(prefs[key]) ?? ''
+        }
+    }
+
+    /** Another window wrote pi's settings.json; processes it affects restart once idle. */
+    private piSettingsChanged(patch: GlobalCompactionPatch) {
+        this.compactionRevision++
+        const models = Object.keys(patch?.modelReserves ?? {})
+        const global = Object.keys(patch ?? {}).some(k => k !== 'modelReserves')
+        const affected = global || [...this.threads.values()].some(t => t.state?.model && models.includes(`${t.state.model.provider}/${t.state.model.id}`))
+        if (!affected)
+            return
+        this.piSettingsEpoch++
+        for (const thread of this.threads.values())
+            void thread.applyConfig()
     }
 
     private persist() {
@@ -341,36 +427,42 @@ class AppStore implements ThreadHost {
             const thread = this.threads.get(key)
             return thread ? thread.persisted && thread.key === thread.sessionPath : !key.startsWith('new:')
         }
+        // Tabs of this window's projects only; other windows save their own.
         const tabs: Record<string, string[]> = {}
-        for (const [cwd, keys] of Object.entries(this.tabsByProject)) {
-            const kept = keys.filter(keep)
+        const activeTabs: Record<string, string> = {}
+        for (const cwd of this.windowProjects) {
+            const kept = (this.tabsByProject[cwd] ?? []).filter(keep)
             if (kept.length)
                 tabs[cwd] = kept
+            const active = this.activeTabByProject[cwd]
+            if (active && kept.includes(active))
+                activeTabs[cwd] = active
         }
-        const activeTabs: Record<string, string> = {}
-        for (const [cwd, key] of Object.entries(this.activeTabByProject)) {
-            if (tabs[cwd]?.includes(key))
-                activeTabs[cwd] = key
-        }
-        const state: AppState = {
+        const current: GlobalPrefs = {
             projects: this.projectOrder,
             hiddenProjects: this.hiddenProjects,
-            activeProject: this.activeProject ?? undefined,
-            tabs,
-            activeTabs,
             layout: this.layout,
             theme: this.themePref,
-            lang: this.langPref === 'system' ? undefined : this.langPref,
+            lang: this.langPref,
             transcriptLang: this.transcriptLang,
             capabilities: this.capabilities,
             approvalMode: this.approvalMode,
             compactAt: this.compactAt,
         }
-        const json = JSON.stringify(state)
-        if (json === this.savedState)
+        const prefs: Partial<GlobalPrefs> = {}
+        for (const key of GLOBAL_PREF_KEYS) {
+            const json = JSON.stringify(current[key]) ?? ''
+            if (json !== this.sentPrefs[key]) {
+                this.sentPrefs[key] = json
+                Object.assign(prefs, { [key]: current[key] })
+            }
+        }
+        const tabsJson = JSON.stringify([tabs, activeTabs])
+        if (!Object.keys(prefs).length && tabsJson === this.sentTabs)
             return
-        this.savedState = json
-        void api().saveState(JSON.parse(json))
+        this.sentTabs = tabsJson
+        const save: StateSave = { prefs, tabs, activeTabs }
+        void api().saveState(JSON.parse(JSON.stringify(save)))
     }
 
     /** Create Thread objects for a project's saved tabs, dropping sessions that no longer exist. */
@@ -474,7 +566,39 @@ class AppStore implements ThreadHost {
 
     // ---------------------------------------------------------------- navigation
 
+    /**
+     * Go to a project: shown here if this window has it (or is the empty welcome window), else its
+     * own window comes forward, or a new one opens for it.
+     */
     selectProject(cwd: string) {
+        if (this.windowProjects.includes(cwd)) {
+            this.showProject(cwd)
+            return
+        }
+        void api().openProject(cwd).then((where) => {
+            if (where === 'here')
+                runInAction(() => this.addWindowProject(cwd))
+        }).catch(error => toast.error(error.message))
+    }
+
+    private addWindowProject(cwd: string) {
+        if (!this.windowProjects.includes(cwd))
+            this.windowProjects = [...this.windowProjects, cwd]
+        this.showProject(cwd)
+    }
+
+    /** Main changed this window's project list. */
+    private setWindowProjects(projects: string[]) {
+        this.windowProjects = projects
+        if (!this.activeProject || !projects.includes(this.activeProject)) {
+            this.activeProject = null
+            if (projects[0])
+                this.showProject(projects[0])
+        }
+    }
+
+    /** Switch this window to one of its projects. */
+    showProject(cwd: string) {
         this.activeProject = cwd
         this.restoreTabs(cwd)
         if (!this.tabsOf(cwd).length)
@@ -719,32 +843,162 @@ class AppStore implements ThreadHost {
 
     // ---------------------------------------------------------------- projects
 
-    async addProject() {
+    /** Picks a folder and puts it on top of the project list. */
+    private async pickProject(): Promise<string | null> {
         const folder = await api().pickFolder()
         if (!folder)
-            return
+            return null
         runInAction(() => {
             this.projectOrder = [folder, ...this.projectOrder.filter(p => p !== folder)]
             this.hiddenProjects = this.hiddenProjects.filter(p => p !== folder)
         })
-        this.selectProject(folder)
+        this.persist()
+        return folder
     }
 
+    /** Open folder…: a window of its own (this one if it is the welcome window). */
+    async addProject() {
+        const folder = await this.pickProject()
+        if (folder)
+            this.selectProject(folder)
+    }
+
+    /** The project tree's "add": the folder joins this window. */
+    async addProjectHere() {
+        const folder = await this.pickProject()
+        if (folder)
+            await this.attachProject(folder)
+    }
+
+    /** Show a project in this window as well, taking it from the window that has it. */
+    async attachProject(cwd: string) {
+        try {
+            await api().attachProject(cwd)
+            runInAction(() => this.addWindowProject(cwd))
+        }
+        catch (error: any) {
+            toast.error(`${tr('无法移入此窗口：', 'Could not move the project here: ')}${error.message}`)
+        }
+    }
+
+    /** One of a merged window's projects into a window of its own. */
+    async detachProject(cwd: string) {
+        try {
+            await api().detachProject(cwd)
+        }
+        catch (error: any) {
+            toast.error(`${tr('无法移到新窗口：', 'Could not move the project to a new window: ')}${error.message}`)
+        }
+    }
+
+    async mergeAllWindows() {
+        try {
+            await api().mergeAllWindows()
+        }
+        catch (error: any) {
+            toast.error(`${tr('合并窗口失败：', 'Could not merge windows: ')}${error.message}`)
+        }
+    }
+
+    /**
+     * Close a project in this window. Its tabs are kept for the next time it opens, as WebStorm
+     * reopens a project's editors; its pi processes stop. The window closes if nothing is left in it.
+     */
+    async closeProject(cwd: string) {
+        if (!this.windowProjects.includes(cwd))
+            return
+        this.persist()
+        const threads = this.tabsOf(cwd)
+        runInAction(() => {
+            for (const thread of threads)
+                this.threads.delete(thread.key)
+            this.windowProjects = this.windowProjects.filter(p => p !== cwd)
+            if (this.activeProject === cwd) {
+                this.activeProject = null
+                if (this.windowProjects[0])
+                    this.showProject(this.windowProjects[0])
+            }
+        })
+        await Promise.all(threads.map(async (thread) => {
+            if (thread.running)
+                await thread.abort()
+            await thread.stopAgent()
+        }))
+        await api().closeProject(cwd)
+    }
+
+    /** Off the project list (until a session or the user brings it back); closed first if open here. */
     async removeProject(cwd: string) {
-        for (const thread of this.tabsOf(cwd))
-            await this.closeTab(thread.key)
+        await this.closeProject(cwd)
         runInAction(() => {
             this.projectOrder = this.projectOrder.filter(p => p !== cwd)
             if (!this.hiddenProjects.includes(cwd))
                 this.hiddenProjects.push(cwd)
             delete this.tabsByProject[cwd]
-            if (this.activeProject === cwd)
-                this.activeProject = null
+            delete this.activeTabByProject[cwd]
         })
         this.persist()
-        const next = this.projects[0]?.cwd
-        if (!this.activeProject && next)
-            this.selectProject(next)
+    }
+
+    // ---------------------------------------------------------------- moving projects between windows
+
+    /**
+     * Hands projects to another window. Main holds back their processes' events from here on; apply
+     * the ones already received, let in-flight starts and end-of-run reloads finish, then snapshot
+     * and drop the threads without stopping their processes.
+     */
+    async exportProjects(cwds: string[]): Promise<ProjectTransfer[]> {
+        this.flushEvents()
+        await Promise.all(cwds.flatMap(cwd => this.tabsOf(cwd)).map(t => t.quiesce()))
+        this.flushEvents()
+        const projects = cwds.map(cwd => ({
+            cwd,
+            tabs: [...(this.tabsByProject[cwd] ?? [])],
+            activeTab: this.activeTabByProject[cwd],
+            threads: this.tabsOf(cwd).map(t => t.snapshot()),
+        }))
+        runInAction(() => {
+            for (const cwd of cwds) {
+                for (const thread of this.tabsOf(cwd)) {
+                    this.threads.delete(thread.key)
+                    if (thread.agentId)
+                        this.agentThreads.delete(thread.agentId)
+                }
+                delete this.tabsByProject[cwd]
+                delete this.activeTabByProject[cwd]
+            }
+            this.windowProjects = this.windowProjects.filter(p => !cwds.includes(p))
+            if (this.activeProject && cwds.includes(this.activeProject)) {
+                this.activeProject = null
+                if (this.windowProjects[0])
+                    this.showProject(this.windowProjects[0])
+            }
+        })
+        return projects
+    }
+
+    /** Takes projects from another window, live threads and their processes included. */
+    async importProjects(projects: ProjectTransfer[]) {
+        runInAction(() => {
+            for (const project of projects) {
+                for (const snapshot of project.threads) {
+                    const thread = Thread.restore(this, snapshot)
+                    this.threads.set(thread.key, thread)
+                    if (thread.agentId)
+                        this.agentThreads.set(thread.agentId, thread)
+                }
+                this.tabsByProject[project.cwd] = project.tabs
+                if (project.activeTab)
+                    this.activeTabByProject[project.cwd] = project.activeTab
+                else
+                    delete this.activeTabByProject[project.cwd]
+                if (!this.windowProjects.includes(project.cwd))
+                    this.windowProjects = [...this.windowProjects, project.cwd]
+            }
+            if (!this.activeProject && projects[0])
+                this.showProject(projects[0].cwd)
+        })
+        this.persist()
     }
 
     toggleReview() {

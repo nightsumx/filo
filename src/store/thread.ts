@@ -134,6 +134,8 @@ export class Thread {
     private loadedConfig = ''
     /** Config changed mid-run; restart once the run settles. */
     private restartPending = false
+    /** The end-of-run reload in progress (see settle). */
+    private settling: Promise<void> | null = null
 
     constructor(private host: ThreadHost, init: { key: string, cwd: string, sessionPath?: string, name?: string, firstPrompt?: string }) {
         this.key = init.key
@@ -142,7 +144,7 @@ export class Thread {
         this.name = init.name
         this.firstPrompt = init.firstPrompt
         this.persisted = !!init.sessionPath
-        makeAutoObservable<this, 'liveCounter' | 'partialArgs' | 'startPromise' | 'stopping' | 'loadedConfig' | 'restartPending' | 'host'>(this, {
+        makeAutoObservable<this, 'liveCounter' | 'partialArgs' | 'startPromise' | 'stopping' | 'loadedConfig' | 'restartPending' | 'settling' | 'host'>(this, {
             lastEventAt: false,
             liveCounter: false,
             partialArgs: false,
@@ -150,8 +152,83 @@ export class Thread {
             stopping: false,
             loadedConfig: false,
             restartPending: false,
+            settling: false,
             host: false,
         }, { autoBind: true })
+    }
+
+    // ---------------------------------------------------------------- moving between windows
+
+    /** Resolves once no process start or end-of-run reload is in flight, so a snapshot is complete. */
+    async quiesce() {
+        await this.startPromise?.catch(() => {})
+        await this.settling?.catch(() => {})
+    }
+
+    /** Everything a window needs to carry on with this thread, its live process included. Structured-cloneable. */
+    snapshot(): Record<string, unknown> {
+        // toJS only converts observables themselves, not plain containers holding them: per field.
+        const fields: Record<string, unknown> = {
+            key: this.key,
+            cwd: this.cwd,
+            sessionPath: this.sessionPath,
+            name: this.name,
+            firstPrompt: this.firstPrompt,
+            items: this.items,
+            live: this.live,
+            streaming: this.streaming,
+            tools: this.tools,
+            blockTimes: this.blockTimes,
+            pendingPrompt: this.pendingPrompt,
+            loaded: this.loaded,
+            persisted: this.persisted,
+            agentId: this.agentId,
+            agentStatus: this.agentStatus,
+            agentError: this.agentError,
+            running: this.running,
+            runStartedAt: this.runStartedAt,
+            compacting: this.compacting,
+            retry: this.retry,
+            state: this.state,
+            models: this.models,
+            thinkingLevels: this.thinkingLevels,
+            commands: this.commands,
+            guiCommands: this.guiCommands,
+            stats: this.stats,
+            queue: this.queue,
+            uiRequests: this.uiRequests,
+            statuses: this.statuses,
+            widgets: this.widgets,
+            draft: this.draft,
+            images: this.images,
+            unread: this.unread,
+            changeTick: this.changeTick,
+            lastUsed: this.lastUsed,
+            lastEventAt: this.lastEventAt,
+            liveCounter: this.liveCounter,
+            partialArgs: [...this.partialArgs],
+            stopping: this.stopping,
+            loadedConfig: this.loadedConfig,
+            restartPending: this.restartPending,
+        }
+        return Object.fromEntries(Object.entries(fields).map(([key, value]) => [key, toJS(value)]))
+    }
+
+    /** Rebuilds a thread from another window's snapshot; the caller registers its process. */
+    static restore(host: ThreadHost, s: Record<string, any>): Thread {
+        const thread = new Thread(host, { key: s.key, cwd: s.cwd, sessionPath: s.sessionPath, name: s.name, firstPrompt: s.firstPrompt })
+        const { tools, blockTimes, partialArgs, liveCounter, stopping, loadedConfig, restartPending, key: _key, cwd: _cwd, sessionPath: _path, name: _name, firstPrompt: _first, ...fields } = s
+        Object.assign(thread, fields)
+        thread.tools.replace(tools ?? new Map())
+        thread.blockTimes.replace(blockTimes ?? new Map())
+        thread.partialArgs = new Map(partialArgs ?? [])
+        thread.liveCounter = liveCounter ?? 0
+        thread.stopping = !!stopping
+        thread.loadedConfig = loadedConfig ?? ''
+        thread.restartPending = !!restartPending
+        if (!thread.loaded)
+            void thread.load().catch(() => {})
+        return thread
     }
 
     get title(): string {
@@ -707,7 +784,9 @@ export class Thread {
                 toast.error(`${tr('扩展出错：', 'Extension error: ')}${event.error}`, { description: event.extensionPath })
                 break
             case 'agent_settled':
-                void this.settle()
+                this.settling = this.settle().finally(() => {
+                    this.settling = null
+                })
                 break
             default:
                 break

@@ -2,6 +2,25 @@ import type { PiBridge } from '@shared/ipc'
 import { IPC } from '@shared/ipc'
 import { contextBridge, ipcRenderer } from 'electron'
 
+/** Main → renderer push channel; returns the unsubscribe function. */
+function listen<A extends unknown[]>(channel: string, listener: (...args: A) => void) {
+    const handler = (_e: unknown, ...args: unknown[]) => listener(...(args as A))
+    ipcRenderer.on(channel, handler)
+    return () => {
+        ipcRenderer.off(channel, handler)
+    }
+}
+
+/** Main → renderer request: the handler's result (or error) goes back on IPC.reply with the request id. */
+function answer<A, R>(channel: string, handler: (arg: A) => Promise<R>) {
+    return listen(channel, (id: string, arg: A) => {
+        handler(arg).then(
+            value => ipcRenderer.send(IPC.reply, id, { ok: true, value }),
+            error => ipcRenderer.send(IPC.reply, id, { ok: false, error: String(error?.message ?? error) }),
+        )
+    })
+}
+
 // Narrow, typed surface: the renderer never gets raw ipcRenderer access.
 const bridge: PiBridge = {
     resolveEnv: () => ipcRenderer.invoke(IPC.resolveEnv),
@@ -12,6 +31,22 @@ const bridge: PiBridge = {
     loadState: () => ipcRenderer.invoke(IPC.loadState),
     saveState: state => ipcRenderer.invoke(IPC.saveState, state),
     pickFolder: () => ipcRenderer.invoke(IPC.pickFolder),
+    onPrefsChanged: listener => listen(IPC.prefsChanged, listener),
+
+    windowInit: () => ipcRenderer.invoke(IPC.windowInit),
+    windowReady: () => ipcRenderer.invoke(IPC.windowReady),
+    reportWindow: report => ipcRenderer.invoke(IPC.reportWindow, report),
+    onWindowProjects: listener => listen(IPC.windowProjects, listener),
+    onOpenProjects: listener => listen(IPC.openProjects, listener),
+    onSelectProject: listener => listen(IPC.selectProject, listener),
+    openProject: cwd => ipcRenderer.invoke(IPC.openProject, cwd),
+    attachProject: cwd => ipcRenderer.invoke(IPC.attachProject, cwd),
+    detachProject: cwd => ipcRenderer.invoke(IPC.detachProject, cwd),
+    closeProject: cwd => ipcRenderer.invoke(IPC.closeProject, cwd),
+    mergeAllWindows: () => ipcRenderer.invoke(IPC.mergeAllWindows),
+    focusWindow: () => ipcRenderer.invoke(IPC.focusWindow),
+    onExportProjects: handler => answer(IPC.exportProjects, handler),
+    onImportProjects: handler => answer(IPC.importProjects, handler),
 
     agentStart: options => ipcRenderer.invoke(IPC.agentStart, options),
     agentRequest: (agentId, command) => ipcRenderer.invoke(IPC.agentRequest, agentId, command),
@@ -36,6 +71,7 @@ const bridge: PiBridge = {
     compactionInfo: (cwd, modelKey) => ipcRenderer.invoke(IPC.compactionInfo, cwd, modelKey),
     globalCompaction: cwd => ipcRenderer.invoke(IPC.globalCompaction, cwd),
     setGlobalCompaction: patch => ipcRenderer.invoke(IPC.setGlobalCompaction, patch),
+    onPiSettingsChanged: listener => listen(IPC.piSettingsChanged, listener),
     gitStatus: cwd => ipcRenderer.invoke(IPC.gitStatus, cwd),
     gitBranches: cwds => ipcRenderer.invoke(IPC.gitBranches, cwds),
     gitFileDiff: (cwd, path, status) => ipcRenderer.invoke(IPC.gitFileDiff, cwd, path, status),
@@ -52,7 +88,6 @@ const bridge: PiBridge = {
         ipcRenderer.on(IPC.notificationClick, handler)
         return () => ipcRenderer.off(IPC.notificationClick, handler)
     },
-    setBadge: count => ipcRenderer.invoke(IPC.setBadge, count),
 }
 
 contextBridge.exposeInMainWorld('pi', bridge)

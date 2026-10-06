@@ -12,6 +12,7 @@ import { StatusBar } from './features/StatusBar'
 import { closeTabWithConfirm, TabBar } from './features/Tabs/TabBar'
 import { ShortcutHints, ThreadPane } from './features/Thread'
 import { MainToolbar } from './features/Toolbar'
+import { Welcome } from './features/Welcome'
 import { newThreadLabel, tr } from '@/lib/i18n'
 
 const EnvError = observer(({ error }: { error: string }) => (
@@ -97,7 +98,7 @@ const Workspace = observer(() => {
     )
 })
 
-/** Tab and layout shortcuts. Ctrl+1–9 picks a project, ⌘1–9 a tab. */
+/** Tab and layout shortcuts. Ctrl+1–9 goes to a project (its window), ⌘1–9 to a tab. */
 function useShortcuts() {
     useEffect(() => {
         const onKey = (e: KeyboardEvent) => {
@@ -159,11 +160,18 @@ export const App = observer(() => {
                     </div>
                 )}
                 {env && !env.ok && <EnvError error={env.error} />}
-                {env?.ok && (
+                {env?.ok && appStore.windowProjects.length > 0 && (
                     <>
                         <MainToolbar />
                         <Workspace />
                         <StatusBar />
+                    </>
+                )}
+                {env?.ok && appStore.windowProjects.length === 0 && (
+                    <>
+                        {/* Title bar strip: drags the window, clears the traffic lights. */}
+                        <header className="app-drag h-[38px] shrink-0" />
+                        <Welcome />
                     </>
                 )}
             </div>

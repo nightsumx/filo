@@ -18,6 +18,6 @@ createRoot(document.getElementById('root')!).render(
 
 void appStore.init()
 
-// Dev-only handle for inspecting state from DevTools.
-if (import.meta.env.DEV)
+// Handle for inspecting state from DevTools (dev builds) and for end-to-end scripts (PI_GUI_TEST).
+if (import.meta.env.DEV || new URLSearchParams(location.search).has('test'))
     (window as any).__app = appStore

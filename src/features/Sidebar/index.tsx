@@ -1,5 +1,6 @@
-// "项目" tool window, laid out like WebStorm's Project view: each project is a root node with its
-// path next to the name, and expands into its threads. Clicking a thread opens (or focuses) its tab.
+// "项目" tool window, laid out like WebStorm's Project view: the window's project is the root node,
+// with its path next to the name, and expands into its threads. A merged window lists each of its
+// projects as a root. Clicking a thread opens (or focuses) its tab.
 import type { SessionSummary } from '@shared/ipc'
 import type { Project } from '@/store/app'
 import type { Thread } from '@/store/thread'
@@ -8,7 +9,8 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSepara
 import { formatElapsed } from '@/lib/threadActivity'
 import { cn, relativeTime, shortPath } from '@/lib/utils'
 import { appStore } from '@/store/app'
-import { ChevronRight, ChevronsDownUp, EyeOff, FolderOpen, FolderPlus, Minus, MoreHorizontal, Plus } from 'lucide-react'
+import { AppWindow, ChevronRight, ChevronsDownUp, EyeOff, FolderOpen, FolderPlus, Minus, MoreHorizontal, Plus, X } from 'lucide-react'
+import { confirm } from '@/lib/confirm'
 import { observer } from 'mobx-react-lite'
 import { useEffect, useState } from 'react'
 import { ProjectBadge } from '../Toolbar/ProjectBadge'
@@ -119,6 +121,21 @@ const ThreadRow = observer(({ thread, session, selected }: { thread?: Thread, se
     )
 })
 
+/** Closing stops the project's pi processes; running ones are confirmed first, like closing a tab. */
+async function closeProject(cwd: string, remove: boolean) {
+    const running = appStore.activity(cwd).running
+    if (running) {
+        const ok = await confirm({
+            title: remove ? tr('从列表移除', 'Remove from list') : tr('关闭项目', 'Close project'),
+            description: tr(`有 ${running} 个线程还在运行，关闭会中断它们。`, `${running} ${running === 1 ? 'thread is' : 'threads are'} still running; closing stops them.`),
+            confirmText: tr('中断并关闭', 'Stop and close'),
+        })
+        if (!ok)
+            return
+    }
+    await (remove ? appStore.removeProject(cwd) : appStore.closeProject(cwd))
+}
+
 const ProjectNode = observer(({ project, index, expanded, onToggle }: { project: Project, index: number, expanded: boolean, onToggle: (open?: boolean) => void }) => {
     const [menuOpen, setMenuOpen] = useState(false)
     const [all, setAll] = useState(false)
@@ -211,7 +228,17 @@ const ProjectNode = observer(({ project, index, expanded, onToggle }: { project:
                                 {tr('在 Finder 中打开', 'Show in Finder')}
                             </DropdownMenuItem>
                             <DropdownMenuSeparator />
-                            <DropdownMenuItem onSelect={() => void appStore.removeProject(project.cwd)}>
+                            {appStore.windowProjects.length > 1 && (
+                                <DropdownMenuItem onSelect={() => void appStore.detachProject(project.cwd)}>
+                                    <AppWindow size={14} />
+                                    {tr('移到新窗口', 'Move to new window')}
+                                </DropdownMenuItem>
+                            )}
+                            <DropdownMenuItem onSelect={() => void closeProject(project.cwd, false)}>
+                                <X size={14} />
+                                {tr('关闭项目', 'Close project')}
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onSelect={() => void closeProject(project.cwd, true)}>
                                 <EyeOff size={14} />
                                 {tr('从列表移除', 'Remove from list')}
                             </DropdownMenuItem>
@@ -266,7 +293,7 @@ export const Sidebar = observer(() => {
         <nav className="ide-island flex w-[272px] shrink-0 flex-col bg-ide-panel" aria-label={tr('项目', 'Projects')}>
             <div className="flex h-[34px] shrink-0 items-center gap-0.5 pl-3 pr-1.5">
                 <span className="flex-1 text-[13px] font-semibold text-gray-900">{tr('项目', 'Projects')}</span>
-                <button type="button" aria-label={tr('添加项目', 'Add project')} title={tr('添加项目', 'Add project')} onClick={() => void appStore.addProject()} className={toolBtn}>
+                <button type="button" aria-label={tr('添加项目到此窗口', 'Add project to this window')} title={tr('添加项目到此窗口', 'Add project to this window')} onClick={() => void appStore.addProjectHere()} className={toolBtn}>
                     <FolderPlus size={14} />
                 </button>
                 <button type="button" aria-label={tr('全部折叠', 'Collapse all')} title={tr('全部折叠', 'Collapse all')} onClick={() => setExpanded(new Set())} className={toolBtn}>
@@ -277,24 +304,15 @@ export const Sidebar = observer(() => {
                 </button>
             </div>
             <div role="tree" aria-label={tr('项目和线程', 'Projects and threads')} className="group/tree flex-1 overflow-y-auto px-1.5 pb-2 scrollbar-trigger">
-                {appStore.projects.map((project, i) => (
+                {appStore.windowProjectList.map(project => (
                     <ProjectNode
                         key={project.cwd}
                         project={project}
-                        index={i}
+                        index={appStore.projects.findIndex(p => p.cwd === project.cwd)}
                         expanded={expanded.has(project.cwd)}
                         onToggle={open => toggle(project.cwd, open)}
                     />
                 ))}
-                {appStore.projects.length === 0 && (
-                    <button
-                        type="button"
-                        onClick={() => void appStore.addProject()}
-                        className="mx-1.5 mt-2 w-[calc(100%-0.75rem)] rounded-lg border border-dashed border-gray-300 px-3 py-6 text-[12px] text-gray-500 hover:border-gray-400 hover:text-gray-700"
-                    >
-                        {tr('添加一个项目文件夹开始', 'Add a project folder to start')}
-                    </button>
-                )}
             </div>
         </nav>
     )

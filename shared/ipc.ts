@@ -53,16 +53,12 @@ export type GitStatus =
 
 export interface GitFileDiff { oldText: string, newText: string }
 
-export interface AppState {
-    /** Sidebar project order (cwds), including folders added manually. */
+/** Settings shared by every window; a change in one window reaches the others. */
+export interface GlobalPrefs {
+    /** Project list order (cwds), including folders added manually. */
     projects: string[]
-    /** Session-derived projects the user removed from the sidebar. */
+    /** Session-derived projects the user removed from the list. */
     hiddenProjects: string[]
-    activeProject?: string
-    /** Open tabs per project, as session file paths in tab order. */
-    tabs: Record<string, string[]>
-    /** Focused tab per project (session file path). */
-    activeTabs: Record<string, string>
     /** split: open tabs tile across the window; single: one pane. */
     layout: 'split' | 'single'
     /** Appearance; `system` follows macOS. */
@@ -75,10 +71,76 @@ export interface AppState {
     capabilities?: CapabilityId[] | Record<string, CapabilityId[]>
     /** Approval mode new threads start in: the last one chosen in any thread. */
     approvalMode?: ApprovalMode
-    /** Older state: the same, per project cwd. Read once, then dropped. */
-    approvalModes?: Record<string, ApprovalMode>
     /** Tokens at which every model compacts (see lib/compactAt); null: none, absent: not decided yet. */
     compactAt?: number | null
+}
+
+export const GLOBAL_PREF_KEYS = ['projects', 'hiddenProjects', 'layout', 'theme', 'lang', 'transcriptLang', 'capabilities', 'approvalMode', 'compactAt'] as const satisfies readonly (keyof GlobalPrefs)[]
+
+/** A project window as saved for the next launch. */
+export interface SavedWindow {
+    /** One project, or several after the user merged windows. */
+    projects: string[]
+    active?: string
+}
+
+export interface WindowBounds { x: number, y: number, width: number, height: number }
+
+export interface AppState extends GlobalPrefs {
+    /** Open tabs per project, as session file paths in tab order. */
+    tabs: Record<string, string[]>
+    /** Focused tab per project (session file path). */
+    activeTabs: Record<string, string>
+    /** Project windows open at quit, reopened on launch. Absent in older state (one window, activeProject). */
+    windows?: SavedWindow[]
+    /** Last window frame per project (a merged window is keyed by its first project). */
+    windowBounds?: Record<string, WindowBounds>
+    /** Older state: the project the single window showed. */
+    activeProject?: string
+    /** Older state: the same, per project cwd. Read once, then dropped. */
+    approvalModes?: Record<string, ApprovalMode>
+}
+
+/** What a window writes: changed shared settings, plus the tabs of the projects it shows. */
+export interface StateSave {
+    prefs: Partial<GlobalPrefs>
+    tabs: Record<string, string[]>
+    activeTabs: Record<string, string>
+}
+
+export interface ProjectActivity {
+    open: number
+    running: number
+    unread: number
+    waiting: number
+}
+
+/** The projects a window shows; empty for the welcome window. */
+export interface WindowInit {
+    id: number
+    projects: string[]
+    active?: string
+}
+
+/** A window's live summary, for other windows' project lists, the Dock badge and close prompts. */
+export interface WindowReport {
+    active: string | null
+    activity: Record<string, ProjectActivity>
+}
+
+/** A project shown in some window. */
+export interface OpenProject {
+    cwd: string
+    windowId: number
+    activity: ProjectActivity
+}
+
+/** A project handed from one window to another, live threads included (see Thread.snapshot). */
+export interface ProjectTransfer {
+    cwd: string
+    tabs: string[]
+    activeTab?: string
+    threads: Record<string, unknown>[]
 }
 
 /** Global compaction settings as the Settings page shows them (pi defaults filled in). */
@@ -134,8 +196,37 @@ export interface PiBridge {
     trashSession: (path: string) => Promise<void>
 
     loadState: () => Promise<AppState>
-    saveState: (state: AppState) => Promise<void>
+    saveState: (save: StateSave) => Promise<void>
     pickFolder: () => Promise<string | null>
+    /** Shared settings another window changed. */
+    onPrefsChanged: (listener: (prefs: Partial<GlobalPrefs>) => void) => () => void
+
+    /** This window's projects; call windowReady once the store can take transfers. */
+    windowInit: () => Promise<WindowInit>
+    windowReady: () => Promise<void>
+    reportWindow: (report: WindowReport) => Promise<void>
+    /** Main changed this window's project list (transfer, close). */
+    onWindowProjects: (listener: (projects: string[]) => void) => () => void
+    /** Every window's projects and activity. */
+    onOpenProjects: (listener: (projects: OpenProject[]) => void) => () => void
+    /** Main asks this window to show one of its projects. */
+    onSelectProject: (listener: (cwd: string) => void) => () => void
+    /**
+     * "here": this window was empty (or already shows it) and now shows it; "elsewhere": the
+     * window showing it was focused, or a new window opened for it.
+     */
+    openProject: (cwd: string) => Promise<'here' | 'elsewhere'>
+    /** Shows a project in this window too, taking it (and its live threads) from its window. */
+    attachProject: (cwd: string) => Promise<void>
+    /** Moves one of this window's projects into a window of its own. */
+    detachProject: (cwd: string) => Promise<void>
+    /** Drops a project from this window; a window left empty closes, the last one turns into the welcome window. */
+    closeProject: (cwd: string) => Promise<void>
+    mergeAllWindows: () => Promise<void>
+    focusWindow: () => Promise<void>
+    /** Main collects a project's threads before handing it to another window. */
+    onExportProjects: (handler: (cwds: string[]) => Promise<ProjectTransfer[]>) => () => void
+    onImportProjects: (handler: (projects: ProjectTransfer[]) => Promise<void>) => () => void
 
     agentStart: (options: AgentStartOptions) => Promise<string>
     agentRequest: <T = any>(agentId: string, command: Record<string, unknown>) => Promise<RpcResponse<T>>
@@ -148,6 +239,8 @@ export interface PiBridge {
     /** compaction.* in pi's global settings.json; cwd only reports whether that project overrides it. */
     globalCompaction: (cwd?: string) => Promise<GlobalCompaction>
     setGlobalCompaction: (patch: GlobalCompactionPatch) => Promise<void>
+    /** Another window wrote pi's settings.json. */
+    onPiSettingsChanged: (listener: (patch: GlobalCompactionPatch) => void) => () => void
     /** App menu → 设置… (⌘,). */
     onOpenSettings: (listener: () => void) => () => void
 
@@ -168,8 +261,6 @@ export interface PiBridge {
     /** System notification; clicking it focuses the window and reports `key` back. */
     notify: (notice: AppNotice) => Promise<void>
     onNotificationClick: (listener: (key: string) => void) => () => void
-    /** Dock badge: threads waiting for the user (0 clears it). */
-    setBadge: (count: number) => Promise<void>
 }
 
 export interface AppNotice {
@@ -209,5 +300,22 @@ export const IPC = {
     openExternal: 'shell:open-external',
     notify: 'app:notify',
     notificationClick: 'app:notification-click',
-    setBadge: 'app:set-badge',
+    prefsChanged: 'state:prefs-changed',
+    piSettingsChanged: 'pi:settings-changed',
+    windowInit: 'window:init',
+    windowReady: 'window:ready',
+    reportWindow: 'window:report',
+    windowProjects: 'window:projects',
+    openProjects: 'window:open-projects',
+    selectProject: 'window:select-project',
+    openProject: 'window:open-project',
+    attachProject: 'window:attach-project',
+    detachProject: 'window:detach-project',
+    closeProject: 'window:close-project',
+    mergeAllWindows: 'window:merge-all',
+    focusWindow: 'window:focus',
+    exportProjects: 'window:export-projects',
+    importProjects: 'window:import-projects',
+    /** Renderer → main answer to a main → renderer request (export/import). */
+    reply: 'window:reply',
 } as const

@@ -6,6 +6,7 @@ function reset() {
     appStore.tabsByProject = {}
     appStore.activeTabByProject = {}
     appStore.activeProject = null
+    appStore.windowProjects = []
     appStore.layout = 'split'
 }
 
@@ -172,5 +173,72 @@ describe('idle pi processes', () => {
         expect(stop()).toBe(false)
         appStore.stopIdleAgents(AGENT_IDLE_MS * 6)
         expect(stop()).toBe(true)
+    })
+})
+
+describe('moving projects between windows', () => {
+    beforeEach(reset)
+
+    it('hands a running thread over mid-stream, and its later events reach the new copy', async () => {
+        appStore.windowProjects = ['/p', '/q']
+        appStore.newThread('/p')
+        const thread = appStore.active!
+        thread.agentId = 'agent-1'
+        thread.agentStatus = 'ready'
+        appStore.registerAgent('agent-1', thread)
+        thread.handleEvent({ type: 'agent_start' })
+        thread.handleEvent({ type: 'message_start', message: { role: 'assistant', content: [], timestamp: 1 } })
+        thread.handleEvent({ type: 'message_update', assistantMessageEvent: { type: 'text_start', contentIndex: 0 } })
+        thread.handleEvent({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', contentIndex: 0, delta: 'Hel' } })
+        thread.draft = 'half typed'
+
+        const projects = await appStore.exportProjects(['/p'])
+        expect(appStore.threads.has(thread.key)).toBe(false)
+        expect(appStore.windowProjects).toEqual(['/q'])
+        expect(appStore.tabsOf('/p')).toEqual([])
+
+        // Crosses IPC as a structured clone.
+        await appStore.importProjects(structuredClone(projects))
+        const moved = appStore.threads.get(thread.key)!
+        expect(moved).not.toBe(thread)
+        expect(appStore.tabsOf('/p')).toEqual([moved])
+        expect(appStore.windowProjects).toEqual(['/q', '/p'])
+        expect(moved.running).toBe(true)
+        expect(moved.agentId).toBe('agent-1')
+        expect(moved.draft).toBe('half typed')
+
+        moved.handleEvent({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', contentIndex: 0, delta: 'lo' } })
+        expect(moved.streaming?.content).toEqual([{ type: 'text', text: 'Hello' }])
+        expect((appStore as any).agentThreads.get('agent-1')).toBe(moved)
+    })
+
+    it('waits for an end-of-run reload before the snapshot, so the copy is not left running', async () => {
+        let finishLoad = () => {}
+        vi.stubGlobal('window', {
+            pi: {
+                agentRequest: async () => ({ success: true, data: undefined }),
+                readSession: () => new Promise(resolve => (finishLoad = () => resolve({ items: [] }))),
+                notify: async () => {},
+            },
+        })
+        vi.stubGlobal('document', { hasFocus: () => true })
+        try {
+            appStore.windowProjects = ['/p']
+            appStore.newThread('/p')
+            const thread = appStore.active!
+            thread.agentId = 'agent-2'
+            thread.agentStatus = 'ready'
+            thread.sessionPath = '/s/p.jsonl'
+            thread.running = true
+            thread.handleEvent({ type: 'agent_settled' })
+            const exporting = appStore.exportProjects(['/p'])
+            await new Promise(r => setTimeout(r, 0))
+            finishLoad()
+            const [project] = await exporting
+            expect(project.threads[0].running).toBe(false)
+        }
+        finally {
+            vi.unstubAllGlobals()
+        }
     })
 })
