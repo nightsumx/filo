@@ -16,6 +16,8 @@ const HEADING = 24
 const GUTTER = 22
 const SIDE_PADDING = 40
 const MAX_WIDTH = 1024
+/** User bubbles taller than this scroll inside (TurnView), so a pasted log doesn't fill the transcript. */
+export const USER_BUBBLE_MAX_HEIGHT = 320
 /** One-line row: a tool title, a fold line, a footer. */
 const ROW_LINE = 24
 const RESULT_LINE = 22
@@ -145,7 +147,7 @@ function estimate(row: TranscriptRow, listWidth: number): number {
             // Bubble: 15% left inset, px-3 padding, leading-relaxed lines.
             const bubble = Math.min(listWidth || 900, MAX_WIDTH) * 0.85 - SIDE_PADDING - 24
             const lines = row.user.text.split('\n').reduce((n, l) => n + Math.max(1, Math.ceil(textWidth(l) / bubble)), 0)
-            return (row.first ? 24 : 12) + 12 + lines * 22 + (row.user.images.length ? 86 : 0)
+            return (row.first ? 24 : 12) + Math.min(USER_BUBBLE_MAX_HEIGHT, 12 + lines * 22) + (row.user.images.length ? 86 : 0)
         }
         case 'live':
         case 'fold':

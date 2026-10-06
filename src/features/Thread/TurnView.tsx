@@ -2,13 +2,15 @@ import type { Step, Turn, UserPrompt } from '@/lib/timeline'
 import type { TranscriptRow } from '@/lib/transcriptRows'
 import type { Thread } from '@/store/thread'
 import { ActionBtn } from '@/components/ActionBtn'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
+import { USER_BUBBLE_MAX_HEIGHT } from '@/lib/rowEstimate'
 import { useT, verbFor } from '@/lib/transcriptText'
 import { cn, formatCost, formatCount } from '@/lib/utils'
 import copyText from 'copy-to-clipboard'
 import { Check, ChevronRight, Copy } from 'lucide-react'
 import { observer } from 'mobx-react-lite'
 import { turnStats } from '@/lib/turnSummary'
-import { createContext, Fragment, memo, useContext, useEffect, useMemo, useState } from 'react'
+import { createContext, Fragment, memo, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { ExtensionRequest } from './ExtensionRequest'
 import { StepView } from './StepView'
 import { Gutter, ToolGroup } from './ToolRow'
@@ -35,6 +37,12 @@ function CopyAction({ text }: { text: string }) {
 // User prompt: a right-aligned chat bubble; the copy action sits to its left on hover.
 function UserBubble({ user }: { user: UserPrompt }) {
     const t = useT()
+    const bubbleRef = useRef<HTMLDivElement>(null)
+    const [overflowing, setOverflowing] = useState(false)
+    useLayoutEffect(() => {
+        const el = bubbleRef.current
+        setOverflowing(!!el && el.scrollHeight > el.clientHeight + 1)
+    }, [user.text])
     return (
         <div className="group flex flex-col items-end gap-1.5 pl-[15%]" title={user.timestamp ? t.dateTime(user.timestamp) : undefined}>
             {user.images.length > 0 && (
@@ -49,7 +57,13 @@ function UserBubble({ user }: { user: UserPrompt }) {
                     <div className="shrink-0 pt-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
                         <CopyAction text={user.text} />
                     </div>
-                    <div className={cn('min-w-0 rounded-xl bg-ide-prompt px-3 py-1.5 text-[length:var(--app-font-size)] leading-relaxed text-gray-900', user.pending && 'opacity-60')}>
+                    {/* Long prompts (pasted logs, specs) scroll inside; focusable then, so the keyboard can scroll them too. */}
+                    <div
+                        ref={bubbleRef}
+                        tabIndex={overflowing ? 0 : undefined}
+                        style={{ maxHeight: USER_BUBBLE_MAX_HEIGHT }}
+                        className={cn('min-w-0 overflow-y-auto rounded-xl bg-ide-prompt px-3 py-1.5 text-[length:var(--app-font-size)] leading-relaxed text-gray-900 outline-none focus-visible:ring-2 focus-visible:ring-ide-accent/50', user.pending && 'opacity-60')}
+                    >
                         <span className="whitespace-pre-wrap break-words select-text">{user.text}</span>
                     </div>
                 </div>
@@ -61,10 +75,14 @@ function UserBubble({ user }: { user: UserPrompt }) {
 /** Toggles a finished turn's fold; MessageList owns the open set because it changes the row list. */
 export const TurnFoldContext = createContext<(turnKey: string) => void>(() => {})
 
-/** Codex-style fold over a finished turn's process: "› Ran 3 commands, edited 2 files +12 -3". */
-function FoldRow({ row }: { row: Extract<TranscriptRow, { kind: 'fold' }> }) {
+/**
+ * Codex-style fold over a finished turn's process: "› Ran 3 commands, edited 2 files +12 -3".
+ * Also rendered pinned over the transcript while its open process scrolls by (MessageList).
+ */
+export function FoldRow({ row, onToggle }: { row: Extract<TranscriptRow, { kind: 'fold' }>, onToggle?: () => void }) {
     const t = useT()
-    const toggle = useContext(TurnFoldContext)
+    const toggleTurn = useContext(TurnFoldContext)
+    const toggle = onToggle ?? (() => toggleTurn(row.turn.key))
     const s = useMemo(() => turnStats(row.steps), [row.steps])
     const parts: { key: string, text: string, extra?: React.ReactNode, className?: string }[] = []
     if (s.commands)
@@ -101,7 +119,7 @@ function FoldRow({ row }: { row: Extract<TranscriptRow, { kind: 'fold' }> }) {
     return (
         <button
             type="button"
-            onClick={() => toggle(row.turn.key)}
+            onClick={toggle}
             aria-expanded={row.open}
             className="group/fold flex w-full min-w-0 gap-2 text-left"
         >
@@ -142,42 +160,97 @@ function estimateTokens(steps: Step[]): number {
 }
 
 
-/** "6 requests · ↑ 52.1k ↓ 3.2k · 89% cached · $0.12 · claude-opus-5-5 (high)" for a turn's footer. */
-function UsageParts({ usage }: { usage: NonNullable<Turn['usage']> }) {
-    const t = useT()
-    if (!usage.requests)
-        return null
-    const input = usage.input + usage.cacheRead + usage.cacheWrite
-    const cachedPct = input ? Math.round((usage.cacheRead / input) * 100) : 0
-    const parts: { key: string, node: React.ReactNode, title?: string }[] = [
-        { key: 'requests', node: t.requests(usage.requests) },
-        {
-            key: 'tokens',
-            node: `↑ ${formatCount(input)} ↓ ${formatCount(usage.output)}${usage.reasoning ? ` (${t.reasoningTokens(formatCount(usage.reasoning))})` : ''}`,
-            title: `${t.tokensIn}: ${input.toLocaleString()} (input ${usage.input.toLocaleString()}, cache read ${usage.cacheRead.toLocaleString()}, cache write ${usage.cacheWrite.toLocaleString()})\n${t.tokensOut}: ${usage.output.toLocaleString()}`,
-        },
-    ]
-    if (cachedPct)
-        parts.push({ key: 'cache', node: t.cached(cachedPct) })
-    if (usage.cost > 0)
-        parts.push({ key: 'cost', node: formatCost(usage.cost) })
-    if (usage.models.length) {
-        const levels = usage.thinkingLevels.filter(l => l !== 'off')
-        parts.push({
-            key: 'model',
-            node: `${usage.models.map(m => m.split('/').pop()).join(', ')}${levels.length ? ` (${levels.join(', ')})` : ''}`,
-            title: usage.models.join('\n'),
-        })
-    }
+/** One coloured slice of a token total: legend dot, label, count and share. */
+interface Slice { key: string, label: string, value: number, dot: string, bar: string, accent?: string }
+
+/** "Input 356,600" heading, a stacked bar and a legend row per slice. */
+function TokenBreakdown({ label, total, slices }: { label: string, total: number, slices: Slice[] }) {
+    const shown = slices.filter(s => s.value > 0)
     return (
-        <>
-            {parts.map(p => (
-                <span key={p.key} title={p.title} className="whitespace-nowrap">
-                    <span className="text-gray-400">· </span>
-                    {p.node}
+        <section className="flex flex-col gap-1.5">
+            <div className="flex items-baseline justify-between gap-4">
+                <span className="text-[11px] font-medium uppercase tracking-wide text-gray-500">{label}</span>
+                <span className="font-medium text-gray-900">{total.toLocaleString()}</span>
+            </div>
+            {total > 0 && shown.length > 1 && (
+                <div className="flex h-1.5 gap-px overflow-hidden rounded-full bg-gray-100" aria-hidden>
+                    {shown.map(s => <span key={s.key} className={s.bar} style={{ width: `${(s.value / total) * 100}%` }} />)}
+                </div>
+            )}
+            <div className="grid grid-cols-[auto_1fr_auto_2.75rem] items-center gap-x-2 gap-y-0.5">
+                {shown.map(s => (
+                    <Fragment key={s.key}>
+                        <span aria-hidden className={cn('size-2 rounded-full', s.dot)} />
+                        <span className="text-gray-600">{s.label}</span>
+                        <span className="text-right text-gray-800">{s.value.toLocaleString()}</span>
+                        <span className={cn('text-right', s.accent ?? 'text-gray-400')}>{`${Math.round((s.value / total) * 100)}%`}</span>
+                    </Fragment>
+                ))}
+            </div>
+        </section>
+    )
+}
+
+/** Hover card under a turn's footer: timing, cost, colour-coded token breakdown and models. */
+function TurnDetails({ turn }: { turn: Turn }) {
+    const t = useT()
+    const usage = turn.usage
+    const ms = turn.endedAt - turn.startedAt
+    const input = usage ? usage.input + usage.cacheRead + usage.cacheWrite : 0
+    const cachedPct = input && usage ? Math.round((usage.cacheRead / input) * 100) : 0
+    const levels = usage?.thinkingLevels.filter(l => l !== 'off') ?? []
+    return (
+        <div className="flex flex-col gap-3 tabular-nums">
+            <header className="flex flex-col gap-0.5">
+                <div className="flex items-baseline justify-between gap-4">
+                    <span className="text-[13px] font-medium text-gray-900">
+                        {ms > 1000 ? t.workedFor(verbFor(t, turn.key)[1], t.duration(ms)) : t.done}
+                    </span>
+                    {usage && usage.cost > 0 && <span className="text-[13px] font-semibold text-gray-900">{formatCost(usage.cost)}</span>}
+                </div>
+                <span className="text-gray-500">
+                    {t.dateTime(turn.endedAt)}
+                    {usage?.requests ? ` · ${t.requests(usage.requests)}` : ''}
                 </span>
-            ))}
-        </>
+            </header>
+            {usage?.requests ? (
+                <>
+                    <TokenBreakdown
+                        label={t.statInput}
+                        total={input}
+                        slices={[
+                            { key: 'read', label: t.statCacheRead, value: usage.cacheRead, dot: 'bg-emerald-500', bar: 'bg-emerald-500', accent: 'font-medium text-emerald-600' },
+                            { key: 'fresh', label: t.statFresh, value: usage.input, dot: 'bg-blue-500', bar: 'bg-blue-500' },
+                            { key: 'write', label: t.statCacheWrite, value: usage.cacheWrite, dot: 'bg-amber-500', bar: 'bg-amber-500' },
+                        ]}
+                    />
+                    <TokenBreakdown
+                        label={t.statOutput}
+                        total={usage.output}
+                        slices={usage.reasoning
+                            ? [
+                                    { key: 'text', label: t.statText, value: Math.max(0, usage.output - usage.reasoning), dot: 'bg-gray-400', bar: 'bg-gray-400' },
+                                    { key: 'thinking', label: t.statThinking, value: usage.reasoning, dot: 'bg-orange-400', bar: 'bg-orange-400' },
+                                ]
+                            : []}
+                    />
+                    {cachedPct > 0 && (
+                        <div className="flex items-center gap-1.5 self-start rounded-full bg-emerald-500/10 px-2 py-0.5 text-[11.5px] font-medium text-emerald-600">
+                            <span aria-hidden className="size-1.5 rounded-full bg-emerald-500" />
+                            {t.statCacheHit(cachedPct)}
+                        </div>
+                    )}
+                </>
+            ) : null}
+            {usage && usage.models.length > 0 && (
+                <footer className="flex flex-col gap-0.5 border-t border-gray-200 pt-2">
+                    {usage.models.map(m => <span key={m} className="break-all font-mono text-[11.5px] text-gray-700">{m}</span>)}
+                    {levels.length > 0 && (
+                        <span className="self-start rounded bg-gray-100 px-1.5 font-mono text-[11px] text-gray-600">{levels.join(', ')}</span>
+                    )}
+                </footer>
+            )}
+        </div>
     )
 }
 
@@ -244,15 +317,27 @@ export const TranscriptRowView = memo(({ row, thread, top }: { row: TranscriptRo
                 </div>
             )
         case 'footer': {
-            // cc-tui's closing entry: "✻ Worked for 3m 12s · done 4:12 PM".
+            // cc-tui's closing entry, trimmed to "✻ Worked for 3m 12s · $0.12"; the rest lives in a hover card.
             const { turn } = row
             const ms = turn.endedAt - turn.startedAt
+            const cost = turn.usage?.cost ?? 0
             return (
                 <div className={cn(pad, 'group/turn')}>
                     <Gutter mark="✻" markClassName="text-gray-400">
                         <div className="flex min-h-6 flex-wrap items-center gap-x-1 text-[12.5px] leading-6 text-gray-500 tabular-nums">
-                            <span title={t.dateTime(turn.endedAt)}>{ms > 1000 ? t.workedFor(verbFor(t, turn.key)[1], t.duration(ms), t.clock(turn.endedAt)) : t.doneAt(t.clock(turn.endedAt))}</span>
-                            {turn.usage && <UsageParts usage={turn.usage} />}
+                            <TooltipProvider delayDuration={200}>
+                                <Tooltip>
+                                    <TooltipTrigger asChild>
+                                        <span tabIndex={0} className="cursor-default rounded-sm outline-none hover:text-gray-800 focus-visible:ring-1 focus-visible:ring-gray-400">
+                                            {ms > 1000 ? t.workedFor(verbFor(t, turn.key)[1], t.duration(ms)) : t.doneAt(t.clock(turn.endedAt))}
+                                            {cost > 0 && <span>{` · ${formatCost(cost)}`}</span>}
+                                        </span>
+                                    </TooltipTrigger>
+                                    <TooltipContent side="top" align="start" className="w-[300px] rounded-lg p-3">
+                                        <TurnDetails turn={turn} />
+                                    </TooltipContent>
+                                </Tooltip>
+                            </TooltipProvider>
                             {row.finalText && (
                                 <span className="flex h-6 items-center opacity-0 transition-opacity group-hover/turn:opacity-100">
                                     <CopyAction text={row.finalText} />

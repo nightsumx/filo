@@ -8,7 +8,8 @@ import { splitTurn } from './turnSummary'
  */
 export type TranscriptRow =
     | { kind: 'user', key: string, turn: Turn, user: UserPrompt, first: boolean }
-    | { kind: 'item', key: string, turn: Turn, item: StepItem, first: boolean }
+    /** `inFold`: part of an unfolded process, under its fold row (MessageList pins that row on top). */
+    | { kind: 'item', key: string, turn: Turn, item: StepItem, first: boolean, inFold?: boolean }
     /** "› Ran 3 commands, edited 2 files +12 -3": a finished turn's process, folded unless open. */
     | { kind: 'fold', key: string, turn: Turn, steps: Step[], open: boolean, first: boolean }
     /** Streaming steps + the "✶ Churning…" line under the last running turn. */
@@ -26,23 +27,27 @@ export function transcriptRows(turns: Turn[], open: ReadonlySet<string> = new Se
     turns.forEach((turn, i) => {
         const start = rows.length
         const first = () => rows.length === start
-        const pushItems = (steps: Step[]) => {
+        const pushItems = (steps: Step[], inFold?: boolean) => {
             for (const item of groupSteps(steps))
-                rows.push({ kind: 'item', key: item.kind === 'group' ? item.key : item.step.key, turn, item, first: first() })
+                rows.push({ kind: 'item', key: item.kind === 'group' ? item.key : item.step.key, turn, item, first: first(), ...(inFold && { inFold }) })
         }
         if (turn.user)
             rows.push({ kind: 'user', key: `${turn.key}:user`, turn, user: turn.user, first: true })
-        // Only finished prompt turns fold; a running turn shows its work as it happens.
+        // A turn without a prompt can still be agent work: the rest of a run that pi compacted
+        // midway continues after the summary. It folds and gets a footer like the prompt's turn.
+        const hasWork = turn.steps.some(s => s.kind === 'tool' || s.kind === 'text' || s.kind === 'thinking')
+        const agentTurn = !!turn.user || hasWork
+        // Only finished turns fold; a running turn shows its work as it happens.
         const { process, tail } = splitTurn(turn.steps)
         // An approved plan is what the work was agreed on: it stays above the fold.
         const pinned = process.filter(isPinned)
-        if (!turn.running && turn.user && process.length > pinned.length) {
+        if (!turn.running && agentTurn && process.length > pinned.length) {
             const isOpen = open.has(turn.key)
             if (!isOpen)
                 pushItems(pinned)
             rows.push({ kind: 'fold', key: `${turn.key}:fold`, turn, steps: process, open: isOpen, first: first() })
             if (isOpen)
-                pushItems(process)
+                pushItems(process, true)
             pushItems(tail)
         }
         else {
@@ -51,8 +56,7 @@ export function transcriptRows(turns: Turn[], open: ReadonlySet<string> = new Se
         const isLast = i === turns.length - 1
         if (isLast && turn.running)
             rows.push({ kind: 'live', key: `${turn.key}:live`, turn, first: first() })
-        const hasWork = turn.steps.some(s => s.kind === 'tool' || s.kind === 'text' || s.kind === 'thinking')
-        if (!turn.running && turn.user && hasWork) {
+        if (!turn.running && hasWork) {
             const texts = turn.steps.filter(s => s.kind === 'text')
             const finalText = texts.length ? (texts[texts.length - 1] as { text: string }).text : ''
             rows.push({ kind: 'footer', key: `${turn.key}:footer`, turn, first: first(), finalText })

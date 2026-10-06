@@ -62,8 +62,10 @@ function NoteBlock({ id, variant, title: customTitle, text }: { id: string, vari
                 <span className="h-px flex-1 bg-ide-line" />
             </button>
             {open && text && (
-                <div className="mt-2 rounded-md bg-ide-block px-3 py-2 text-[13px] text-gray-700">
-                    <Markdown content={text} />
+                // A summary is reference text, not a document: headings at body size so "Goal" does
+                // not read as a page title in the middle of the conversation.
+                <div className="mt-2 rounded-md bg-ide-block px-4 py-3 text-[13px] text-gray-700 [&_h1]:!mt-3 [&_h1]:!border-0 [&_h1]:!pb-0 [&_h1]:!text-[13.5px] [&_h1]:!leading-6 [&_h2]:!mt-3 [&_h2]:!border-0 [&_h2]:!pb-0 [&_h2]:!text-[13.5px] [&_h2]:!leading-6 [&_h3]:!text-[13px]">
+                    <Markdown content={text} className="[&>*:first-child]:!mt-0 [&>*:last-child]:mb-0" />
                 </div>
             )}
         </div>

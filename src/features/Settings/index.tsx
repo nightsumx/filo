@@ -42,7 +42,7 @@ function TranscriptPreview({ lang }: { lang: TranscriptLang }) {
             </div>
             <div className="font-sans text-gray-500">
                 <span className="text-gray-400">✻ </span>
-                {t.workedFor(done, t.duration(192_000), t.clock(new Date(2026, 0, 1, 16, 12).getTime()))}
+                {`${t.workedFor(done, t.duration(192_000))} · $0.42`}
             </div>
         </div>
     )

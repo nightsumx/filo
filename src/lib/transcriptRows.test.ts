@@ -29,6 +29,7 @@ describe('transcriptRows', () => {
         expect(rows.map(r => r.kind)).toEqual(['user', 'fold', 'item', 'item', 'item', 'footer'])
         expect(rows[1]).toMatchObject({ kind: 'fold', open: true })
         expect(rows[2].kind === 'item' && rows[2].item.kind).toBe('group')
+        expect(rows.map(r => r.kind === 'item' && !!r.inFold)).toEqual([false, false, true, true, false, false])
     })
 
     it('marks the first row of each turn and adds a live row to the running last turn', () => {
@@ -43,6 +44,15 @@ describe('transcriptRows', () => {
             ['item', true],
             ['live', false],
         ])
+    })
+
+    it('folds the rest of a run that continued after a mid-run compaction', () => {
+        const note: Step = { kind: 'note', key: 'c', variant: 'compaction', title: '', text: 'summary' }
+        const rows = transcriptRows([
+            turn('c', [note], { user: undefined }),
+            turn('d', [tool('d:0', 'bash'), tool('d:1', 'read'), text('d:2', 'done')], { user: undefined }),
+        ])
+        expect(rows.map(r => r.kind)).toEqual(['item', 'fold', 'item', 'footer'])
     })
 
     it('keeps row keys unique', () => {
