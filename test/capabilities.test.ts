@@ -96,7 +96,7 @@ describe.runIf(process.env.PI_GUI_SKIP_E2E !== '1')('capability extensions (real
         await pi.waitFor(e => e.type === 'agent_settled')
     }, 30_000)
 
-    it('approval: asks before bash, and a denial reaches the model', async ({ skip }) => {
+    it('approval: asks before bash; a denial ends the turn and reaches the model with the next message', async ({ skip }) => {
         if (!env)
             return skip('pi not installed')
         const { llm, pi } = await setup(['approval'], script({ toolCalls: [{ name: 'bash', arguments: { command: 'git push origin main' } }] }), { approvalMode: 'ask' })
@@ -112,7 +112,61 @@ describe.runIf(process.env.PI_GUI_SKIP_E2E !== '1')('capability extensions (real
         expect(end.isError).toBe(true)
         expect(end.toolCallId).toBe(request.toolCallId)
         await pi.waitFor(e => e.type === 'agent_settled')
+        // No follow-up request: the turn stops so the user can say what to do instead.
+        expect(llm.requests).toHaveLength(1)
+        await pi.run('do it differently')
         expect(llm.requests[1].toolResults[0]).toContain('The user declined this bash call')
+    }, 30_000)
+
+    it('approval: a denial declines the rest of the batch without asking', async ({ skip }) => {
+        if (!env)
+            return skip('pi not installed')
+        // Two bash calls for every new user message.
+        const batch = { toolCalls: [
+            { name: 'bash', arguments: { command: 'touch one' } },
+            { name: 'bash', arguments: { command: 'touch two' } },
+        ] }
+        const { llm, pi } = await setup(['approval'], r => r.messages.at(-1)?.role === 'user' ? batch : { text: 'done' }, { approvalMode: 'ask' })
+        await pi.request({ type: 'prompt', message: 'go' })
+        const prompt: any = await pi.waitFor(approvalPrompt)
+        pi.send({ type: 'extension_ui_response', id: prompt.id, value: 'deny' })
+        await pi.waitFor(e => e.type === 'agent_settled')
+        expect(pi.events.filter(approvalPrompt)).toHaveLength(1)
+        const ends = pi.events.filter(toolEnd('bash'))
+        expect(ends.map((e: any) => e.isError)).toEqual([true, true])
+        expect(ends[1].result.content[0].text).toContain('declined an earlier call')
+        expect(llm.requests).toHaveLength(1)
+
+        // The next message's calls are asked about again.
+        await pi.request({ type: 'prompt', message: 'again' })
+        const second: any = await pi.waitFor(e => approvalPrompt(e) && e.id !== prompt.id)
+        pi.send({ type: 'extension_ui_response', id: second.id, value: 'allow' })
+        const third: any = await pi.waitFor(e => approvalPrompt(e) && e.id !== prompt.id && e.id !== second.id)
+        pi.send({ type: 'extension_ui_response', id: third.id, value: 'allow' })
+        await pi.waitFor(e => e.type === 'agent_settled' && pi.events.filter(toolEnd('bash')).length === 4)
+        expect(pi.events.filter(toolEnd('bash')).slice(2).map((e: any) => e.isError)).toEqual([false, false])
+    }, 30_000)
+
+    it('approval: "always" on a project file edit switches to the edits mode', async ({ skip }) => {
+        if (!env)
+            return skip('pi not installed')
+        const { pi } = await setup(['approval'], script(
+            { toolCalls: [{ name: 'write', arguments: { path: 'a.txt', content: 'a' } }] },
+            { toolCalls: [{ name: 'write', arguments: { path: 'b.txt', content: 'b' } }] },
+            { toolCalls: [{ name: 'write', arguments: { path: '../outside.txt', content: 'c' } }] },
+        ), { approvalMode: 'ask' })
+        await pi.request({ type: 'prompt', message: 'write' })
+        const first: any = await pi.waitFor(approvalPrompt)
+        expect(approvalOf(first)).toMatchObject({ tool: 'write', scope: 'edits' })
+        expect(first.options).toEqual(['allow', 'always', 'deny'])
+        pi.send({ type: 'extension_ui_response', id: first.id, value: 'always' })
+        // b.txt goes through; the file outside the project asks, with no "always".
+        const outside: any = await pi.waitFor(e => approvalPrompt(e) && approvalOf(e).summary === '../outside.txt')
+        expect(statusOf(pi, 'gui-approval')).toBe('edits')
+        expect(outside.options).toEqual(['allow', 'deny'])
+        expect(pi.events.filter(toolEnd('write')).map((e: any) => e.isError)).toEqual([false, false])
+        pi.send({ type: 'extension_ui_response', id: outside.id, value: 'allow' })
+        await pi.waitFor(e => e.type === 'agent_settled')
     }, 30_000)
 
     it('approval: "always" covers later calls of the same program in the session', async ({ skip }) => {

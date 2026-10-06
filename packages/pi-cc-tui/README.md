@@ -57,11 +57,11 @@ Try it once without installing: `pi -e npm:pi-cc-tui`
 | Mode | Edits (`edit`, `write`) | Commands (`bash`, `powershell`) |
 |---|---|---|
 | `bypassPermissions` (default, pi's behavior) | run | run |
-| `default` | ask | ask |
-| `acceptEdits` | run | ask |
+| `default` | ask | ask, except read-only ones (`ls`, `git status`, `rg` …) |
+| `acceptEdits` | run inside the project, ask outside | same as `default` |
 | `plan` | read-only tools only, until you approve a plan | read-only commands only |
 
-The prompt is Claude Code's rounded box: ↑/↓ and enter, or press 1–3 directly; esc means No. It offers Yes, "Yes, allow all edits during this session" (switches to `acceptEdits`) or "don't ask again for … this session", and No, which stops the turn. Print and JSON modes never ask.
+The prompt is Claude Code's rounded box: ↑/↓ and enter, or press 1–3 directly; esc means No. It offers Yes, "Yes, allow all edits during this session" (switches to `acceptEdits`) or "don't ask again for … this session", and No, which stops the turn and declines the rest of that batch of tool calls, so you can say what to do instead. Print and JSON modes never ask. The desktop app follows the same rules.
 
 **Plan mode** — the model researches with read-only tools and calls `propose_plan`. The plan opens in a `Ready to code?` box: approve and auto-accept edits, approve and keep asking, or keep planning with a note on what to change.
 

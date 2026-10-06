@@ -122,7 +122,10 @@ export interface ApprovalRequest {
     tool: string
     /** The command, path or arguments, one line. */
     summary: string
-    /** What "always" allows in this thread: a bash program name, or the tool name. */
+    /**
+     * What "always" allows in this thread: a bash program name, `edits` for a project file edit
+     * (switches to the edits mode), or a tool name. Empty when "always" isn't offered.
+     */
     scope: string
     /** Set when a subagent's call is forwarded: the subagent's title. */
     agent?: string

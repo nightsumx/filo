@@ -59,11 +59,11 @@ pi install npm:pi-cc-tui
 | 模式 | 改文件（`edit`、`write`） | 跑命令（`bash`、`powershell`） |
 |---|---|---|
 | `bypassPermissions`（默认，即 pi 原本的行为） | 直接执行 | 直接执行 |
-| `default` | 询问 | 询问 |
-| `acceptEdits` | 直接执行 | 询问 |
+| `default` | 询问 | 询问；只读命令（`ls`、`git status`、`rg` 等）直接执行 |
+| `acceptEdits` | 项目内直接执行，项目外询问 | 同 `default` |
 | `plan` | 只开放只读工具，直到你批准方案 | 只允许只读命令 |
 
-询问框是 Claude Code 的圆角框：↑/↓ 加回车，或直接按 1–3；esc 等于 No。选项：Yes；"Yes, allow all edits during this session"（切到 `acceptEdits`）或 "don't ask again for … this session"；No，会结束本回合。print 和 JSON 模式从不询问。
+询问框是 Claude Code 的圆角框：↑/↓ 加回车，或直接按 1–3；esc 等于 No。选项：Yes；"Yes, allow all edits during this session"（切到 `acceptEdits`）或 "don't ask again for … this session"；No，会结束本回合，同一批里剩下的工具调用也一并拒绝，等你说怎么做。print 和 JSON 模式从不询问。桌面版规则相同。
 
 **Plan 模式**：模型用只读工具调研，然后调用 `propose_plan`。方案显示在 `Ready to code?` 框里：批准并自动接受修改、批准但继续逐个询问、或者写一句要改什么让它继续规划。
 

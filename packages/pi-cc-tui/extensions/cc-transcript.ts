@@ -121,6 +121,7 @@ tool.updateResult = function (result: any, ...rest: unknown[]) {
 	const text = result?.isError && content?.length === 1 && content[0].type === "text" ? content[0].text : undefined;
 	if (text && ABORT_TEXTS.has(text)) result = { ...result, content: [{ type: "text", text: "Interrupted by user" }] };
 	else if (text && /^The user declined this \S+ call\./.test(text)) result = { ...result, content: [{ type: "text", text: "No (tell pi what to do differently)" }] };
+	else if (text?.startsWith("Not run: the user declined an earlier call")) result = { ...result, content: [{ type: "text", text: "Not run" }] };
 	return updateResult.call(this, result, ...rest);
 };
 

@@ -63,7 +63,7 @@ export async function promptApproval(ctx: ExtensionContext, request: ApprovalReq
         // A subagent's request: only the path is known here.
         title = tool === 'edit' ? 'Edit file' : 'Write file'
         body = [`  ${request.summary}`]
-        always = `Yes, and don't ask again for ${tool} this session`
+        always = 'Yes, allow all edits during this session'
     }
     else {
         title = `Tool use: ${tool}`
