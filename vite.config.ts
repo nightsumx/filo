@@ -33,7 +33,8 @@ export default defineConfig(({ command }) => {
             strictCsp(),
             !process.env.VITEST && electron({
                 main: {
-                    entry: 'electron/main.ts',
+                    // The session search worker is its own entry (dist-electron/main/searchWorker.js).
+                    entry: ['electron/main.ts', 'electron/searchWorker.ts'],
                     // PI_GUI_DEBUG_PORT=9333 bun run dev exposes Chrome DevTools Protocol for automated checks.
                     onstart({ startup }) {
                         const port = process.env.PI_GUI_DEBUG_PORT

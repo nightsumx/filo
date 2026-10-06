@@ -27,6 +27,7 @@ const bridge: PiBridge = {
     listSessions: () => ipcRenderer.invoke(IPC.listSessions),
     readSession: path => ipcRenderer.invoke(IPC.readSession, path),
     trashSession: path => ipcRenderer.invoke(IPC.trashSession, path),
+    searchSessions: query => ipcRenderer.invoke(IPC.searchSessions, query),
 
     loadState: () => ipcRenderer.invoke(IPC.loadState),
     saveState: state => ipcRenderer.invoke(IPC.saveState, state),
@@ -45,6 +46,8 @@ const bridge: PiBridge = {
     closeProject: cwd => ipcRenderer.invoke(IPC.closeProject, cwd),
     mergeAllWindows: () => ipcRenderer.invoke(IPC.mergeAllWindows),
     focusWindow: () => ipcRenderer.invoke(IPC.focusWindow),
+    revealSession: (cwd, session, entryId) => ipcRenderer.invoke(IPC.revealSession, cwd, session, entryId),
+    onRevealSession: listener => listen(IPC.revealSession, listener),
     onExportProjects: handler => answer(IPC.exportProjects, handler),
     onImportProjects: handler => answer(IPC.importProjects, handler),
 

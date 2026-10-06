@@ -6,6 +6,7 @@ import { AlertTriangle, FolderPlus, Loader2, Plus } from 'lucide-react'
 import { observer } from 'mobx-react-lite'
 import { Fragment, useEffect, useRef } from 'react'
 import { ReviewPanel } from './features/Review'
+import { SearchDialog } from './features/Search'
 import { SettingsDialog } from './features/Settings'
 import { Sidebar } from './features/Sidebar'
 import { StatusBar } from './features/StatusBar'
@@ -142,6 +143,10 @@ function useShortcuts() {
                 e.preventDefault()
                 appStore.toggleSidebar()
             }
+            else if (key === 'f' && e.shiftKey) {
+                e.preventDefault()
+                appStore.setSearchOpen(!appStore.searchOpen)
+            }
         }
         window.addEventListener('keydown', onKey)
         return () => window.removeEventListener('keydown', onKey)
@@ -176,6 +181,7 @@ export const App = observer(() => {
                 )}
             </div>
             <SettingsDialog />
+            <SearchDialog />
             <Toaster position="top-center" />
         </TooltipProvider>
     )

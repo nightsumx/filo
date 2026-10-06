@@ -1,10 +1,11 @@
-import type { AgentStartOptions, GlobalCompactionPatch, StateSave, ThemePref, WindowBounds, WindowReport } from '@shared/ipc'
+import type { AgentStartOptions, GlobalCompactionPatch, SearchResult, StateSave, ThemePref, WindowBounds, WindowReport } from '@shared/ipc'
 import { APP_INFO } from '@shared/app'
 import { resolveLang } from '@shared/i18n'
 import { stat } from 'node:fs/promises'
 import path from 'node:path'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
+import { Worker } from 'node:worker_threads'
 import { DEFAULT_THEME, IPC, THEME_PREFS } from '@shared/ipc'
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, Notification, shell } from 'electron'
 import { AgentManager } from './agents'
@@ -36,6 +37,41 @@ const agents = new AgentManager({
 }, extensionsDir)
 
 const windows = new Windows({ store, create: createWindow, stopAgent: id => agents.stop(id) })
+
+/** Session search runs in a worker thread (searchWorker.ts), started on first use. */
+const search = (() => {
+    let worker: Worker | null = null
+    let next = 0
+    const pending = new Map<number, { resolve: (r: SearchResult[]) => void, reject: (e: Error) => void }>()
+    const start = () => {
+        const w = new Worker(path.join(__dirname, 'searchWorker.js'), { workerData: { cacheFile: path.join(app.getPath('userData'), 'search-index.json') } })
+        w.on('message', ({ id, ok, results, error }) => {
+            const p = pending.get(id)
+            pending.delete(id)
+            if (ok)
+                p?.resolve(results)
+            else
+                p?.reject(new Error(error))
+        })
+        w.on('error', (error) => {
+            for (const p of pending.values())
+                p.reject(error)
+            pending.clear()
+            worker = null
+        })
+        return w
+    }
+    return {
+        search(query: string): Promise<SearchResult[]> {
+            worker ??= start()
+            const id = ++next
+            return new Promise((resolve, reject) => {
+                pending.set(id, { resolve, reject })
+                worker!.postMessage({ id, query })
+            })
+        },
+    }
+})()
 
 /** Shown notifications, kept referenced so their click handlers survive garbage collection. */
 const notices = new Set<Notification>()
@@ -147,6 +183,7 @@ function registerIpc() {
     ipcMain.handle(IPC.resolveEnv, () => resolvePiEnv())
     ipcMain.handle(IPC.listSessions, () => listSessions())
     ipcMain.handle(IPC.readSession, (_e, file: string) => readSession(file))
+    ipcMain.handle(IPC.searchSessions, (_e, query: unknown) => search.search(typeof query === 'string' ? query.slice(0, 500) : ''))
     ipcMain.handle(IPC.trashSession, async (_e, file: string) => {
         await assertInSessionsDir(file)
         await shell.trashItem(file)
@@ -186,6 +223,12 @@ function registerIpc() {
     ipcMain.handle(IPC.closeProject, (e, cwd: unknown) => windows.closeProject(e.sender, absolutePath(cwd)))
     ipcMain.handle(IPC.mergeAllWindows, e => windows.mergeAll(e.sender))
     ipcMain.handle(IPC.focusWindow, e => windows.focusWindow(e.sender))
+    ipcMain.handle(IPC.revealSession, async (e, cwd: unknown, session: unknown, entryId: unknown) => {
+        if (typeof session !== 'string')
+            throw new Error('expected a session path')
+        await assertInSessionsDir(session)
+        await windows.revealSession(e.sender, absolutePath(cwd), session, typeof entryId === 'string' ? entryId : undefined)
+    })
 
     const isDirectory = (dir: string) => stat(dir).then(s => s.isDirectory(), () => false)
     ipcMain.handle(IPC.agentStart, async (e, options: AgentStartOptions) => {

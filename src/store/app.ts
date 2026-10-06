@@ -1,6 +1,6 @@
 import type { ApprovalMode, CapabilityId } from '@shared/capabilities'
 import type { LangPref } from '@shared/i18n'
-import type { AppState, GlobalCompactionPatch, GlobalPrefs, OpenProject, PiEnvResult, ProjectActivity, ProjectTransfer, RepoEdits, ReviewView, SessionSummary, StateSave, ThemePref, TranscriptLang, WindowReport } from '@shared/ipc'
+import type { AppState, GlobalCompactionPatch, GlobalPrefs, OpenProject, PiEnvResult, ProjectActivity, ProjectTransfer, RepoEdits, ReviewView, SearchResult, SessionSummary, StateSave, ThemePref, TranscriptLang, WindowReport } from '@shared/ipc'
 import { APPROVAL_MODES, DEFAULT_CAPABILITIES, normalizeCapabilities } from '@shared/capabilities'
 import { LANG_PREFS } from '@shared/i18n'
 import { DEFAULT_THEME, GLOBAL_PREF_KEYS, REVIEW_VIEWS, THEME_PREFS, TRANSCRIPT_LANGS } from '@shared/ipc'
@@ -109,6 +109,9 @@ class AppStore implements ThreadHost {
 
     reviewOpen = false
     sidebarOpen = true
+    searchOpen = false
+    /** A message to scroll a thread's transcript to (search result); `n` bumps per request. */
+    reveal: { key: string, entryId: string, n: number } | null = null
     /** Per project: the sessions that edited each uncommitted file (this app's threads and terminal pi alike). */
     edits = observable.map<string, RepoEdits['files']>()
 
@@ -291,6 +294,7 @@ class AppStore implements ThreadHost {
         api().onWindowProjects(projects => runInAction(() => this.setWindowProjects(projects)))
         api().onOpenProjects(projects => runInAction(() => (this.openProjects = projects)))
         api().onSelectProject(cwd => runInAction(() => this.windowProjects.includes(cwd) && this.showProject(cwd)))
+        api().onRevealSession((session, entryId) => void this.revealHere(session, entryId))
         api().onExportProjects(this.exportProjects)
         api().onImportProjects(this.importProjects)
         // A thread starts waiting for the user: notify once. The Dock badge counts every window's.
@@ -1071,6 +1075,35 @@ class AppStore implements ThreadHost {
                 this.showProject(projects[0].cwd)
         })
         this.persist()
+    }
+
+    setSearchOpen(open: boolean) {
+        this.searchOpen = open
+    }
+
+    /** A search result: its thread opens (in the window of its project) at the matching message. */
+    openSearchResult(result: SearchResult, entryId?: string) {
+        if (this.windowProjects.includes(result.cwd)) {
+            void this.revealHere(result.session, entryId)
+            return
+        }
+        void api().revealSession(result.cwd, result.session, entryId).catch(error => toast.error(error.message))
+    }
+
+    /** Opens a session of this window's projects as a tab, scrolled to `entryId` if given. */
+    async revealHere(session: string, entryId?: string) {
+        let summary = this.sessions.find(s => s.path === session)
+        if (!summary) {
+            await this.refreshSessions()
+            summary = this.sessions.find(s => s.path === session)
+        }
+        if (!summary || !this.windowProjects.includes(summary.cwd))
+            return
+        runInAction(() => {
+            this.openSession(summary)
+            if (entryId)
+                this.reveal = { key: summary.path, entryId, n: (this.reveal?.n ?? 0) + 1 }
+        })
     }
 
     toggleReview() {

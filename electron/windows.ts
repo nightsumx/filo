@@ -307,6 +307,17 @@ export class Windows {
         this.focus(target)
     }
 
+    /** Like openProject, then the window showing the project opens the session (at a message). */
+    async revealSession(sender: Electron.WebContents, cwd: string, session: string, entryId?: string) {
+        this.openProject(sender, cwd)
+        const owner = this.ownerOf(cwd)
+        if (!owner)
+            return
+        await owner.ready
+        this.focus(owner)
+        owner.win.webContents.send(IPC.revealSession, session, entryId)
+    }
+
     focusWindow(sender: Electron.WebContents) {
         const entry = this.entries.get(sender.id)
         if (entry)

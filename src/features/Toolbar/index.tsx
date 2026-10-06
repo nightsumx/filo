@@ -311,6 +311,9 @@ export const MainToolbar = observer(() => {
             <ProjectSwitcher />
             {project && <BranchWidget cwd={project.cwd} />}
             <span className="min-w-4 flex-1 self-stretch" />
+            <button type="button" aria-label={tr('搜索线程', 'Search threads')} title={tr('搜索线程（⌘⇧F）', 'Search threads (⌘⇧F)')} onClick={() => appStore.setSearchOpen(true)} className={iconBtn}>
+                <Search size={15} />
+            </button>
             <button
                 type="button"
                 aria-pressed={split}

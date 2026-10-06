@@ -22,6 +22,27 @@ export interface SessionSummary {
     updatedAt: number
 }
 
+/** A message that matched a full-text search. */
+export interface SearchHit {
+    entryId: string
+    role: 'user' | 'assistant'
+    at: number
+    /** Text around the first match. */
+    snippet: string
+}
+
+/** One session with matches, most recently active first. */
+export interface SearchResult {
+    session: string
+    cwd: string
+    title: string
+    updatedAt: number
+    /** The first few matching messages. */
+    hits: SearchHit[]
+    /** Matching messages in all. */
+    total: number
+}
+
 export interface SessionItem {
     /** Stable entry id from the session file. */
     entryId: string
@@ -218,6 +239,8 @@ export interface PiBridge {
     listSessions: () => Promise<SessionSummary[]>
     readSession: (path: string) => Promise<SessionSnapshot>
     trashSession: (path: string) => Promise<void>
+    /** Full-text search of prompts and replies in every session; every word must appear. */
+    searchSessions: (query: string) => Promise<SearchResult[]>
 
     loadState: () => Promise<AppState>
     saveState: (save: StateSave) => Promise<void>
@@ -240,6 +263,13 @@ export interface PiBridge {
      * window showing it was focused, or a new window opened for it.
      */
     openProject: (cwd: string) => Promise<'here' | 'elsewhere'>
+    /**
+     * Opens a session in the window showing its project (focused), or in a new window; the window
+     * then gets onRevealSession. Used when the project is not in this window.
+     */
+    revealSession: (cwd: string, session: string, entryId?: string) => Promise<void>
+    /** Main asks this window to open a session of one of its projects and scroll to a message. */
+    onRevealSession: (listener: (session: string, entryId?: string) => void) => () => void
     /** Shows a project in this window too, taking it (and its live threads) from its window. */
     attachProject: (cwd: string) => Promise<void>
     /** Moves one of this window's projects into a window of its own. */
@@ -307,6 +337,7 @@ export const IPC = {
     listSessions: 'sessions:list',
     readSession: 'sessions:read',
     trashSession: 'sessions:trash',
+    searchSessions: 'sessions:search',
     loadState: 'state:load',
     saveState: 'state:save',
     pickFolder: 'dialog:pick-folder',
@@ -347,6 +378,7 @@ export const IPC = {
     closeProject: 'window:close-project',
     mergeAllWindows: 'window:merge-all',
     focusWindow: 'window:focus',
+    revealSession: 'window:reveal-session',
     exportProjects: 'window:export-projects',
     importProjects: 'window:import-projects',
     /** Renderer → main answer to a main → renderer request (export/import). */

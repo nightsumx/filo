@@ -168,6 +168,42 @@ export const MessageList = observer(({ thread }: { thread: Thread }) => {
         toggleFold(pinnedRow.turn.key)
     }
 
+    // Search opened this thread at a message: scroll there (unfolding its turn if the message is in
+    // a folded process) and flash it.
+    const reveal = appStore.reveal
+    const revealed = useRef(0)
+    const [flash, setFlash] = useState<string | null>(null)
+    useEffect(() => {
+        if (!reveal || reveal.key !== thread.key || revealed.current === reveal.n)
+            return
+        const prefix = `${reveal.entryId}:`
+        const matches = (key: string) => key.startsWith(prefix) || key.startsWith(`group:${prefix}`)
+        const index = rows.findIndex(r => matches(r.key))
+        if (index === -1) {
+            const turn = turns.find(t => t.key === reveal.entryId || t.steps.some(st => st.key.startsWith(prefix)))
+            if (turn && !openTurns.has(turn.key)) {
+                toggleFold(turn.key)
+                return
+            }
+            // Not on screen yet (still loading), or not on the active branch.
+            if (thread.loaded)
+                revealed.current = reveal.n
+            return
+        }
+        revealed.current = reveal.n
+        stick.current = false
+        virtualizer.scrollToIndex(index, { align: 'center' })
+        // Rows above get measured as they mount; a second pass lands exactly.
+        requestAnimationFrame(() => virtualizer.scrollToIndex(index, { align: 'center' }))
+        setFlash(rows[index].key)
+    }, [reveal, rows, turns, openTurns, thread, toggleFold, virtualizer])
+    useEffect(() => {
+        if (!flash)
+            return
+        const timer = setTimeout(() => setFlash(null), 1600)
+        return () => clearTimeout(timer)
+    }, [flash])
+
     const items = virtualizer.getVirtualItems()
 
     return (
@@ -196,6 +232,8 @@ export const MessageList = observer(({ thread }: { thread: Thread }) => {
                                                             ref={virtualizer.measureElement}
                                                             data-index={item.index}
                                                             data-row-kind={rows[item.index].kind}
+                                                            data-revealed={flash === rows[item.index].key || undefined}
+                                                            className="rounded-md transition-colors duration-700 data-[revealed]:bg-amber-400/15"
                                                         >
                                                             <TranscriptRowView row={rows[item.index]} thread={thread} top={item.index === 0} />
                                                         </div>
