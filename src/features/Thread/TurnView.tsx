@@ -1,7 +1,7 @@
 import type { Step, Turn, UserPrompt } from '@/lib/timeline'
+import type { TranscriptRow } from '@/lib/transcriptRows'
 import type { Thread } from '@/store/thread'
 import { ActionBtn } from '@/components/ActionBtn'
-import { groupSteps } from '@/lib/timeline'
 import { useT, verbFor } from '@/lib/transcriptText'
 import { cn } from '@/lib/utils'
 import copyText from 'copy-to-clipboard'
@@ -34,7 +34,7 @@ function CopyAction({ text }: { text: string }) {
 // User prompt: a full-width block, like the highlighted prompt line in a JetBrains terminal / AI chat.
 function UserBubble({ user }: { user: UserPrompt }) {
     return (
-        <div className="group relative flex flex-col gap-2 rounded-md bg-gray-50 px-3 py-2 dark:bg-gray-100">
+        <div className="group relative flex flex-col gap-2 rounded-md bg-ide-block px-3 py-2">
             {user.images.length > 0 && (
                 <div className="flex flex-wrap gap-2">
                     {user.images.map((img, i) => (
@@ -114,38 +114,44 @@ const StreamingSteps = observer(({ thread }: { thread: Thread }) => (
     </>
 ))
 
-export const TurnView = memo(({ turn, thread, isLast }: { turn: Turn, thread: Thread, isLast: boolean }) => {
+/** One virtualized transcript row; spacing reproduces the old per-turn layout (gap 12px, 24px between turns). */
+export const TranscriptRowView = memo(({ row, thread, top }: { row: TranscriptRow, thread: Thread, top: boolean }) => {
     const t = useT()
-    const items = groupSteps(turn.steps)
-    const finalText = turn.steps.filter(s => s.kind === 'text').map(s => (s as { text: string }).text).slice(-1).join('')
-    const ms = turn.endedAt - turn.startedAt
-    const hasWork = turn.steps.some(s => s.kind === 'tool' || s.kind === 'text' || s.kind === 'thinking')
-
-    return (
-        <div className="group/turn flex flex-col gap-3 py-3">
-            {turn.user && <UserBubble user={turn.user} />}
-            {items.map(item => item.kind === 'group'
-                ? <ToolGroup key={item.key} steps={item.steps} />
-                : <StepView key={item.step.key} step={item.step} />)}
-            {isLast && turn.running && (
-                <>
+    const pad = row.first && !top ? 'pt-6' : 'pt-3'
+    switch (row.kind) {
+        case 'user':
+            return <div className={pad}><UserBubble user={row.user} /></div>
+        case 'item':
+            return (
+                <div className={pad}>
+                    {row.item.kind === 'group' ? <ToolGroup steps={row.item.steps} /> : <StepView step={row.item.step} />}
+                </div>
+            )
+        case 'live':
+            return (
+                <div className={cn(pad, 'flex flex-col gap-3')}>
                     <StreamingSteps thread={thread} />
-                    <RunningLine thread={thread} turn={turn} />
-                </>
-            )}
-            {!turn.running && turn.user && hasWork && (
-                // cc-tui's closing entry: "✻ Worked for 3m 12s · done 4:12 PM".
-                <Gutter mark="✻" markClassName="text-gray-400">
-                    <div className="flex h-6 items-center gap-2 text-[12.5px] text-gray-500">
-                        <span>{ms > 1000 ? t.workedFor(verbFor(t, turn.key)[1], t.duration(ms), t.clock(turn.endedAt)) : t.doneAt(t.clock(turn.endedAt))}</span>
-                        {finalText && (
-                            <span className="opacity-0 transition-opacity group-hover/turn:opacity-100">
-                                <CopyAction text={finalText} />
-                            </span>
-                        )}
-                    </div>
-                </Gutter>
-            )}
-        </div>
-    )
+                    <RunningLine thread={thread} turn={row.turn} />
+                </div>
+            )
+        case 'footer': {
+            // cc-tui's closing entry: "✻ Worked for 3m 12s · done 4:12 PM".
+            const { turn } = row
+            const ms = turn.endedAt - turn.startedAt
+            return (
+                <div className={cn(pad, 'group/turn')}>
+                    <Gutter mark="✻" markClassName="text-gray-400">
+                        <div className="flex h-6 items-center gap-2 text-[12.5px] text-gray-500">
+                            <span>{ms > 1000 ? t.workedFor(verbFor(t, turn.key)[1], t.duration(ms), t.clock(turn.endedAt)) : t.doneAt(t.clock(turn.endedAt))}</span>
+                            {row.finalText && (
+                                <span className="opacity-0 transition-opacity group-hover/turn:opacity-100">
+                                    <CopyAction text={row.finalText} />
+                                </span>
+                            )}
+                        </div>
+                    </Gutter>
+                </div>
+            )
+        }
+    }
 })

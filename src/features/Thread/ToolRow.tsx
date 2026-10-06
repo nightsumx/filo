@@ -11,6 +11,7 @@ import { diffFromContent, diffFromEdits, diffFromPatch } from '@/lib/diffModel'
 import { formatToolInput, tuiSummary, tuiTitle } from '@/lib/toolMeta'
 import { useT } from '@/lib/transcriptText'
 import { cn } from '@/lib/utils'
+import { useViewState } from './viewState'
 import { createContext, memo, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 
 /** Thread cwd, so absolute paths in tool calls print relative like the TUI. */
@@ -125,9 +126,9 @@ function Delta({ added, removed }: { added: number, removed: number }) {
 }
 
 /** One Input / Output section of an expanded tool: tree branch, label, clipped mono body. */
-function IoSection({ label, body, last, maxLines, error }: { label: string, body: string, last: boolean, maxLines: number, error?: boolean }) {
+function IoSection({ id, label, body, last, maxLines, error }: { id: string, label: string, body: string, last: boolean, maxLines: number, error?: boolean }) {
     const t = useT()
-    const [full, setFull] = useState(false)
+    const [full, setFull] = useViewState(id, false)
     const lines = body.replace(/\n+$/, '').split('\n')
     const clipped = !full && lines.length > maxLines
     const shown = clipped ? lines.slice(0, maxLines).join('\n') : lines.join('\n')
@@ -155,9 +156,9 @@ function IoSection({ label, body, last, maxLines, error }: { label: string, body
 function IoPanel({ call, output, error }: { call: ToolCall, output: string, error: boolean }) {
     const input = formatToolInput(call.arguments)
     return (
-        <div className="mt-1 flex flex-col gap-1 rounded-md bg-[var(--bg-side)] px-3 py-2 font-mono text-[12px] dark:border dark:border-gray-100">
-            {input && <IoSection label="Input" body={input} last={false} maxLines={INPUT_PREVIEW_LINES} />}
-            <IoSection label="Output" body={output} last maxLines={OUTPUT_PREVIEW_LINES} error={error} />
+        <div className="mt-1 flex flex-col gap-1 rounded-md bg-ide-block px-3 py-2 font-mono text-[12px]">
+            {input && <IoSection id={`io:${call.id}:in`} label="Input" body={input} last={false} maxLines={INPUT_PREVIEW_LINES} />}
+            <IoSection id={`io:${call.id}:out`} label="Output" body={output} last maxLines={OUTPUT_PREVIEW_LINES} error={error} />
         </div>
     )
 }
@@ -187,7 +188,7 @@ function LiveTail({ text }: { text: string }) {
 export const ToolRow = memo(({ call, result, running }: { call: ToolCall, result?: ToolResultView, running: boolean }) => {
     const cwd = useContext(CwdContext)
     const t = useT()
-    const [expanded, setExpanded] = useState(false)
+    const [expanded, setExpanded] = useViewState(`tool:${call.id}`, false)
     const [bodyRef, width] = useWidth<HTMLDivElement>()
     const status = statusOf({ result, running })
     const failed = status === 'error'
@@ -307,7 +308,7 @@ export const ToolRow = memo(({ call, result, running }: { call: ToolCall, result
 export const ToolGroup = memo(({ steps }: { steps: ToolStep[] }) => {
     const cwd = useContext(CwdContext)
     const t = useT()
-    const [expanded, setExpanded] = useState(false)
+    const [expanded, setExpanded] = useViewState(`group:${steps[0].call.id}`, false)
     const statuses = steps.map(statusOf)
     const counts = { running: 0, success: 0, error: 0 }
     statuses.forEach(s => counts[s]++)
@@ -342,7 +343,7 @@ export const ToolGroup = memo(({ steps }: { steps: ToolStep[] }) => {
                 </button>
                 {expanded
                     ? (
-                            <div className="mt-1 flex flex-col gap-1.5 rounded-md bg-[var(--bg-side)] py-2 pl-1 pr-3 dark:border dark:border-gray-100">
+                            <div className="mt-1 flex flex-col gap-1.5 rounded-md bg-ide-block py-2 pl-1 pr-3">
                                 {steps.map(step => <ToolRow key={step.key} call={step.call} result={step.result} running={step.running} />)}
                             </div>
                         )

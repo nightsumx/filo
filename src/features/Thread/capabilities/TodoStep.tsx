@@ -5,8 +5,9 @@ import type { ToolCall } from '@shared/pi'
 import type { ToolResultView } from '@/lib/timeline'
 import { useT } from '@/lib/transcriptText'
 import { cn } from '@/lib/utils'
-import { memo, useState } from 'react'
+import { memo } from 'react'
 import { Gutter, StatusMark } from '../ToolRow'
+import { useViewState } from '../viewState'
 
 /** Items from the result, or from the streamed arguments while the call is still running. */
 function itemsOf(call: ToolCall, result?: ToolResultView): TodoItem[] {
@@ -39,7 +40,7 @@ export function TodoList({ items, className }: { items: TodoItem[], className?: 
 
 export const TodoStep = memo(({ call, result, running }: { call: ToolCall, result?: ToolResultView, running: boolean }) => {
     const t = useT()
-    const [expanded, setExpanded] = useState(false)
+    const [expanded, setExpanded] = useViewState(`todo:${call.id}`, false)
     const items = itemsOf(call, result)
     const done = items.filter(i => i.status === 'done').length
     const current = items.find(i => i.status === 'in_progress')
