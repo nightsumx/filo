@@ -67,14 +67,22 @@ export default function (pi: ExtensionAPI) {
 			return { content: [{ type: "text", text }], details: { todos } };
 		},
 
-		renderCall(_args, theme) {
-			return new Text(theme.bold("Update Todos"), 0, 0);
+		// Drawn without pi's tool box, like Claude Code: "⏺ Update Todos" with the list hanging under "⎿".
+		renderShell: "self",
+
+		renderCall(_args, theme, context) {
+			const dot = context.isError ? theme.fg("error", "⏺") : context.executionStarted && !context.isPartial ? theme.fg("success", "⏺") : theme.fg("dim", "⏺");
+			return new Text(`${dot} ${theme.bold("Update Todos")}`, 0, 0);
 		},
 
-		renderResult(result, _options, theme) {
+		renderResult(result, _options, theme, context) {
 			const todos = (result.details as { todos?: Todo[] } | undefined)?.todos;
-			if (!todos?.length) return new Text(theme.fg("dim", "⎿  (no todos)"), 0, 0);
-			return new Text(renderTodos(todos, theme), 0, 0);
+			if (context.isError) {
+				const text = result.content.find((c) => c.type === "text")?.text ?? "Error";
+				return new Text(`${theme.fg("dim", "  ⎿  ")}${theme.fg("error", text)}`, 0, 0);
+			}
+			if (!todos?.length) return new Text(theme.fg("dim", "  ⎿  (no todos)"), 0, 0);
+			return new Text(renderTodos(todos, theme, theme.fg("dim", "  ⎿  "), "     "), 0, 0);
 		},
 	});
 

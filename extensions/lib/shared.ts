@@ -15,8 +15,10 @@ export interface Shared {
 	mode: PermissionMode;
 	todos: Todo[];
 	showShortcuts: boolean;
-	/** Live UI handle, used to pick the light or dark palette. */
-	ui?: { theme?: { appearance?: string } };
+	/** Until this time (ms), the second status row reads "Press ctrl+c again to exit". */
+	exitHintUntil: number;
+	/** Live UI handle, used for the active theme (light/dark palette, message background). */
+	ui?: { theme?: { appearance?: string; fg?(color: string, s: string): string; bg?(color: string, s: string): string } };
 }
 
 const KEY = Symbol.for("pi-cc-tui.shared");
@@ -25,6 +27,7 @@ export const shared: Shared = ((globalThis as any)[KEY] ??= {
 	mode: "bypassPermissions",
 	todos: [],
 	showShortcuts: false,
+	exitHintUntil: 0,
 } satisfies Shared);
 
 /** Key label for a pi keybinding, with Claude Code's "esc" spelling. */

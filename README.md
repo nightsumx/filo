@@ -46,7 +46,11 @@ Try it once without installing: `pi -e npm:pi-cc-tui`
 
 **Working line** — `✻ Brewing… (12s · ↓ 1.2k tokens · thinking · esc to interrupt)` above the input instead of inside its border, with `⎿  Tip: …` or the todo list under it, and `✻ Brewed for 34s · done 7:09 PM` when the turn ends. While a todo is in progress, its `activeForm` ("Running tests…") replaces the random verb.
 
-**Interrupts and queued messages** — esc leaves `⎿  Interrupted by user` instead of `Operation aborted`. Messages typed while pi works show as gray `❯ …` lines instead of `Steering: …`.
+**Interrupts, errors and queued messages** — esc leaves `⎿  Interrupted by user` instead of `Operation aborted`, and failed requests read `⎿  API Error: 529 …`. While pi retries, the working line becomes `⎿  API Error (Overloaded) · Retrying in 3 seconds… (attempt 1/10)`. Messages typed while pi works show as gray `❯ …` lines instead of `Steering: …`.
+
+**`!` commands** — `! cmd` on the user-message background with the output under `⎿`, instead of a bordered `$ cmd` box. pi's 20-line tail preview, ctrl+o expansion and truncation notes stay.
+
+**Exit** — the first ctrl+c shows `Press ctrl+c again to exit` in the second status row; a second press within 800ms exits (pi's own window is 500ms, with no hint).
 
 **Permission modes** — option+m (alt+m off macOS) cycles Claude Code's modes; pi keeps shift+tab for thinking levels. `/permissions` picks one, `--permission-mode <mode>` sets the starting mode.
 
@@ -57,9 +61,9 @@ Try it once without installing: `pi -e npm:pi-cc-tui`
 | `acceptEdits` | run | ask |
 | `plan` | blocked, and the model is told to plan first | ask |
 
-The prompt offers Yes, "Yes, allow all edits during this session" (switches to `acceptEdits`) or "don't ask again for this command", and No, which stops the turn. Print and JSON modes never ask.
+The prompt is Claude Code's rounded box: ↑/↓ and enter, or press 1–3 directly; esc means No. It offers Yes, "Yes, allow all edits during this session" (switches to `acceptEdits`) or "don't ask again for this command", and No, which stops the turn. Print and JSON modes never ask.
 
-**Todos** — a `TodoWrite` tool with Claude Code's schema (`content`, `status`, `activeForm`), drawn as `☐` / bold `☐` / struck-through `☒`. The list follows the session branch. `/todos` prints it.
+**Todos** — a `TodoWrite` tool with Claude Code's schema (`content`, `status`, `activeForm`), drawn as `⏺ Update Todos` with `☐` / bold `☐` / struck-through `☒` under it. The list follows the session branch. `/todos` prints it.
 
 **Compaction** — `· Compacting conversation… (1m 37s · ↓ 2.1k tokens · esc to cancel)` with a `▰▰▰▱▱▱ 60%` bar underneath, for both `/compact` and auto-compaction. pi's default summarizer still runs; the bar is an estimate from streamed summary tokens (the final length isn't known up front), so it eases toward 99% instead of tracking exact completion.
 

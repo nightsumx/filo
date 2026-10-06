@@ -7,6 +7,7 @@ const ARROW = 108, DIR = 110, MODEL = 141, MUTED = 244, WARN = 179, DANGER = 174
 
 // Claude Code's second row: permission mode (or "? for shortcuts") on the left, auto-compact on the right.
 const modeHint = (editorText: string) => {
+	if (Date.now() < shared.exitHintUntil) return c(MUTED, `Press ${key("app.clear")} again to exit`);
 	if (editorText.trimStart().startsWith("!")) return c(COLOR.bash, "! for bash mode");
 	const cycle = c(MUTED, ` (${MODE_KEY} to cycle)`);
 	switch (shared.mode) {

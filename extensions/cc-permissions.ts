@@ -1,7 +1,8 @@
 import { existsSync } from "node:fs";
 import { basename, isAbsolute, resolve } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { REJECTED, shared, type PermissionMode } from "./lib/shared.ts";
+import { matchesKey, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
+import { COLOR, fg, REJECTED, shared, type PermissionMode } from "./lib/shared.ts";
 
 // Claude Code's shift+tab order. pi keeps shift+tab for thinking levels, so alt+m cycles here
 // (the key Claude Code itself uses where shift+tab is unavailable).
@@ -22,11 +23,66 @@ const PLAN_REMINDER =
 
 const isMode = (value: unknown): value is PermissionMode => CYCLE.includes(value as PermissionMode);
 
-const preview = (text: string, sign: string, max = 8) => {
+const preview = (text: string, sign: string, max = 8, color = (s: string) => s) => {
 	const lines = text.replace(/\n$/, "").split("\n");
-	const shown = lines.slice(0, max).map((line) => `  ${sign} ${line}`);
-	if (lines.length > max) shown.push(`  … ${lines.length - max} more lines`);
-	return shown.join("\n");
+	const shown = lines.slice(0, max).map((line) => color(sign ? `  ${sign} ${line}` : `  ${line}`));
+	if (lines.length > max) shown.push(fg(COLOR.muted, `  … ${lines.length - max} more lines`));
+	return shown;
+};
+
+interface Prompt {
+	title: string;
+	body: string[];
+	question: string;
+	options: string[];
+}
+
+// Claude Code's permission dialog: a rounded box with numbered choices, ❯ on the selected one.
+// 1-9 pick directly, enter confirms, esc / ctrl+c choose the last option ("No").
+const choose = async (ctx: ExtensionContext, prompt: Prompt): Promise<number> => {
+	const { title, body, question, options } = prompt;
+	const no = options.length - 1;
+	if (ctx.mode !== "tui") {
+		const labels = options.map((o, i) => `${i + 1}. ${o}`);
+		const choice = await ctx.ui.select([title, "", ...body, "", question].join("\n"), labels);
+		return choice ? labels.indexOf(choice) : no;
+	}
+	return ctx.ui.custom<number>((tui, _theme, _kb, done) => {
+		let selected = 0;
+		const accent = (s: string) => fg(COLOR.suggestion, s);
+		return {
+			invalidate() {},
+			handleInput(data: string) {
+				const digit = Number(data);
+				if (Number.isInteger(digit) && digit >= 1 && digit <= options.length) return done(digit - 1);
+				if (matchesKey(data, "up")) selected = (selected + options.length - 1) % options.length;
+				else if (matchesKey(data, "down") || matchesKey(data, "tab")) selected = (selected + 1) % options.length;
+				else if (matchesKey(data, "enter")) return done(selected);
+				else if (matchesKey(data, "escape") || matchesKey(data, "ctrl+c")) return done(no);
+				else return;
+				tui.requestRender();
+			},
+			render(width: number) {
+				const inner = Math.max(1, width - 4);
+				const rows = [
+					`\x1b[1m${accent(title)}\x1b[22m`,
+					"",
+					...body,
+					"",
+					question,
+					...options.map((o, i) => (i === selected ? accent(`❯ ${i + 1}. ${o}`) : `  ${i + 1}. ${o}`)),
+				];
+				const lines = rows
+					.flatMap((row) => (row ? wrapTextWithAnsi(row, inner) : [""]))
+					.map((line) => {
+						const text = truncateToWidth(line, inner, "");
+						return `${accent("│")} ${text}${" ".repeat(Math.max(0, inner - visibleWidth(text)))} ${accent("│")}`;
+					});
+				const rule = "─".repeat(Math.max(0, width - 2));
+				return [accent(`╭${rule}╮`), ...lines, accent(`╰${rule}╯`)];
+			},
+		};
+	});
 };
 
 export default function (pi: ExtensionAPI) {
@@ -93,30 +149,41 @@ export default function (pi: ExtensionAPI) {
 		// Print/JSON modes can't ask; keep pi's default of running the tool.
 		if (!ctx.hasUI) return undefined;
 
-		let title: string;
-		let always: string;
+		let prompt: Prompt;
+		const no = "No, and tell pi what to do differently (esc)";
 		if (SHELL_TOOLS.has(name)) {
 			const command = String(input.command ?? "").trim();
-			title = `${name === "bash" ? "Bash" : "PowerShell"} command\n\n${preview(command, " ", 12)}\n${input.description ? `  ${input.description}\n` : ""}\nDo you want to proceed?`;
-			always = "Yes, and don't ask again for this command this session";
+			prompt = {
+				title: `${name === "bash" ? "Bash" : "PowerShell"} command`,
+				body: [...preview(command, "", 12), ...(input.description ? [fg(COLOR.muted, `  ${input.description}`)] : [])],
+				question: "Do you want to proceed?",
+				options: ["Yes", "Yes, and don't ask again for this command this session", no],
+			};
 		} else {
 			const path = String(input.path ?? input.file_path ?? "");
 			const abs = isAbsolute(path) ? path : resolve(ctx.cwd, path);
+			const removed = (s: string) => ctx.ui.theme.fg("toolDiffRemoved", s);
+			const added = (s: string) => ctx.ui.theme.fg("toolDiffAdded", s);
 			const body =
 				name === "edit"
-					? (Array.isArray(input.edits) ? input.edits : [input])
-							.map((e: any) => `${preview(String(e.oldText ?? e.old_string ?? ""), "-", 4)}\n${preview(String(e.newText ?? e.new_string ?? ""), "+", 4)}`)
-							.join("\n\n")
-					: preview(String(input.content ?? ""), "+");
+					? (Array.isArray(input.edits) ? input.edits : [input]).flatMap((e: any, i: number) => [
+							...(i ? [""] : []),
+							...preview(String(e.oldText ?? e.old_string ?? ""), "-", 4, removed),
+							...preview(String(e.newText ?? e.new_string ?? ""), "+", 4, added),
+						])
+					: preview(String(input.content ?? ""), "+", 8, added);
 			const verb = name === "edit" ? "Edit file" : existsSync(abs) ? "Overwrite file" : "Create file";
-			title = `${verb}  ${path}\n\n${body}\n\nDo you want to ${name === "edit" ? "make this edit to" : verb === "Create file" ? "create" : "overwrite"} ${basename(path)}?`;
-			always = "Yes, allow all edits during this session";
+			prompt = {
+				title: verb,
+				body: [fg(COLOR.muted, path), "", ...body],
+				question: `Do you want to ${name === "edit" ? "make this edit to" : verb === "Create file" ? "create" : "overwrite"} ${basename(path)}?`,
+				options: ["Yes", "Yes, allow all edits during this session", no],
+			};
 		}
 
-		const options = ["1. Yes", `2. ${always}`, "3. No, and tell pi what to do differently (esc)"];
-		const choice = await ctx.ui.select(title, options);
-		if (choice === options[0]) return undefined;
-		if (choice === options[1]) {
+		const choice = await choose(ctx, prompt);
+		if (choice === 0) return undefined;
+		if (choice === 1) {
 			if (SHELL_TOOLS.has(name)) allowedCommands.add(String(input.command ?? "").trim());
 			else shared.mode = "acceptEdits";
 			return undefined;

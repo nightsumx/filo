@@ -48,7 +48,11 @@ pi install npm:pi-cc-tui
 
 **进度行**：`✻ Brewing… (12s · ↓ 1.2k tokens · thinking · esc to interrupt)` 放在输入框上方，不再嵌进边框，下面一行是 `⎿  Tip: …` 或 todo 列表；回合结束留一行 `✻ Brewed for 34s · done 7:09 PM`。有进行中的 todo 时，用它的 `activeForm`（"Running tests…"）代替随机动词。
 
-**中断和排队消息**：按 esc 中断后显示 `⎿  Interrupted by user`，不再是 `Operation aborted`。pi 工作时输入的消息显示成灰色 `❯ …`，不再是 `Steering: …`。
+**中断、报错和排队消息**：按 esc 中断后显示 `⎿  Interrupted by user`，不再是 `Operation aborted`；请求失败显示 `⎿  API Error: 529 …`。pi 自动重试时，进度行变成 `⎿  API Error (Overloaded) · Retrying in 3 seconds… (attempt 1/10)`。pi 工作时输入的消息显示成灰色 `❯ …`，不再是 `Steering: …`。
+
+**`!` 命令**：`! cmd` 用用户消息的底色，输出挂在 `⎿` 下面，不再是带上下边框的 `$ cmd`。pi 的 20 行尾部预览、ctrl+o 展开、截断提示都保留。
+
+**退出**：第一次按 ctrl+c，状态栏第二行显示 `Press ctrl+c again to exit`；800ms 内再按一次退出（pi 原本是 500ms，没有提示）。
 
 **权限模式**：option+m（非 macOS 是 alt+m）切换 Claude Code 的几种模式；shift+tab 仍归 pi 切换思考强度。`/permissions` 直接选，`--permission-mode <mode>` 设启动模式。
 
@@ -59,9 +63,9 @@ pi install npm:pi-cc-tui
 | `acceptEdits` | 直接执行 | 询问 |
 | `plan` | 拦下，并提示模型先出方案 | 询问 |
 
-询问框的选项：Yes；"Yes, allow all edits during this session"（切到 `acceptEdits`）或 "don't ask again for this command"；No，会结束本回合。print 和 JSON 模式从不询问。
+询问框是 Claude Code 的圆角框：↑/↓ 加回车，或直接按 1–3；esc 等于 No。选项：Yes；"Yes, allow all edits during this session"（切到 `acceptEdits`）或 "don't ask again for this command"；No，会结束本回合。print 和 JSON 模式从不询问。
 
-**Todo**：`TodoWrite` 工具，参数和 Claude Code 一样（`content`、`status`、`activeForm`），显示成 `☐` / 加粗 `☐` / 划线 `☒`。列表跟随会话分支。`/todos` 打印当前列表。
+**Todo**：`TodoWrite` 工具，参数和 Claude Code 一样（`content`、`status`、`activeForm`），显示成 `⏺ Update Todos`，下面是 `☐` / 加粗 `☐` / 划线 `☒`。列表跟随会话分支。`/todos` 打印当前列表。
 
 **压缩进度**：`/compact` 和自动压缩时显示 `· Compacting conversation… (1m 37s · ↓ 2.1k tokens · esc to cancel)`，下面一行 `▰▰▰▱▱▱ 60%` 进度条。仍然走 pi 默认的摘要逻辑；摘要最终长度事先未知，进度按已流出的 token 估算，逐渐逼近 99%，不是精确完成度。
 
