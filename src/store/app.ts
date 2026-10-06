@@ -1,12 +1,14 @@
 import type { ApprovalMode, CapabilityId } from '@shared/capabilities'
 import type { LangPref } from '@shared/i18n'
-import type { AppState, GlobalCompactionPatch, GlobalPrefs, OpenProject, PiEnvResult, ProjectActivity, ProjectTransfer, ReviewView, SessionSummary, StateSave, ThemePref, TranscriptLang, WindowReport } from '@shared/ipc'
+import type { AppState, GlobalCompactionPatch, GlobalPrefs, OpenProject, PiEnvResult, ProjectActivity, ProjectTransfer, RepoEdits, ReviewView, SessionSummary, StateSave, ThemePref, TranscriptLang, WindowReport } from '@shared/ipc'
 import { APPROVAL_MODES, DEFAULT_CAPABILITIES, normalizeCapabilities } from '@shared/capabilities'
 import { LANG_PREFS } from '@shared/i18n'
 import { DEFAULT_THEME, GLOBAL_PREF_KEYS, REVIEW_VIEWS, THEME_PREFS, TRANSCRIPT_LANGS } from '@shared/ipc'
 import type { PiEvent, PiModel } from '@shared/pi'
 import type { ThreadHost } from './thread'
 import type { ModelWindow } from '@/lib/compactAt'
+import type { Conflict } from '@/lib/edits'
+import { conflictsOf } from '@/lib/edits'
 import { autoReserve, inferCompactAt, syncReserves } from '@/lib/compactAt'
 import { applyLangPref, tr } from '@/lib/i18n'
 import { waitingLabel } from '@/lib/threadActivity'
@@ -16,6 +18,9 @@ import { toast } from 'sonner'
 import { Thread } from './thread'
 
 const api = () => window.pi
+
+/** Terminal pi's edits are only seen on disk; how often a visible window re-reads them. */
+const EDITS_POLL_MS = 15_000
 
 /** First line of the final answer of a thread's last turn, for the "done" notification. */
 function lastAnswer(thread: Thread): string {
@@ -104,8 +109,13 @@ class AppStore implements ThreadHost {
 
     reviewOpen = false
     sidebarOpen = true
+    /** Per project: the sessions that edited each uncommitted file (this app's threads and terminal pi alike). */
+    edits = observable.map<string, RepoEdits['files']>()
 
     private agentThreads = new Map<string, Thread>()
+    /** Pending edit-log refreshes per project (debounced; one request in flight at a time). */
+    private editsQueued = new Map<string, ReturnType<typeof setTimeout>>()
+    private editsLoading = new Set<string>()
     private eventQueue: [string, PiEvent][] = []
     private flushTimer: ReturnType<typeof setTimeout> | null = null
     /** JSON of each shared setting as main last has it, so saves carry only what this window changed. */
@@ -115,8 +125,10 @@ class AppStore implements ThreadHost {
     private ready = false
 
     constructor() {
-        makeAutoObservable<this, 'agentThreads' | 'eventQueue' | 'flushTimer' | 'sentPrefs' | 'sentTabs' | 'ready' | 'reconciling'>(this, {
+        makeAutoObservable<this, 'agentThreads' | 'eventQueue' | 'flushTimer' | 'sentPrefs' | 'sentTabs' | 'ready' | 'reconciling' | 'editsQueued' | 'editsLoading'>(this, {
             agentThreads: false,
+            editsQueued: false,
+            editsLoading: false,
             reconciling: false,
             eventQueue: false,
             flushTimer: false,
@@ -226,6 +238,11 @@ class AppStore implements ThreadHost {
         return [...windows].map(([key, contextWindow]) => ({ key, contextWindow }))
     }
 
+    /** Files a session (thread) changed that another session changed too since the last commit. */
+    conflictsOf(cwd: string, session: string | undefined): Conflict[] {
+        return conflictsOf(this.edits.get(cwd), session)
+    }
+
     isVisible(thread: Thread): boolean {
         return this.visibleTabs.includes(thread)
     }
@@ -291,7 +308,26 @@ class AppStore implements ThreadHost {
         )
         // Gives models pi lists for the first time (or after an update) the global compaction point.
         reaction(() => [this.modelWindows.length, this.compactAt], () => void this.reconcileCompaction())
-        window.addEventListener('focus', () => void this.refreshSessions())
+        window.addEventListener('focus', () => {
+            void this.refreshSessions()
+            this.windowProjects.forEach(cwd => this.refreshEdits(cwd))
+        })
+        // Edits by this window's threads show up as they land; terminal pi's on the poll.
+        reaction(
+            () => this.windowProjects.map(cwd => [cwd, this.tabsOf(cwd).reduce((n, t) => n + t.changeTick, 0)] as const),
+            (ticks, previous) => {
+                const before = new Map(previous ?? [])
+                for (const [cwd, tick] of ticks) {
+                    if (before.get(cwd) !== tick)
+                        this.refreshEdits(cwd)
+                }
+            },
+            { equals: (a, b) => JSON.stringify(a) === JSON.stringify(b), fireImmediately: true },
+        )
+        setInterval(() => {
+            if (document.visibilityState === 'visible')
+                this.windowProjects.forEach(cwd => this.refreshEdits(cwd))
+        }, EDITS_POLL_MS)
         setInterval(this.stopIdleAgents, IDLE_SWEEP_MS)
 
         const [env, state, win] = await Promise.all([api().resolveEnv(), api().loadState(), api().windowInit()])
@@ -354,6 +390,32 @@ class AppStore implements ThreadHost {
         }
         if (this.ready)
             await this.refreshMissing()
+    }
+
+    /** Re-reads the edit log for a project soon; bursts of tool calls collapse into one read. */
+    refreshEdits(cwd: string) {
+        clearTimeout(this.editsQueued.get(cwd))
+        this.editsQueued.set(cwd, setTimeout(async () => {
+            this.editsQueued.delete(cwd)
+            if (this.editsLoading.has(cwd)) {
+                this.refreshEdits(cwd)
+                return
+            }
+            this.editsLoading.add(cwd)
+            try {
+                const { files } = await api().repoEdits(cwd)
+                runInAction(() => {
+                    if (JSON.stringify(files) !== JSON.stringify(this.edits.get(cwd)))
+                        this.edits.set(cwd, files)
+                })
+            }
+            catch {
+                // Not a repo, or the folder is gone: nothing to show.
+            }
+            finally {
+                this.editsLoading.delete(cwd)
+            }
+        }, 300))
     }
 
     private async refreshMissing() {

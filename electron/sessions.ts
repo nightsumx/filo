@@ -23,7 +23,7 @@ export async function sessionsDir(): Promise<string> {
     return path.join(agentDir, 'sessions')
 }
 
-function parseLines(text: string): any[] {
+export function parseLines(text: string): any[] {
     const entries: any[] = []
     for (const line of text.split('\n')) {
         if (!line.trim())
@@ -147,7 +147,8 @@ async function readExcerpt(filePath: string, size: number): Promise<string> {
 
 const summaryCache = new Map<string, { key: string, summary: SessionSummary | null }>()
 
-export async function listSessions(): Promise<SessionSummary[]> {
+/** Every session file: pi keeps one folder per working directory under the sessions folder. */
+export async function sessionFiles(): Promise<string[]> {
     const root = await sessionsDir()
     let dirs: string[]
     try {
@@ -166,6 +167,11 @@ export async function listSessions(): Promise<SessionSummary[]> {
         }
         catch {}
     }))
+    return files
+}
+
+export async function listSessions(): Promise<SessionSummary[]> {
+    const files = await sessionFiles()
 
     const results = await Promise.all(files.map(async (file) => {
         try {

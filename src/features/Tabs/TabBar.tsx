@@ -1,4 +1,5 @@
 import type { Thread } from '@/store/thread'
+import { ConflictMark } from '@/components/ConflictMark'
 import { StatusDot } from '@/components/StatusIcons'
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from '@/components/ui/context-menu'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
@@ -132,6 +133,7 @@ const Tab = observer(({ thread, index, visible }: { thread: Thread, index: numbe
                             {thread.isEmpty && !thread.persisted ? newThreadLabel() : thread.title}
                         </span>
                     )}
+            <ConflictMark cwd={thread.cwd} session={thread.sessionPath} />
             <button
                 type="button"
                 aria-label={tr(`关闭 ${thread.title}`, `Close ${thread.title}`)}

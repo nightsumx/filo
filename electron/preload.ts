@@ -75,6 +75,9 @@ const bridge: PiBridge = {
     gitStatus: cwd => ipcRenderer.invoke(IPC.gitStatus, cwd),
     gitBranches: cwds => ipcRenderer.invoke(IPC.gitBranches, cwds),
     gitFileDiff: (cwd, path, status) => ipcRenderer.invoke(IPC.gitFileDiff, cwd, path, status),
+    repoEdits: cwd => ipcRenderer.invoke(IPC.repoEdits, cwd),
+    gitDiscard: (cwd, files) => ipcRenderer.invoke(IPC.gitDiscard, cwd, files),
+    gitCommit: (cwd, message, paths) => ipcRenderer.invoke(IPC.gitCommit, cwd, message, paths),
 
     openFolder: path => ipcRenderer.invoke(IPC.openFolder, path),
     missingFolders: paths => ipcRenderer.invoke(IPC.missingFolders, paths),

@@ -9,7 +9,8 @@ import { DEFAULT_THEME, IPC, THEME_PREFS } from '@shared/ipc'
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, Notification, shell } from 'electron'
 import { AgentManager } from './agents'
 import { applySave, savedWindows, StateFile } from './appState'
-import { gitBranch, gitFileDiff, gitStatus } from './git'
+import { repoEdits } from './edits'
+import { gitBranch, gitCommit, gitDiscard, gitFileDiff, gitStatus } from './git'
 import { mainLang, setMainLang, tr } from './i18n'
 import { compactionInfo, globalCompaction, setGlobalCompaction } from './piSettings'
 import { resolvePiEnv } from './pi-env'
@@ -218,6 +219,14 @@ function registerIpc() {
         return Object.fromEntries(await Promise.all(list.map(async cwd => [cwd, await gitBranch(cwd)] as const)))
     })
     ipcMain.handle(IPC.gitFileDiff, (_e, cwd: string, file: string, status: string) => gitFileDiff(cwd, file, status))
+    ipcMain.handle(IPC.repoEdits, (_e, cwd: unknown) => repoEdits(absolutePath(cwd)))
+    ipcMain.handle(IPC.gitDiscard, (_e, cwd: unknown, files: unknown) => {
+        if (!Array.isArray(files))
+            throw new Error('expected a file list')
+        return gitDiscard(absolutePath(cwd), files.slice(0, 5000), file => shell.trashItem(file))
+    })
+    ipcMain.handle(IPC.gitCommit, (_e, cwd: unknown, message: unknown, paths: unknown) =>
+        gitCommit(absolutePath(cwd), typeof message === 'string' ? message : '', Array.isArray(paths) ? paths : []))
 
     ipcMain.handle(IPC.setTheme, (_e, theme: unknown) => applyTheme(theme))
     ipcMain.handle(IPC.setLang, (_e, lang: unknown) => applyLang(lang))

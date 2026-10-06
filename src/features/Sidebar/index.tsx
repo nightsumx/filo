@@ -4,6 +4,7 @@
 import type { SessionSummary } from '@shared/ipc'
 import type { Project } from '@/store/app'
 import type { Thread } from '@/store/thread'
+import { ConflictMark } from '@/components/ConflictMark'
 import { ActivityBadge, PiGlyph, StatusDot } from '@/components/StatusIcons'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { formatElapsed } from '@/lib/threadActivity'
@@ -112,6 +113,7 @@ const ThreadRow = observer(({ thread, session, selected }: { thread?: Thread, se
             <div className="flex h-6 min-w-0 flex-1 items-center gap-1.5">
                 {thread ? <StatusDot thread={thread} /> : <PiGlyph dim />}
                 <span className={cn('min-w-0 flex-1 truncate', thread ? 'text-gray-900' : 'text-gray-700')}>{title}</span>
+                <ConflictMark cwd={thread?.cwd ?? session!.cwd} session={thread?.sessionPath ?? session?.path} />
                 {running
                     ? <span className="shrink-0 text-[11px] tabular-nums text-gray-500" title={tr('已运行', 'Running for')}>{formatElapsed(now - thread!.runStartedAt)}</span>
                     : updated != null && <span className="shrink-0 text-[11px] tabular-nums text-gray-400">{relativeTime(updated)}</span>}

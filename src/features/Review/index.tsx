@@ -1,15 +1,18 @@
-import type { GitFileChange, GitFileDiff } from '@shared/ipc'
-import type { ChangeNode } from '@/lib/changeTree'
+import type { FileEditor, GitFileChange, GitFileDiff } from '@shared/ipc'
+import type { ChangeDir, ChangeNode } from '@/lib/changeTree'
 import type { Thread } from '@/store/thread'
 import { DiffBlock } from '@/components/toolPrimitives'
 import { buildChangeTree, dirPaths } from '@/lib/changeTree'
-import { cn } from '@/lib/utils'
+import { confirm } from '@/lib/confirm'
+import { editedBy } from '@/lib/edits'
+import { cn, relativeTime } from '@/lib/utils'
 import { appStore } from '@/store/app'
-import { ChevronRight, ChevronsDownUp, ChevronsUpDown, Columns2, Folder, FolderTree, GitBranch, List, Loader2, RefreshCw, Rows2, X } from 'lucide-react'
+import { ChevronRight, ChevronsDownUp, ChevronsUpDown, Columns2, Folder, FolderTree, GitBranch, List, Loader2, RefreshCw, Rows2, TriangleAlert, Undo2, X } from 'lucide-react'
 import { observer } from 'mobx-react-lite'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { toast } from 'sonner'
 import { useGitStatus } from './useGitStatus'
-import { tr } from '@/lib/i18n'
+import { newThreadLabel, tr } from '@/lib/i18n'
 
 function statusBadge(status: string): { letter: string, className: string, nameClass: string, label: string } {
     if (status === '??')
@@ -38,6 +41,8 @@ const HIGHLIGHT_MAX_BYTES = 120 * 1024
 /** Tree rows: chevron column plus this much per level, so a file lines up under its folder's name. */
 const INDENT = 16
 const rowHover = 'hover:bg-[color-mix(in_srgb,var(--ide-panel),rgb(var(--black))_5%)]'
+const headerBtn = 'flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-gray-500 hover:bg-black/[0.06] hover:text-gray-800'
+const rowAction = 'hidden h-5 w-5 shrink-0 items-center justify-center rounded text-gray-500 hover:bg-black/[0.08] hover:text-gray-800 group-hover/row:flex'
 
 function Totals({ additions, deletions }: { additions: number, deletions: number }) {
     return (
@@ -48,12 +53,50 @@ function Totals({ additions, deletions }: { additions: number, deletions: number
     )
 }
 
+/** Commit selection box; `mixed` for a folder with some files picked. */
+function Check({ checked, mixed, onChange, label }: { checked: boolean, mixed?: boolean, onChange: (checked: boolean) => void, label: string }) {
+    const ref = useRef<HTMLInputElement>(null)
+    useLayoutEffect(() => {
+        if (ref.current)
+            ref.current.indeterminate = !!mixed
+    }, [mixed])
+    return (
+        <input
+            ref={ref}
+            type="checkbox"
+            checked={checked}
+            aria-label={label}
+            onClick={e => e.stopPropagation()}
+            onChange={e => onChange(e.target.checked)}
+            className="size-[13px] shrink-0 cursor-default accent-[var(--ide-accent)] outline-none"
+        />
+    )
+}
+
+/** What the panel knows about each file besides git: who else changed it, whether it is picked. */
+interface RowContext {
+    cwd: string
+    tick: number
+    mode: 'unified' | 'split'
+    /** Other sessions that edited the file (the thread's own excluded); empty when it is not shared. */
+    othersOf: (path: string) => FileEditor[]
+    isChecked: (path: string) => boolean
+    setChecked: (paths: string[], checked: boolean) => void
+    discard: (files: GitFileChange[]) => void
+}
+
+function othersTitle(others: FileEditor[]): string {
+    const names = others.map(o => `「${o.title || newThreadLabel()}」${relativeTime(o.at)}`).join('\n')
+    return tr(`也被其他线程改过：\n${names}`, `Also changed by:\n${names}`)
+}
+
 /**
  * One changed file: a header row that unfolds its diff. In the list the folder follows the name;
  * in the tree (`depth` set) the row is indented under its folder instead. The diff always spans the
  * full panel width, since the panel is narrow.
  */
-function FileDiff({ cwd, file, tick, mode, defaultOpen, depth }: { cwd: string, file: GitFileChange, tick: number, mode: 'unified' | 'split', defaultOpen: boolean, depth?: number }) {
+function FileDiff({ file, ctx, defaultOpen, depth }: { file: GitFileChange, ctx: RowContext, defaultOpen: boolean, depth?: number }) {
+    const { cwd, tick, mode } = ctx
     const [open, setOpen] = useState(defaultOpen)
     const [diff, setDiff] = useState<GitFileDiff | null>(null)
     const [error, setError] = useState('')
@@ -63,6 +106,7 @@ function FileDiff({ cwd, file, tick, mode, defaultOpen, depth }: { cwd: string, 
     const changedLines = file.additions + file.deletions
     const size = diff ? diff.oldText.length + diff.newText.length : 0
     const large = changedLines > LARGE_DIFF_LINES || size > LARGE_DIFF_BYTES
+    const others = ctx.othersOf(file.path)
 
     useEffect(() => {
         // Large files are not even fetched until the user asks for them.
@@ -79,22 +123,48 @@ function FileDiff({ cwd, file, tick, mode, defaultOpen, depth }: { cwd: string, 
 
     return (
         <div>
-            <button
-                type="button"
+            <div
+                role="button"
+                tabIndex={0}
                 onClick={() => setOpen(v => !v)}
+                onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault()
+                        setOpen(v => !v)
+                    }
+                }}
                 aria-expanded={open}
+                title={file.origPath ? `${file.origPath} → ${file.path}` : file.path}
                 style={depth ? { paddingLeft: 8 + depth * INDENT } : undefined}
-                className={cn('sticky top-0 z-[1] flex h-7 w-full items-center gap-1.5 bg-ide-panel px-2 text-left text-[13px]', rowHover)}
+                className={cn('group/row sticky top-0 z-[1] flex h-7 w-full cursor-default items-center gap-1.5 bg-ide-panel px-2 text-left text-[13px] outline-none', rowHover)}
             >
                 <ChevronRight size={14} className={cn('shrink-0 text-gray-500 transition-transform duration-100', open && 'rotate-90')} />
+                <Check checked={ctx.isChecked(file.path)} onChange={c => ctx.setChecked([file.path], c)} label={tr(`提交 ${file.path}`, `Commit ${file.path}`)} />
                 <span className={cn('w-3 shrink-0 text-center font-mono text-[12px] font-semibold', badge.className)} title={badge.label}>{badge.letter}</span>
                 {/* JetBrains file-status colours: name tinted by status, directory dimmed after it. */}
                 <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
                     <span className={cn('shrink-0 truncate', badge.nameClass)}>{file.path.slice(slash + 1)}</span>
                     {slash > 0 && depth === undefined && <span className="min-w-0 truncate text-[12px] text-gray-500">{file.path.slice(0, slash)}</span>}
                 </span>
+                {others.length > 0 && (
+                    <span className="flex shrink-0 items-center text-amber-600 dark:text-amber-400" title={othersTitle(others)} aria-label={othersTitle(others)}>
+                        <TriangleAlert size={13} />
+                    </span>
+                )}
+                <button
+                    type="button"
+                    aria-label={tr(`回滚 ${file.path}`, `Roll back ${file.path}`)}
+                    title={tr('回滚', 'Roll back')}
+                    onClick={(e) => {
+                        e.stopPropagation()
+                        ctx.discard([file])
+                    }}
+                    className={rowAction}
+                >
+                    <Undo2 size={13} />
+                </button>
                 <Totals additions={file.additions} deletions={file.deletions} />
-            </button>
+            </div>
             {open && (
                 <div className="px-2 pb-2 pt-0.5">
                     {file.binary
@@ -117,52 +187,102 @@ function FileDiff({ cwd, file, tick, mode, defaultOpen, depth }: { cwd: string, 
     )
 }
 
+function filesUnder(dir: ChangeDir): GitFileChange[] {
+    return dir.children.flatMap(n => (n.kind === 'file' ? [n.file] : filesUnder(n)))
+}
+
 /** Changed files by folder, like the JetBrains Commit tool window; a file row unfolds its diff in place. */
-function ChangeTree({ nodes, depth, collapsed, onToggle, cwd, tick, mode, generation }: {
+function ChangeTree({ nodes, depth, collapsed, onToggle, ctx, generation }: {
     nodes: ChangeNode[]
     depth: number
     collapsed: ReadonlySet<string>
     onToggle: (path: string) => void
-    cwd: string
-    tick: number
-    mode: 'unified' | 'split'
+    ctx: RowContext
     generation: number
 }) {
     return nodes.map((node) => {
         if (node.kind === 'file')
-            return <FileDiff key={`${generation}:${node.file.path}`} cwd={cwd} file={node.file} tick={tick} mode={mode} defaultOpen={false} depth={depth} />
+            return <FileDiff key={`${generation}:${node.file.path}`} file={node.file} ctx={ctx} defaultOpen={false} depth={depth} />
         const open = !collapsed.has(node.path)
+        const files = filesUnder(node)
+        const picked = files.filter(f => ctx.isChecked(f.path)).length
         return (
             <div key={node.path} role="group">
-                <button
-                    type="button"
+                <div
+                    role="button"
+                    tabIndex={0}
                     onClick={() => onToggle(node.path)}
+                    onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault()
+                            onToggle(node.path)
+                        }
+                    }}
                     aria-expanded={open}
                     title={node.path}
                     style={{ paddingLeft: 8 + depth * INDENT }}
-                    className={cn('flex h-7 w-full items-center gap-1.5 pr-2 text-left text-[13px]', rowHover)}
+                    className={cn('group/row flex h-7 w-full cursor-default items-center gap-1.5 pr-2 text-left text-[13px] outline-none', rowHover)}
                 >
                     <ChevronRight size={14} className={cn('shrink-0 text-gray-500 transition-transform duration-100', open && 'rotate-90')} />
+                    <Check
+                        checked={picked === files.length}
+                        mixed={picked > 0 && picked < files.length}
+                        onChange={c => ctx.setChecked(files.map(f => f.path), c)}
+                        label={tr(`提交 ${node.path} 下的文件`, `Commit files in ${node.path}`)}
+                    />
                     <Folder size={14} className="shrink-0 text-gray-500" />
                     <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
                         <span className="truncate text-gray-800">{node.name}</span>
                         <span className="shrink-0 text-[12px] text-gray-500">{tr(`${node.count} 个文件`, `${node.count} ${node.count === 1 ? 'file' : 'files'}`)}</span>
                     </span>
+                    <button
+                        type="button"
+                        aria-label={tr(`回滚 ${node.path}`, `Roll back ${node.path}`)}
+                        title={tr('回滚此文件夹', 'Roll back this folder')}
+                        onClick={(e) => {
+                            e.stopPropagation()
+                            ctx.discard(files)
+                        }}
+                        className={rowAction}
+                    >
+                        <Undo2 size={13} />
+                    </button>
                     <Totals additions={node.additions} deletions={node.deletions} />
-                </button>
-                {open && <ChangeTree nodes={node.children} depth={depth + 1} collapsed={collapsed} onToggle={onToggle} cwd={cwd} tick={tick} mode={mode} generation={generation} />}
+                </div>
+                {open && <ChangeTree nodes={node.children} depth={depth + 1} collapsed={collapsed} onToggle={onToggle} ctx={ctx} generation={generation} />}
             </div>
         )
     })
 }
 
-const headerBtn = 'flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-gray-500 hover:bg-black/[0.06] hover:text-gray-800'
+/** Rollback asks first: tracked changes are gone for good, new files go to the Trash. */
+async function confirmDiscard(files: GitFileChange[]): Promise<boolean> {
+    const fresh = files.filter(f => f.status === '??' || f.status[0] === 'A' || f.status[0] === 'R' || f.status[0] === 'C').length
+    const tracked = files.length - fresh
+    const what = files.length === 1 ? `「${files[0].path}」` : tr(`${files.length} 个文件`, `${files.length} files`)
+    const parts = [
+        tracked && tr('已跟踪的改动会恢复到上次提交，无法撤销。', 'Tracked changes go back to the last commit; this cannot be undone.'),
+        fresh && tr('新文件会移到废纸篓。', 'New files are moved to the Trash.'),
+    ].filter(Boolean)
+    return confirm({
+        title: tr(`回滚${what}？`, `Roll back ${what}?`),
+        description: parts.join(' '),
+        confirmText: tr('回滚', 'Roll back'),
+    })
+}
+
+type Scope = 'all' | 'thread'
 
 /** Right-hand review pane: uncommitted changes in the thread's folder, as a folder tree or a flat list. */
 export const ReviewPanel = observer(({ thread, onClose }: { thread: Thread, onClose: () => void }) => {
-    const { status, loading, refresh, totals } = useGitStatus(thread.cwd, thread.changeTick)
+    const { status, loading, refresh } = useGitStatus(thread.cwd, thread.changeTick)
     const [mode, setMode] = useState<'unified' | 'split'>('unified')
-    const files = status?.isRepo ? status.files : []
+    const [scope, setScope] = useState<Scope>('all')
+    const allFiles = status?.isRepo ? status.files : []
+    const editors = appStore.edits.get(thread.cwd)
+    const own = useMemo(() => editedBy(editors, thread.sessionPath), [editors, thread.sessionPath])
+    const files = useMemo(() => (scope === 'thread' ? allFiles.filter(f => own.has(f.path)) : allFiles), [scope, allFiles, own])
+    const totals = files.reduce((t, f) => ({ add: t.add + f.additions, del: t.del + f.deletions }), { add: 0, del: 0 })
     const view = appStore.reviewView
     const tree = useMemo(() => buildChangeTree(files), [files])
     const autoOpen = totals.add + totals.del <= AUTO_OPEN_LINES
@@ -171,6 +291,12 @@ export const ReviewPanel = observer(({ thread, onClose }: { thread: Thread, onCl
     const [generation, setGeneration] = useState(0)
     // Tree: folders start expanded, so new ones show up open; this holds the ones the user folded.
     const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set())
+    // Commit selection: everything is picked unless unticked, so files that appear later are in.
+    const [unchecked, setUnchecked] = useState<ReadonlySet<string>>(new Set())
+    const [message, setMessage] = useState('')
+    const [committing, setCommitting] = useState(false)
+    const picked = files.filter(f => !unchecked.has(f.path))
+
     const toggleDir = (path: string) => setCollapsed((c) => {
         const next = new Set(c)
         if (!next.delete(path))
@@ -188,6 +314,75 @@ export const ReviewPanel = observer(({ thread, onClose }: { thread: Thread, onCl
         setAllOpen(!expanded)
         setGeneration(g => g + 1)
     }
+
+    const changed = () => {
+        refresh()
+        appStore.refreshEdits(thread.cwd)
+    }
+    const discard = async (list: GitFileChange[]) => {
+        if (!list.length || !(await confirmDiscard(list)))
+            return
+        try {
+            await window.pi.gitDiscard(thread.cwd, list.map(f => ({ path: f.path, status: f.status, origPath: f.origPath })))
+        }
+        catch (error: any) {
+            toast.error(tr('回滚失败', 'Rollback failed'), { description: error.message })
+        }
+        changed()
+    }
+    const commit = async () => {
+        if (!picked.length || !message.trim() || committing)
+            return
+        setCommitting(true)
+        try {
+            const paths = picked.flatMap(f => (f.origPath ? [f.path, f.origPath] : [f.path]))
+            const hash = await window.pi.gitCommit(thread.cwd, message, paths)
+            setMessage('')
+            toast.success(tr(`已提交 ${hash}`, `Committed ${hash}`), { description: tr(`${picked.length} 个文件`, `${picked.length} ${picked.length === 1 ? 'file' : 'files'}`) })
+        }
+        catch (error: any) {
+            toast.error(tr('提交失败', 'Commit failed'), { description: error.message })
+        }
+        finally {
+            setCommitting(false)
+            changed()
+        }
+    }
+
+    const ctx: RowContext = {
+        cwd: thread.cwd,
+        tick: thread.changeTick,
+        mode,
+        // Flagged once two sessions changed a file; the tooltip names the ones other than this thread.
+        othersOf: (path) => {
+            const list = editors?.[path] ?? []
+            return list.length > 1 ? list.filter(e => e.session !== thread.sessionPath) : []
+        },
+        isChecked: path => !unchecked.has(path),
+        setChecked: (paths, checked) => setUnchecked((u) => {
+            const next = new Set(u)
+            for (const p of paths) {
+                if (checked)
+                    next.delete(p)
+                else
+                    next.add(p)
+            }
+            return next
+        }),
+        discard: list => void discard(list),
+    }
+    const scopeBtn = (value: Scope, label: string, count: number) => (
+        <button
+            type="button"
+            aria-pressed={scope === value}
+            onClick={() => setScope(value)}
+            className={cn('flex h-[22px] items-center gap-1 rounded-md px-2 text-[12px]', scope === value ? 'bg-black/[0.07] text-gray-900' : 'text-gray-500 hover:text-gray-800')}
+        >
+            {label}
+            <span className="tabular-nums text-gray-500">{count}</span>
+        </button>
+    )
+    const sharedCount = files.filter(f => (editors?.[f.path]?.length ?? 0) > 1).length
 
     return (
         <aside className="flex h-full w-full flex-col bg-ide-panel" aria-label={tr('代码改动', 'Code changes')}>
@@ -223,33 +418,79 @@ export const ReviewPanel = observer(({ thread, onClose }: { thread: Thread, onCl
                 <button type="button" aria-label={mode === 'unified' ? tr('并排显示', 'Side by side') : tr('合并显示', 'Unified')} title={mode === 'unified' ? tr('并排显示', 'Side by side') : tr('合并显示', 'Unified')} onClick={() => setMode(m => (m === 'unified' ? 'split' : 'unified'))} className={headerBtn}>
                     {mode === 'unified' ? <Columns2 size={14} /> : <Rows2 size={14} />}
                 </button>
-                <button type="button" aria-label={tr('刷新', 'Refresh')} title={tr('刷新', 'Refresh')} onClick={refresh} className={headerBtn}>
+                <button type="button" aria-label={tr('刷新', 'Refresh')} title={tr('刷新', 'Refresh')} onClick={changed} className={headerBtn}>
                     {loading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
                 </button>
                 <button type="button" aria-label={tr('关闭改动面板', 'Close changes panel')} onClick={onClose} className={headerBtn}>
                     <X size={15} />
                 </button>
             </div>
+            {status?.isRepo && allFiles.length > 0 && (
+                <div className="flex h-7 shrink-0 items-center gap-0.5 px-2">
+                    {scopeBtn('all', tr('全部', 'All'), allFiles.length)}
+                    {scopeBtn('thread', tr('本线程', 'This thread'), own.size)}
+                    <span className="flex-1" />
+                    {sharedCount > 0 && (
+                        <span className="flex items-center gap-1 text-[12px] text-amber-600 dark:text-amber-400" title={tr('自上次提交以来，这些文件被不止一个线程改过，提交前看一下', 'More than one thread changed these files since the last commit; check before committing')}>
+                            <TriangleAlert size={12} />
+                            {tr(`${sharedCount} 个文件被多个线程改过`, `${sharedCount} changed by several threads`)}
+                        </span>
+                    )}
+                </div>
+            )}
             <div className="flex-1 overflow-y-auto px-1 pb-2">
                 {status && !status.isRepo && (
                     <div className="px-6 py-10 text-center text-[13px] text-gray-500">{tr('这个文件夹不是 git 仓库', 'This folder is not a git repository')}</div>
                 )}
-                {status?.isRepo && files.length === 0 && (
+                {status?.isRepo && allFiles.length === 0 && (
                     <div className="px-6 py-10 text-center text-[13px] text-gray-500">{tr('没有未提交的改动', 'No uncommitted changes')}</div>
                 )}
-                {view === 'tree' && <ChangeTree nodes={tree} depth={0} collapsed={collapsed} onToggle={toggleDir} cwd={thread.cwd} tick={thread.changeTick} mode={mode} generation={generation} />}
+                {status?.isRepo && allFiles.length > 0 && files.length === 0 && (
+                    <div className="px-6 py-10 text-center text-[13px] text-gray-500">{tr('这个线程还没改过文件（只统计 edit / write 工具）', 'This thread has not changed any files yet (edit / write tools only)')}</div>
+                )}
+                {view === 'tree' && <ChangeTree nodes={tree} depth={0} collapsed={collapsed} onToggle={toggleDir} ctx={ctx} generation={generation} />}
                 {view === 'list' && files.map(file => (
-                    <FileDiff
-                        key={`${generation}:${file.path}`}
-                        cwd={thread.cwd}
-                        file={file}
-                        tick={thread.changeTick}
-                        mode={mode}
-                        // "Expand all" still leaves large files behind their own click.
-                        defaultOpen={allOpen ?? autoOpen}
-                    />
+                    // "Expand all" still leaves large files behind their own click.
+                    <FileDiff key={`${generation}:${file.path}`} file={file} ctx={ctx} defaultOpen={allOpen ?? autoOpen} />
                 ))}
             </div>
+            {status?.isRepo && files.length > 0 && (
+                <div className="shrink-0 px-2 pb-2 pt-1">
+                    <textarea
+                        value={message}
+                        onChange={e => setMessage(e.target.value)}
+                        onKeyDown={(e) => {
+                            if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                                e.preventDefault()
+                                void commit()
+                            }
+                        }}
+                        rows={3}
+                        aria-label={tr('提交说明', 'Commit message')}
+                        placeholder={tr('提交说明', 'Commit message')}
+                        className="block w-full resize-none rounded-md bg-ide-editor px-2 py-1.5 text-[13px] text-gray-900 outline-none placeholder:text-gray-400"
+                    />
+                    <div className="mt-1.5 flex items-center gap-2">
+                        <span className="text-[12px] tabular-nums text-gray-500">{tr(`已选 ${picked.length} / ${files.length} 个文件`, `${picked.length} of ${files.length} files`)}</span>
+                        <span className="flex-1" />
+                        {picked.length > 0 && (
+                            <button type="button" onClick={() => void discard(picked)} className="h-7 rounded-md px-2.5 text-[12px] text-gray-600 hover:bg-black/[0.06] hover:text-gray-900">
+                                {tr('回滚所选', 'Roll back')}
+                            </button>
+                        )}
+                        <button
+                            type="button"
+                            disabled={!picked.length || !message.trim() || committing}
+                            onClick={() => void commit()}
+                            title={tr('提交所选文件（⌘↩）', 'Commit the selected files (⌘↩)')}
+                            className="flex h-7 items-center gap-1.5 rounded-md bg-ide-accent px-3 text-[12px] font-medium text-white hover:bg-ide-accent-hover disabled:opacity-40 disabled:hover:bg-ide-accent"
+                        >
+                            {committing && <Loader2 size={12} className="animate-spin" />}
+                            {tr('提交', 'Commit')}
+                        </button>
+                    </div>
+                </div>
+            )}
         </aside>
     )
 })

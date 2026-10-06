@@ -45,11 +45,30 @@ export interface GitFileChange {
     additions: number
     deletions: number
     binary: boolean
+    /** Renames and copies: the path in HEAD. */
+    origPath?: string
 }
 
 export type GitStatus =
     | { isRepo: false }
-    | { isRepo: true, branch: string, files: GitFileChange[] }
+    | { isRepo: true, root: string, branch: string, files: GitFileChange[] }
+
+/** A pi session that edited a file (edit / write tool calls; bash changes cannot be attributed). */
+export interface FileEditor {
+    /** Session file path; a GUI thread's key once saved. */
+    session: string
+    title: string
+    /** Last edit, ms. */
+    at: number
+}
+
+/**
+ * Which sessions edited each uncommitted file since the last commit, keyed by path relative to the
+ * repository root. Two sessions on one file is a collision.
+ */
+export interface RepoEdits {
+    files: Record<string, FileEditor[]>
+}
 
 export interface GitFileDiff { oldText: string, newText: string }
 
@@ -253,6 +272,12 @@ export interface PiBridge {
     /** Current branch per folder (null when not a repo); cheap, used by the project popup. */
     gitBranches: (cwds: string[]) => Promise<Record<string, string | null>>
     gitFileDiff: (cwd: string, path: string, status: string) => Promise<GitFileDiff>
+    /** Which sessions edited each uncommitted file of the repository holding cwd. */
+    repoEdits: (cwd: string) => Promise<RepoEdits>
+    /** Rollback: tracked files back to HEAD; files HEAD lacks go to the Trash. */
+    gitDiscard: (cwd: string, files: Pick<GitFileChange, 'path' | 'status' | 'origPath'>[]) => Promise<void>
+    /** Commits exactly these paths (relative to the repository root); returns the short hash. */
+    gitCommit: (cwd: string, message: string, paths: string[]) => Promise<string>
 
     openFolder: (path: string) => Promise<void>
     /** The given folders that no longer exist (deleted or moved since they were added). */
@@ -298,6 +323,9 @@ export const IPC = {
     gitStatus: 'git:status',
     gitBranches: 'git:branches',
     gitFileDiff: 'git:file-diff',
+    repoEdits: 'git:repo-edits',
+    gitDiscard: 'git:discard',
+    gitCommit: 'git:commit',
     openFolder: 'shell:open-folder',
     missingFolders: 'fs:missing-folders',
     setTheme: 'theme:set',
