@@ -39,6 +39,8 @@ Try it once without installing: `pi -e npm:pi-cc-tui`
 
 **Working line** — `✻ Brewing… (12s · ↓ 1.2k tokens)` above the input instead of inside its border, and `✻ Brewed for 34s · done 7:09 PM` when the turn ends.
 
+**Compaction** — `· Compacting conversation… (1m 37s · ↓ 2.1k tokens · esc to cancel)` with a `▰▰▰▱▱▱ 60%` bar underneath, for both `/compact` and auto-compaction. pi's default summarizer still runs; the bar is an estimate from streamed summary tokens (the final length isn't known up front), so it eases toward 99% instead of tracking exact completion.
+
 **Status line** — one line, same segments, glyphs and colors as a popular Claude Code `statusLine` script:
 
 | Segment | Meaning | Color |

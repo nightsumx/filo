@@ -41,6 +41,8 @@ pi install npm:pi-cc-tui
 
 **进度行**：`✻ Brewing… (12s · ↓ 1.2k tokens)` 放在输入框上方，不再嵌进边框；回合结束留一行 `✻ Brewed for 34s · done 7:09 PM`。
 
+**压缩进度**：`/compact` 和自动压缩时显示 `· Compacting conversation… (1m 37s · ↓ 2.1k tokens · esc to cancel)`，下面一行 `▰▰▰▱▱▱ 60%` 进度条。仍然走 pi 默认的摘要逻辑；摘要最终长度事先未知，进度按已流出的 token 估算，逐渐逼近 99%，不是精确完成度。
+
 **状态栏**：一行，段落、符号、配色都和 Claude Code 常见的 `statusLine` 脚本一致：
 
 | 段 | 含义 | 颜色 |

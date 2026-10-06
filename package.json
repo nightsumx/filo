@@ -21,7 +21,8 @@
   "pi": {
     "extensions": [
       "./extensions/cc-tui.ts",
-      "./extensions/cc-statusline.ts"
+      "./extensions/cc-statusline.ts",
+      "./extensions/cc-compaction.ts"
     ],
     "themes": [
       "./themes/claude-code.json"
