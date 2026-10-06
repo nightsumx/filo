@@ -31,6 +31,10 @@
         --ide-sel: #d4e2ff;
         --ide-sel-muted: #dfe1e5;
         --ide-tab: #ffffff;
+        /* Filled block on the editor (prompt, composer, code, tool output, diff). Both themes are
+           borderless; blocks separate from the editor by fill alone. */
+        --ide-block: #f7f8fa;
+        --ide-tab-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
         --ide-accent: #3574f0;
         /* Same colour as channels, so Tailwind opacity modifiers (ring-ide-accent/50) work. */
         --ide-accent-rgb: 53 116 240;
@@ -119,6 +123,8 @@
         --ide-sel: #2e436e;
         --ide-sel-muted: #33353a;
         --ide-tab: #2b2d30;
+        --ide-block: #2b2d30;
+        --ide-tab-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
         --ide-accent: #3574f0;
         /* Same colour as channels, so Tailwind opacity modifiers (ring-ide-accent/50) work. */
         --ide-accent-rgb: 53 116 240;
@@ -373,7 +379,4 @@ ul {
 .ide-island {
     border-radius: var(--ide-radius);
     overflow: hidden;
-}
-.dark .ide-island {
-    box-shadow: 0 0 0 1px var(--ide-border), 0 1px 2px rgba(0, 0, 0, 0.25);
 }

@@ -167,7 +167,7 @@ export const Composer = observer(({ thread }: { thread: Thread }) => {
             }}
         >
             {widgetsAbove.map(([key, w]) => (
-                <pre key={key} className="mb-2 rounded-md bg-[var(--bg-side)] px-3 py-2 font-mono text-[12px] text-gray-600 whitespace-pre-wrap">{w.lines.join('\n')}</pre>
+                <pre key={key} className="mb-2 rounded-md bg-ide-block px-3 py-2 font-mono text-[12px] text-gray-600 whitespace-pre-wrap">{w.lines.join('\n')}</pre>
             ))}
             <TodoBar thread={thread} />
             {queued.length > 0 && (
@@ -185,11 +185,9 @@ export const Composer = observer(({ thread }: { thread: Thread }) => {
                 {slashMatches.length > 0 && <SlashMenu commands={slashMatches} active={slashIndex} onPick={pickCommand} />}
                 <div
                     className={cn(
-                        // Light: a borderless filled field. Dark: JetBrains text field with a 1px border.
-                        // Both turn into a 2px accent ring on focus.
-                        'relative cursor-text rounded-lg border border-transparent bg-gray-50 transition-[border-color,box-shadow,background-color] dark:border-gray-200 dark:bg-ide-editor',
-                        'focus-within:bg-ide-editor',
-                        'focus-within:border-ide-accent focus-within:shadow-[0_0_0_1px_var(--ide-accent)]',
+                        // A borderless filled field; focus changes nothing but the caret. Only a file
+                        // drag shows an outline, as the drop target.
+                        'relative cursor-text rounded-lg border border-transparent bg-ide-block transition-[border-color,background-color]',
                         dragOver && '!border-ide-accent !bg-ide-sel',
                     )}
                     onClick={e => e.target === e.currentTarget && textareaRef.current?.focus()}

@@ -167,7 +167,7 @@ export const TuiDiff = memo(({ model, path, mode, limit, onShowMore }: {
     const t = useT()
 
     return (
-        <div className="overflow-hidden rounded-md bg-[var(--bg-side)] font-mono text-[12px] text-gray-800 select-text dark:border dark:border-gray-100">
+        <div className="overflow-hidden rounded-md bg-ide-block font-mono text-[12px] text-gray-800 select-text">
             {split
                 ? <SplitGrid rows={limit != null ? split.slice(0, limit) : split} tokens={tokens} />
                 : <UnifiedGrid rows={limit != null ? unified!.slice(0, limit) : unified!} tokens={tokens} />}

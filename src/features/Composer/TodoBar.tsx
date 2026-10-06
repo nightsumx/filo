@@ -17,7 +17,7 @@ export const TodoBar = observer(({ thread }: { thread: Thread }) => {
     const percent = Math.round((done / items.length) * 100)
 
     return (
-        <div className="mb-2 overflow-hidden rounded-lg bg-[var(--bg-side)] dark:border dark:border-gray-100">
+        <div className="mb-2 overflow-hidden rounded-lg bg-ide-block">
             <button
                 type="button"
                 onClick={() => setOpen(v => !v)}

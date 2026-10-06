@@ -62,8 +62,8 @@ export const CodeBlock = memo(({ language, code }: { language?: string, code: st
     }, [text, lang])
 
     return (
-        <div className="not-prose my-2 overflow-hidden rounded-md bg-[var(--bg-side)] dark:border dark:border-gray-100">
-            <div className="flex h-7 items-center justify-between pl-3 pr-1 dark:border-b dark:border-gray-100 text-[11.5px] text-gray-500">
+        <div className="not-prose my-2 overflow-hidden rounded-md bg-ide-block">
+            <div className="flex h-7 items-center justify-between pl-3 pr-1 text-[11.5px] text-gray-500">
                 <span className="font-mono">{language || 'text'}</span>
                 <CopyBtn text={text} />
             </div>

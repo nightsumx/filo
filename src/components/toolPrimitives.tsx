@@ -18,7 +18,7 @@ export const DiffBlock = observer(({ path, oldStr, newStr, mode = 'unified', hig
         return diff
     }, [path, oldStr, newStr])
     return (
-        <div className="overflow-hidden rounded-md bg-[var(--bg-side)] text-[12px] dark:border dark:border-gray-100 select-text [&_.diff-table-wrapper]:!bg-transparent">
+        <div className="overflow-hidden rounded-md bg-ide-block text-[12px] select-text [&_.diff-table-wrapper]:!bg-transparent">
             <DiffView
                 diffFile={file}
                 diffViewMode={mode === 'split' ? DiffModeEnum.Split : DiffModeEnum.Unified}
