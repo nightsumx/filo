@@ -52,6 +52,10 @@ const bridge: PiBridge = {
     onRevealSession: listener => listen(IPC.revealSession, listener),
     onExportProjects: handler => answer(IPC.exportProjects, handler),
     onImportProjects: handler => answer(IPC.importProjects, handler),
+    moveTab: move => ipcRenderer.invoke(IPC.moveTab, move),
+    onExportThreads: handler => answer(IPC.exportThreads, handler),
+    onImportThreads: handler => answer(IPC.importThreads, handler),
+    onOpenTabs: listener => listen(IPC.openTabs, listener),
 
     agentStart: options => ipcRenderer.invoke(IPC.agentStart, options),
     agentRequest: (agentId, command) => ipcRenderer.invoke(IPC.agentRequest, agentId, command),

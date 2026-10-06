@@ -41,16 +41,60 @@ export function applySave(state: AppState, save: StateSave, owned: readonly stri
 export function savedWindows(state: AppState): SavedWindow[] {
     if (!Array.isArray(state.windows))
         return state.activeProject ? [{ projects: [state.activeProject], active: state.activeProject }] : []
-    const seen = new Set<string>()
     const windows: SavedWindow[] = []
+    // A session is a tab in one window only: the first window listing it keeps it.
+    const taken = new Set<string>()
     for (const w of state.windows) {
-        // A project shows in one window only.
-        const projects = (Array.isArray(w?.projects) ? w.projects : []).filter(p => typeof p === 'string' && path.isAbsolute(p) && !seen.has(p))
-        projects.forEach(p => seen.add(p))
-        if (projects.length)
-            windows.push({ projects, active: projects.includes(w.active ?? '') ? w.active : projects[0] })
+        const projects = [...new Set((Array.isArray(w?.projects) ? w.projects : []).filter(p => typeof p === 'string' && path.isAbsolute(p)))]
+        if (!projects.length)
+            continue
+        const saved: SavedWindow = { projects, active: projects.includes(w.active ?? '') ? w.active : projects[0] }
+        if (w.tabs && typeof w.tabs === 'object') {
+            saved.tabs = {}
+            saved.activeTabs = {}
+            for (const cwd of projects) {
+                const list = Array.isArray(w.tabs[cwd]) ? w.tabs[cwd].filter(k => typeof k === 'string' && !taken.has(k)) : []
+                list.forEach(k => taken.add(k))
+                saved.tabs[cwd] = list
+                const active = w.activeTabs?.[cwd]
+                if (active && list.includes(active))
+                    saved.activeTabs[cwd] = active
+            }
+        }
+        windows.push(saved)
     }
     return windows
+}
+
+/** A project's tabs across the windows showing it, in window order, each session once. */
+export function unionTabs(lists: string[][]): string[] {
+    return [...new Set(lists.flat())]
+}
+
+/**
+ * The state one window starts from: its own tabs where main has them, else each project's tabs
+ * less the sessions other windows show (a session is a tab in one window only).
+ */
+export function windowState(state: AppState, own: Pick<SavedWindow, 'tabs' | 'activeTabs'>, elsewhere: ReadonlySet<string>): AppState {
+    const tabs: Record<string, string[]> = {}
+    const activeTabs: Record<string, string> = {}
+    for (const [cwd, list] of Object.entries(state.tabs)) {
+        const kept = list.filter(k => !elsewhere.has(k))
+        if (kept.length)
+            tabs[cwd] = kept
+    }
+    for (const [cwd, key] of Object.entries(state.activeTabs)) {
+        if (tabs[cwd]?.includes(key))
+            activeTabs[cwd] = key
+    }
+    for (const [cwd, list] of Object.entries(own.tabs ?? {})) {
+        tabs[cwd] = list
+        if (own.activeTabs?.[cwd])
+            activeTabs[cwd] = own.activeTabs[cwd]
+        else
+            delete activeTabs[cwd]
+    }
+    return { ...state, tabs, activeTabs }
 }
 
 /** state.json, owned by the main process; every window reads and writes through it. */

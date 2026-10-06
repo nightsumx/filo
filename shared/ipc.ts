@@ -121,9 +121,12 @@ export const GLOBAL_PREF_KEYS = ['projects', 'hiddenProjects', 'layout', 'theme'
 
 /** A project window as saved for the next launch. */
 export interface SavedWindow {
-    /** One project, or several after the user merged windows. */
+    /** One project, or several after the user merged windows. A project can show in several windows. */
     projects: string[]
     active?: string
+    /** This window's own tabs per project (state.tabs is the fallback for windows without). */
+    tabs?: Record<string, string[]>
+    activeTabs?: Record<string, string>
 }
 
 export interface WindowBounds { x: number, y: number, width: number, height: number }
@@ -177,12 +180,36 @@ export interface OpenProject {
     activity: ProjectActivity
 }
 
+/** Tabs dragged from one window to another, live threads included (see Thread.snapshot). */
+export interface ThreadTransfer {
+    cwd: string
+    threads: Record<string, unknown>[]
+    /** pi processes of those threads, re-routed by main. */
+    agents: string[]
+    /** The source window still has tabs of the project (else it drops the project). */
+    remaining: boolean
+}
+
+/** Drag a tab to another window (`to`), or tear it off into a new window at a screen point. */
+export interface TabMove {
+    key: string
+    cwd: string
+    /** Source window, when the target asks (a drop); else the asking window. */
+    from?: number
+    to: number | null
+    /** Position among the target's tabs of that project; the end if absent. */
+    index?: number
+    at?: { x: number, y: number }
+}
+
 /** A project handed from one window to another, live threads included (see Thread.snapshot). */
 export interface ProjectTransfer {
     cwd: string
     tabs: string[]
     activeTab?: string
     threads: Record<string, unknown>[]
+    /** Set by main: the target already showed the project (it was in both windows); tabs are added to its own. */
+    merge?: boolean
 }
 
 /** Global compaction settings as the Settings page shows them (pi defaults filled in). */
@@ -284,6 +311,12 @@ export interface PiBridge {
     /** Main collects a project's threads before handing it to another window. */
     onExportProjects: (handler: (cwds: string[]) => Promise<ProjectTransfer[]>) => () => void
     onImportProjects: (handler: (projects: ProjectTransfer[]) => Promise<void>) => () => void
+    /** Moves a tab of this window (live thread and pi process included). */
+    moveTab: (move: TabMove) => Promise<void>
+    onExportThreads: (handler: (keys: string[]) => Promise<ThreadTransfer>) => () => void
+    onImportThreads: (handler: (arg: { transfer: ThreadTransfer, index?: number }) => Promise<void>) => () => void
+    /** Session file → id of the window showing it as a tab (every window). */
+    onOpenTabs: (listener: (tabs: Record<string, number>) => void) => () => void
 
     agentStart: (options: AgentStartOptions) => Promise<string>
     agentRequest: <T = any>(agentId: string, command: Record<string, unknown>) => Promise<RpcResponse<T>>
@@ -384,6 +417,10 @@ export const IPC = {
     focusWindow: 'window:focus',
     revealSession: 'window:reveal-session',
     exportProjects: 'window:export-projects',
+    moveTab: 'window:move-tab',
+    exportThreads: 'window:export-threads',
+    importThreads: 'window:import-threads',
+    openTabs: 'window:open-tabs',
     importProjects: 'window:import-projects',
     /** Renderer → main answer to a main → renderer request (export/import). */
     reply: 'window:reply',

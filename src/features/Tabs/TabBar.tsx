@@ -4,6 +4,7 @@ import { StatusDot } from '@/components/StatusIcons'
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from '@/components/ui/context-menu'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { cn, relativeTime } from '@/lib/utils'
+import type { TabDrag } from '@/store/app'
 import { appStore } from '@/store/app'
 import { Check, ChevronDown, MoreHorizontal, Plus, X } from 'lucide-react'
 import { runInAction } from 'mobx'
@@ -17,6 +18,46 @@ const iconBtn = 'flex h-6 w-6 shrink-0 items-center justify-center rounded-md te
 export { closeTabWithConfirm }
 
 const contextParts = { Item: ContextMenuItem, Separator: ContextMenuSeparator }
+
+const TAB_MIME = 'application/x-pi-tab'
+
+function readDrag(e: React.DragEvent): TabDrag | null {
+    try {
+        const drag = JSON.parse(e.dataTransfer.getData(TAB_MIME))
+        return typeof drag?.key === 'string' && typeof drag.cwd === 'string' && Number.isInteger(drag.window) ? drag : null
+    }
+    catch {
+        return null
+    }
+}
+
+/** A drop at `index` of the active project's tabs: reorder, or pull the tab in from its window. */
+function dropTab(drag: TabDrag, index: number) {
+    if (drag.window !== appStore.windowId) {
+        void appStore.pullTab(drag, index)
+        return
+    }
+    const from = appStore.tabs.findIndex(t => t.key === drag.key)
+    appStore.moveTab(drag.key, from !== -1 && from < index ? index - 1 : index)
+}
+
+/**
+ * Let go outside every window: the tab tears off into a window of its own, like a browser tab. A drop
+ * on another window of the app pulls it there instead (that window's drop handler), so wait a moment
+ * and only tear off if it is still here.
+ */
+function tearOff(thread: Thread, e: React.DragEvent) {
+    const { screenX: x, screenY: y } = e
+    const inside = x >= window.screenX && x <= window.screenX + window.outerWidth && y >= window.screenY && y <= window.screenY + window.outerHeight
+    // The only tab of the window's only project: tearing it off would just move the window.
+    const alone = appStore.windowProjects.length === 1 && appStore.tabsOf(thread.cwd).length === 1
+    if (e.dataTransfer.dropEffect !== 'none' || inside || alone)
+        return
+    setTimeout(() => {
+        if (appStore.threads.get(thread.key) === thread)
+            void appStore.moveTabToWindow(thread.key, null, { at: { x, y } })
+    }, 250)
+}
 const dropdownParts = { Item: DropdownMenuItem, Separator: DropdownMenuSeparator }
 
 /** In-place title editor: same text, no chrome. Enter / blur saves, Esc cancels. */
@@ -81,27 +122,30 @@ const Tab = observer(({ thread, index, visible }: { thread: Thread, index: numbe
             aria-selected={active}
             title={thread.title}
             draggable={!editing}
-            onDragStart={e => e.dataTransfer.setData('application/x-pi-tab', thread.key)}
+            onDragStart={(e) => {
+                e.dataTransfer.effectAllowed = 'move'
+                e.dataTransfer.setData(TAB_MIME, JSON.stringify({ window: appStore.windowId, key: thread.key, cwd: thread.cwd } satisfies TabDrag))
+            }}
+            onDragEnd={e => tearOff(thread, e)}
             onDragOver={(e) => {
-                if (!e.dataTransfer.types.includes('application/x-pi-tab'))
+                if (!e.dataTransfer.types.includes(TAB_MIME))
                     return
                 e.preventDefault()
+                e.stopPropagation()
+                e.dataTransfer.dropEffect = 'move'
                 const rect = e.currentTarget.getBoundingClientRect()
                 setDropSide(e.clientX < rect.left + rect.width / 2 ? 'left' : 'right')
             }}
             onDragLeave={() => setDropSide(null)}
             onDrop={(e) => {
-                const key = e.dataTransfer.getData('application/x-pi-tab')
+                const drag = readDrag(e)
                 const side = dropSide
                 setDropSide(null)
-                if (!key || key === thread.key)
+                e.stopPropagation()
+                if (!drag || drag.key === thread.key)
                     return
                 e.preventDefault()
-                const from = appStore.tabs.findIndex(t => t.key === key)
-                let to = index + (side === 'right' ? 1 : 0)
-                if (from < to)
-                    to--
-                appStore.moveTab(key, to)
+                dropTab(drag, index + (side === 'right' ? 1 : 0))
             }}
             onMouseDown={(e) => {
                 // Middle click closes, like a browser tab.
@@ -209,7 +253,24 @@ export const TabBar = observer(() => {
     const visible = new Set(appStore.visibleTabs.map(t => t.key))
     return (
         <div className="flex h-[36px] shrink-0 items-center gap-1 bg-ide-panel px-1.5">
-            <div role="tablist" aria-label={tr('线程标签', 'Thread tabs')} className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto px-px py-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            <div
+                role="tablist"
+                aria-label={tr('线程标签', 'Thread tabs')}
+                // Space after the last tab: drops land at the end.
+                onDragOver={(e) => {
+                    if (!e.dataTransfer.types.includes(TAB_MIME))
+                        return
+                    e.preventDefault()
+                    e.dataTransfer.dropEffect = 'move'
+                }}
+                onDrop={(e) => {
+                    const drag = readDrag(e)
+                    if (!drag)
+                        return
+                    e.preventDefault()
+                    dropTab(drag, appStore.tabs.length)
+                }}
+                className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto px-px py-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                 {appStore.tabs.map((thread, i) => (
                     <Tab key={thread.key} thread={thread} index={i} visible={visible.has(thread.key) && appStore.tabs.length > 1} />
                 ))}

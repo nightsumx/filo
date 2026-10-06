@@ -3,7 +3,7 @@
 import type { Thread } from '@/store/thread'
 import { confirm } from '@/lib/confirm'
 import { appStore } from '@/store/app'
-import { Archive, FolderOpen, Pencil, Trash2, X, XCircle } from 'lucide-react'
+import { AppWindow, Archive, ArrowRightToLine, FolderOpen, Pencil, Trash2, X, XCircle } from 'lucide-react'
 import { observable, runInAction } from 'mobx'
 import { observer } from 'mobx-react-lite'
 import { tr } from '@/lib/i18n'
@@ -40,6 +40,8 @@ async function closeOthers(thread: Thread) {
 export const ThreadActions = observer(({ thread, parts: { Item, Separator } }: { thread: Thread, parts: MenuParts }) => {
     const session = thread.sessionPath ? appStore.sessions.find(s => s.path === thread.sessionPath) : undefined
     const hasOthers = appStore.tabsOf(thread.cwd).length > 1
+    // The window's only tab would just take the window along.
+    const canTearOff = hasOthers || appStore.windowProjects.length > 1
     return (
         <>
             {!thread.isEmpty && (
@@ -58,6 +60,18 @@ export const ThreadActions = observer(({ thread, parts: { Item, Separator } }: {
                 <FolderOpen size={14} />
                 {tr('在 Finder 中打开', 'Show in Finder')}
             </Item>
+            <Separator />
+            {/* Same as dragging the tab out of the window, or onto another window's tab bar. */}
+            <Item disabled={!canTearOff} onSelect={() => void appStore.moveTabToWindow(thread.key, null)}>
+                <AppWindow size={14} />
+                {tr('移到新窗口', 'Move to new window')}
+            </Item>
+            {appStore.otherWindows.map(w => (
+                <Item key={w.id} onSelect={() => void appStore.moveTabToWindow(thread.key, w.id)}>
+                    <ArrowRightToLine size={14} />
+                    <span className="min-w-0 flex-1 truncate">{tr(`移到窗口：${w.label}`, `Move to window: ${w.label}`)}</span>
+                </Item>
+            ))}
             <Separator />
             <Item onSelect={() => void closeTabWithConfirm(thread)}>
                 <X size={14} />

@@ -1,12 +1,15 @@
 // One project per window, as in WebStorm. A window can also hold several projects after the user
 // merges windows (or attaches a project); its project tree then lists them all. Projects move between
 // windows live: the source window hands over its threads' state and main re-routes their pi
-// processes, holding back events until the target window has taken them.
-import type { OpenProject, ProjectActivity, ProjectTransfer, WindowBounds, WindowInit, WindowReport } from '@shared/ipc'
+// processes, holding back events until the target window has taken them. Single tabs move the same
+// way (dragged to another window or torn off), so one project can show in several windows; a session
+// is still a tab in one window only.
+import type { AppState, OpenProject, ProjectActivity, ProjectTransfer, StateSave, TabMove, ThreadTransfer, WindowBounds, WindowInit, WindowReport } from '@shared/ipc'
 import type { StateFile } from './appState'
 import { randomUUID } from 'node:crypto'
 import { IPC } from '@shared/ipc'
 import { app, BrowserWindow, dialog, ipcMain, screen } from 'electron'
+import { unionTabs, windowState } from './appState'
 import { tr } from './i18n'
 
 interface Entry {
@@ -20,6 +23,11 @@ interface Entry {
     markReady: () => void
     /** Closed by the app (emptied by a transfer, or its last project closed): no prompt. */
     closing: boolean
+    /** This window's tabs per project, as it last saved them (or as saved at the last quit). */
+    tabs: Record<string, string[]>
+    activeTabs: Record<string, string>
+    /** Last time the window had focus: picks the window to bring forward for a project shown in several. */
+    focusedAt: number
 }
 
 interface Route {
@@ -68,9 +76,9 @@ export class Windows {
 
     // ---------------------------------------------------------------- windows
 
-    open(projects: string[], active?: string | null, near?: BrowserWindow | null): Entry {
+    open(projects: string[], active?: string | null, near?: BrowserWindow | null, extra: { frame?: Partial<WindowBounds>, tabs?: Record<string, string[]>, activeTabs?: Record<string, string> } = {}): Entry {
         const saved = projects[0] ? this.options.store.state.windowBounds?.[projects[0]] : undefined
-        const win = this.options.create(saved && onScreen(saved) ? saved : cascade(near ?? BrowserWindow.getFocusedWindow()))
+        const win = this.options.create(extra.frame ?? (saved && onScreen(saved) ? saved : cascade(near ?? BrowserWindow.getFocusedWindow())))
         let markReady = () => {}
         const ready = new Promise<void>(resolve => (markReady = resolve))
         const entry: Entry = {
@@ -82,8 +90,12 @@ export class Windows {
             ready,
             markReady,
             closing: false,
+            tabs: { ...extra.tabs },
+            activeTabs: { ...extra.activeTabs },
+            focusedAt: Date.now(),
         }
         this.entries.set(entry.id, entry)
+        win.on('focus', () => (entry.focusedAt = Date.now()))
 
         win.on('close', (event) => {
             if (!this.quitting && !entry.closing) {
@@ -140,9 +152,9 @@ export class Windows {
     }
 
     /** Reopens the windows saved at the last quit, or a welcome window. */
-    restore(saved: { projects: string[], active?: string }[]) {
+    restore(saved: { projects: string[], active?: string, tabs?: Record<string, string[]>, activeTabs?: Record<string, string> }[]) {
         for (const w of saved)
-            this.open(w.projects, w.active)
+            this.open(w.projects, w.active, null, { tabs: w.tabs, activeTabs: w.activeTabs })
         if (!this.entries.size)
             this.open([])
     }
@@ -164,8 +176,19 @@ export class Windows {
         return entry
     }
 
+    /** The window showing the project; of several, the one focused last. */
     private ownerOf(cwd: string): Entry | undefined {
-        return [...this.entries.values()].find(e => e.projects.includes(cwd))
+        let best: Entry | undefined
+        for (const e of this.entries.values()) {
+            if (e.projects.includes(cwd) && (!best || e.focusedAt > best.focusedAt))
+                best = e
+        }
+        return best
+    }
+
+    /** The window showing a session as a tab. */
+    private holderOf(session: string): Entry | undefined {
+        return [...this.entries.values()].find(e => e.projects.some(cwd => e.tabs[cwd]?.includes(session)))
     }
 
     private focus(entry: Entry) {
@@ -178,17 +201,37 @@ export class Windows {
     /** Saves the window list, refreshes every window's view of the others and the Dock badge. */
     private changed() {
         const entries = [...this.entries.values()]
-        const windows = entries.filter(e => e.projects.length).map(e => ({ projects: e.projects, active: e.active ?? undefined }))
+        const windows = entries.filter(e => e.projects.length).map(e => ({
+            projects: e.projects,
+            active: e.active ?? undefined,
+            tabs: Object.fromEntries(e.projects.filter(cwd => e.tabs[cwd]).map(cwd => [cwd, e.tabs[cwd]])),
+            activeTabs: Object.fromEntries(e.projects.filter(cwd => e.activeTabs[cwd]).map(cwd => [cwd, e.activeTabs[cwd]])),
+        }))
         if (!this.quitting && JSON.stringify(windows) !== JSON.stringify(this.options.store.state.windows))
             void this.options.store.update(s => ({ ...s, windows }))
         const open: OpenProject[] = entries.flatMap(e => e.projects.map(cwd => ({ cwd, windowId: e.id, activity: e.activity[cwd] ?? NO_ACTIVITY })))
-        for (const e of entries)
+        const tabs: Record<string, number> = {}
+        for (const e of entries) {
+            for (const cwd of e.projects) {
+                for (const key of e.tabs[cwd] ?? [])
+                    tabs[key] ??= e.id
+            }
+        }
+        for (const e of entries) {
             e.win.webContents.send(IPC.openProjects, open)
+            e.win.webContents.send(IPC.openTabs, tabs)
+        }
         const waiting = open.reduce((n, p) => n + p.activity.waiting, 0)
         app.setBadgeCount(Math.min(waiting, 999))
     }
 
     private setProjects(entry: Entry, projects: string[]) {
+        for (const cwd of entry.projects) {
+            if (!projects.includes(cwd)) {
+                delete entry.tabs[cwd]
+                delete entry.activeTabs[cwd]
+            }
+        }
         entry.projects = projects
         if (!entry.active || !projects.includes(entry.active))
             entry.active = projects[0] ?? null
@@ -224,6 +267,40 @@ export class Windows {
         return { id: entry.id, projects: entry.projects, active: entry.active ?? undefined }
     }
 
+    /** state.json as this window starts from it: its own tabs, and none that another window shows. */
+    stateFor(sender: Electron.WebContents, state: AppState): AppState {
+        const entry = this.entryOf(sender)
+        const elsewhere = new Set<string>()
+        for (const e of this.entries.values()) {
+            if (e !== entry)
+                e.projects.forEach(cwd => e.tabs[cwd]?.forEach(k => elsewhere.add(k)))
+        }
+        return windowState(state, { tabs: entry.tabs, activeTabs: entry.activeTabs }, elsewhere)
+    }
+
+    /**
+     * Takes a window's tabs from its save. Returns the save as state.json should apply it: a project
+     * shown in several windows keeps all their tabs there (the fallback for a window that has none).
+     */
+    recordTabs(sender: Electron.WebContents, save: StateSave): { save: StateSave, owned: string[] } {
+        const entry = this.entryOf(sender)
+        const tabs: Record<string, string[]> = {}
+        const activeTabs: Record<string, string> = {}
+        for (const cwd of entry.projects) {
+            entry.tabs[cwd] = Array.isArray(save.tabs[cwd]) ? save.tabs[cwd].filter(k => typeof k === 'string') : []
+            if (typeof save.activeTabs[cwd] === 'string')
+                entry.activeTabs[cwd] = save.activeTabs[cwd]
+            else
+                delete entry.activeTabs[cwd]
+            const others = [...this.entries.values()].filter(e => e !== entry && e.projects.includes(cwd))
+            tabs[cwd] = unionTabs([entry.tabs[cwd], ...others.map(e => e.tabs[cwd] ?? [])])
+            if (entry.activeTabs[cwd])
+                activeTabs[cwd] = entry.activeTabs[cwd]
+        }
+        this.changed()
+        return { save: { ...save, tabs, activeTabs }, owned: entry.projects }
+    }
+
     ready(sender: Electron.WebContents) {
         this.entryOf(sender).markReady()
     }
@@ -239,9 +316,9 @@ export class Windows {
 
     openProject(sender: Electron.WebContents, cwd: string): 'here' | 'elsewhere' {
         const entry = this.entryOf(sender)
-        const owner = this.ownerOf(cwd)
-        if (owner === entry)
+        if (entry.projects.includes(cwd))
             return 'here'
+        const owner = this.ownerOf(cwd)
         if (owner) {
             this.focus(owner)
             owner.win.webContents.send(IPC.selectProject, cwd)
@@ -259,9 +336,9 @@ export class Windows {
 
     attachProject(sender: Electron.WebContents, cwd: string) {
         const entry = this.entryOf(sender)
-        const owner = this.ownerOf(cwd)
-        if (owner === entry)
+        if (entry.projects.includes(cwd))
             return
+        const owner = this.ownerOf(cwd)
         if (owner)
             return this.transfer([cwd], owner, entry)
         this.setProjects(entry, [...entry.projects, cwd])
@@ -307,10 +384,19 @@ export class Windows {
         this.focus(target)
     }
 
-    /** Like openProject, then the window showing the project opens the session (at a message). */
+    /**
+     * The window with the session's tab, else the one showing its project (like openProject), opens
+     * the session at a message.
+     */
     async revealSession(sender: Electron.WebContents, cwd: string, session: string, entryId?: string) {
-        this.openProject(sender, cwd)
-        const owner = this.ownerOf(cwd)
+        const entry = this.entryOf(sender)
+        let owner = this.holderOf(session)
+        if (!owner && entry.projects.includes(cwd))
+            owner = entry
+        if (!owner) {
+            this.openProject(sender, cwd)
+            owner = this.ownerOf(cwd)
+        }
         if (!owner)
             return
         await owner.ready
@@ -354,6 +440,88 @@ export class Windows {
 
     // ---------------------------------------------------------------- transfers
 
+    /** A tab to another window (or a new one, torn off at `move.at`). */
+    moveTab(sender: Electron.WebContents, move: TabMove): Promise<void> {
+        const from = move.from == null ? this.entryOf(sender) : this.entries.get(move.from)
+        if (!from)
+            return Promise.reject(new Error('the source window is gone'))
+        const run = this.moving.catch(() => {}).then(() => this.moveThread(from, move))
+        this.moving = run
+        return run
+    }
+
+    private async moveThread(from: Entry, move: TabMove) {
+        const { cwd, key } = move
+        if (!from.projects.includes(cwd) || this.entries.get(from.id) !== from)
+            return
+        let to = move.to == null ? undefined : this.entries.get(move.to)
+        if (move.to != null && !to)
+            throw new Error('the target window is gone')
+        if (to === from)
+            return
+        to ??= this.open([], null, from.win, move.at ? { frame: frameAt(from.win, move.at) } : {})
+        await to.ready
+        // Every process of the project in the source is held while it hands the tab over: one may be
+        // the moving thread's, starting right now.
+        const leaving = `${from.id}
+${cwd}`
+        this.leaving.add(leaving)
+        for (const route of this.routes.values()) {
+            if (route.owner === from.id && route.cwd === cwd)
+                route.held ??= []
+        }
+        let owner = from
+        try {
+            const transfer = await this.ask<ThreadTransfer>(from, IPC.exportThreads, [key])
+            if (!transfer.remaining)
+                this.setProjects(from, from.projects.filter(p => p !== cwd))
+            // Listed for the target before it imports (its save during the import must count), but
+            // told only after: the renderer adds the project itself, with just this tab.
+            const added = !to.projects.includes(cwd)
+            if (added)
+                to.projects = [...to.projects, cwd]
+            try {
+                await this.ask(to, IPC.importThreads, { transfer, index: move.index })
+                owner = to
+                if (added)
+                    this.setProjects(to, to.projects)
+            }
+            catch (error) {
+                if (added)
+                    this.setProjects(to, to.projects.filter(p => p !== cwd))
+                if (!from.projects.includes(cwd))
+                    this.setProjects(from, [...from.projects, cwd])
+                await this.ask(from, IPC.importThreads, { transfer }).catch(() => {})
+                throw error
+            }
+            finally {
+                for (const agentId of transfer.agents) {
+                    const route = this.routes.get(agentId)
+                    if (route)
+                        route.owner = owner.id
+                }
+            }
+        }
+        finally {
+            this.leaving.delete(leaving)
+            for (const [agentId, route] of [...this.routes]) {
+                if (route.held && route.cwd === cwd && (route.owner === from.id || route.owner === to.id)) {
+                    const held = route.held
+                    route.held = null
+                    for (const [channel, args] of held)
+                        this.deliver(agentId, channel, ...args)
+                }
+            }
+            this.changed()
+            // A new window the tab never reached is not left behind empty.
+            if (owner !== to && !to.projects.length && move.to == null)
+                this.dispose(to)
+        }
+        if (!from.projects.length)
+            this.dispose(from)
+        this.focus(to)
+    }
+
     private transfer(cwds: string[], from: Entry, to: Entry): Promise<void> {
         const run = this.moving.catch(() => {}).then(() => this.move(cwds, from, to))
         this.moving = run
@@ -373,7 +541,8 @@ export class Windows {
         try {
             await to.ready
             // The source applies every event it already got before it snapshots, then lets the threads go.
-            const projects = await this.ask<ProjectTransfer[]>(from, IPC.exportProjects, cwds)
+            const shown = new Set(cwds.filter(c => to.projects.includes(c)))
+            const projects = (await this.ask<ProjectTransfer[]>(from, IPC.exportProjects, cwds)).map(p => ({ ...p, merge: shown.has(p.cwd) }))
             // Processes started while the source was finishing up are held as well.
             const routes = [...this.routes.values()].filter(r => r.owner === from.id && cwds.includes(r.cwd))
             this.setProjects(from, from.projects.filter(p => !cwds.includes(p)))
@@ -409,6 +578,15 @@ export class Windows {
         if (!from.projects.length)
             this.dispose(from)
     }
+}
+
+/** A torn-off tab's window: the source's size, its tab strip under the pointer, kept on screen. */
+function frameAt(near: BrowserWindow, at: { x: number, y: number }): Partial<WindowBounds> {
+    const { width, height } = near.getNormalBounds()
+    const area = screen.getDisplayNearestPoint({ x: Math.round(at.x), y: Math.round(at.y) }).workArea
+    const x = Math.min(Math.max(area.x, Math.round(at.x) - 120), area.x + area.width - width)
+    const y = Math.min(Math.max(area.y, Math.round(at.y) - 20), area.y + area.height - height)
+    return { x: Math.max(area.x, x), y: Math.max(area.y, y), width: Math.min(width, area.width), height: Math.min(height, area.height) }
 }
 
 function cascade(near: BrowserWindow | null): Partial<WindowBounds> {

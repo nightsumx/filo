@@ -1,6 +1,6 @@
 import type { ApprovalMode, CapabilityId, Presence } from '@shared/capabilities'
 import type { LangPref } from '@shared/i18n'
-import type { AppState, GlobalCompactionPatch, GlobalPrefs, OpenProject, PiEnvResult, ProjectActivity, ProjectTransfer, RepoEdits, ReviewView, SearchResult, SessionSummary, StateSave, ThemePref, TranscriptLang, WindowReport } from '@shared/ipc'
+import type { AppState, GlobalCompactionPatch, GlobalPrefs, OpenProject, PiEnvResult, ProjectActivity, ProjectTransfer, RepoEdits, ReviewView, SearchResult, SessionSummary, StateSave, ThemePref, ThreadTransfer, TranscriptLang, WindowReport } from '@shared/ipc'
 import { APPROVAL_MODES, DEFAULT_CAPABILITIES, normalizeCapabilities } from '@shared/capabilities'
 import { LANG_PREFS } from '@shared/i18n'
 import { DEFAULT_THEME, GLOBAL_PREF_KEYS, REVIEW_VIEWS, THEME_PREFS, TRANSCRIPT_LANGS } from '@shared/ipc'
@@ -55,6 +55,13 @@ export interface Project {
 export type { ProjectActivity }
 
 const NO_ACTIVITY: ProjectActivity = { open: 0, running: 0, unread: 0, waiting: 0 }
+
+/** What a dragged tab carries (application/x-pi-tab), readable by every window of the app. */
+export interface TabDrag {
+    window: number
+    key: string
+    cwd: string
+}
 
 class AppStore implements ThreadHost {
     env: PiEnvResult | null = null
@@ -114,6 +121,8 @@ class AppStore implements ThreadHost {
     reveal: { key: string, entryId: string, n: number } | null = null
     /** Per project: the sessions that edited each uncommitted file (this app's threads and terminal pi alike). */
     edits = observable.map<string, RepoEdits['files']>()
+    /** Session file → the window showing it as a tab (all windows, from main). */
+    tabWindows: Record<string, number> = {}
     /** Terminal pi processes (pi-cc-tui's presence extension). */
     presence: Presence[] = []
 
@@ -297,6 +306,9 @@ class AppStore implements ThreadHost {
         api().onOpenProjects(projects => runInAction(() => (this.openProjects = projects)))
         api().onSelectProject(cwd => runInAction(() => this.windowProjects.includes(cwd) && this.showProject(cwd)))
         api().onRevealSession((session, entryId) => void this.revealHere(session, entryId))
+        api().onOpenTabs(tabs => runInAction(() => (this.tabWindows = tabs)))
+        api().onExportThreads(this.exportThreads)
+        api().onImportThreads(this.importThreads)
         api().onPresence(list => this.setPresence(list))
         void api().getPresence().then(list => this.setPresence(list))
         api().onExportProjects(this.exportProjects)
@@ -573,7 +585,7 @@ class AppStore implements ThreadHost {
                 continue
             }
             const session = this.sessions.find(s => s.path === key)
-            if (!session)
+            if (!session || this.elsewhere(key))
                 continue
             this.createSessionThread(session)
             restored.push(key)
@@ -736,6 +748,11 @@ class AppStore implements ThreadHost {
 
     /** Open a session in a tab of its project, or focus the tab already showing it. */
     openSession(session: SessionSummary) {
+        // A session is a tab in one window: the one that has it comes forward.
+        if (!this.threads.has(session.path) && this.elsewhere(session.path)) {
+            void api().revealSession(session.cwd, session.path).catch(error => toast.error(error.message))
+            return
+        }
         this.activeProject = session.cwd
         this.restoreTabs(session.cwd)
         const thread = this.threads.get(session.path) ?? this.createSessionThread(session)
@@ -1119,6 +1136,20 @@ class AppStore implements ThreadHost {
                     if (thread.agentId)
                         this.agentThreads.set(thread.agentId, thread)
                 }
+                // Shown here already (it was in both windows): its tabs from there go after these.
+                if (project.merge) {
+                    const here = this.tabsByProject[project.cwd] ?? []
+                    this.tabsByProject[project.cwd] = [...here, ...project.tabs.filter(k => !here.includes(k))]
+                    continue
+                }
+                // Main listed the project here just before this, and showing it opened a blank tab.
+                for (const key of this.tabsByProject[project.cwd] ?? []) {
+                    const blank = this.threads.get(key)
+                    if (blank && !project.tabs.includes(key) && blank.isEmpty && !blank.persisted) {
+                        this.threads.delete(key)
+                        void blank.stopAgent()
+                    }
+                }
                 this.tabsByProject[project.cwd] = project.tabs
                 if (project.activeTab)
                     this.activeTabByProject[project.cwd] = project.activeTab
@@ -1129,6 +1160,117 @@ class AppStore implements ThreadHost {
             }
             if (!this.activeProject && projects[0])
                 this.showProject(projects[0].cwd)
+        })
+        this.persist()
+    }
+
+    // ---------------------------------------------------------------- moving tabs between windows
+
+    /** Another window shows this session as a tab. */
+    elsewhere(session: string): boolean {
+        const id = this.tabWindows[session]
+        return id != null && id !== this.windowId
+    }
+
+    /** Other windows, labelled by their projects (for "move tab to"). */
+    get otherWindows(): { id: number, label: string }[] {
+        const byWindow = new Map<number, string[]>()
+        for (const p of this.openProjects) {
+            if (p.windowId !== this.windowId)
+                byWindow.set(p.windowId, [...byWindow.get(p.windowId) ?? [], basename(p.cwd)])
+        }
+        return [...byWindow].map(([id, names]) => ({ id, label: names.join(', ') }))
+    }
+
+    /** Sends a tab to another window, or (`to` null) into a new one, opened at `at` if given. */
+    async moveTabToWindow(key: string, to: number | null, options: { index?: number, at?: { x: number, y: number } } = {}) {
+        const thread = this.threads.get(key)
+        if (!thread)
+            return
+        try {
+            await api().moveTab({ key, cwd: thread.cwd, to, ...options })
+        }
+        catch (error: any) {
+            toast.error(`${tr('移动标签失败：', 'Could not move the tab: ')}${error.message}`)
+        }
+    }
+
+    /** A tab dragged in from another window, dropped at `index` among this project's tabs. */
+    async pullTab(drag: TabDrag, index?: number) {
+        if (drag.window === this.windowId)
+            return
+        try {
+            await api().moveTab({ key: drag.key, cwd: drag.cwd, from: drag.window, to: this.windowId, index })
+        }
+        catch (error: any) {
+            toast.error(`${tr('移动标签失败：', 'Could not move the tab: ')}${error.message}`)
+        }
+    }
+
+    /** Main asks for tabs that another window takes over (see exportProjects for the hand-over rules). */
+    async exportThreads(keys: string[]): Promise<ThreadTransfer> {
+        const threads = keys.map(k => this.threads.get(k)).filter((t): t is Thread => !!t)
+        const cwd = threads[0]?.cwd
+        if (!cwd || threads.some(t => t.cwd !== cwd))
+            throw new Error('no such tab')
+        this.flushEvents()
+        await Promise.all(threads.map(t => t.quiesce()))
+        this.flushEvents()
+        const transfer: ThreadTransfer = {
+            cwd,
+            threads: threads.map(t => t.snapshot()),
+            agents: threads.map(t => t.agentId).filter((id): id is string => !!id),
+            remaining: false,
+        }
+        runInAction(() => {
+            for (const thread of threads) {
+                this.threads.delete(thread.key)
+                if (thread.agentId)
+                    this.agentThreads.delete(thread.agentId)
+            }
+            const moved = new Set(threads.map(t => t.key))
+            const tabs = (this.tabsByProject[cwd] ?? []).filter(k => !moved.has(k))
+            const index = (this.tabsByProject[cwd] ?? []).indexOf(this.activeTabByProject[cwd] ?? '')
+            this.tabsByProject[cwd] = tabs
+            transfer.remaining = tabs.some(k => this.threads.has(k))
+            if (moved.has(this.activeTabByProject[cwd] ?? '') && tabs.length)
+                this.activeTabByProject[cwd] = tabs[Math.min(Math.max(index, 0), tabs.length - 1)]
+            // Its last tab gone, the project leaves this window too (main drops it there as well).
+            if (!transfer.remaining) {
+                delete this.tabsByProject[cwd]
+                delete this.activeTabByProject[cwd]
+                this.windowProjects = this.windowProjects.filter(p => p !== cwd)
+                if (this.activeProject === cwd) {
+                    this.activeProject = null
+                    if (this.windowProjects[0])
+                        this.showProject(this.windowProjects[0])
+                }
+            }
+        })
+        this.persist()
+        return transfer
+    }
+
+    /** Takes tabs from another window, at `index` among the project's tabs here. */
+    async importThreads({ transfer, index }: { transfer: ThreadTransfer, index?: number }) {
+        runInAction(() => {
+            const keys: string[] = []
+            for (const snapshot of transfer.threads) {
+                const thread = Thread.restore(this, snapshot)
+                this.threads.set(thread.key, thread)
+                if (thread.agentId)
+                    this.agentThreads.set(thread.agentId, thread)
+                keys.push(thread.key)
+            }
+            const { cwd } = transfer
+            // Not shown here yet: whatever tab list this window remembers for it belongs to others.
+            const here = this.windowProjects.includes(cwd) ? (this.tabsByProject[cwd] ?? []).filter(k => !keys.includes(k)) : []
+            const at = index == null ? here.length : Math.max(0, Math.min(index, here.length))
+            this.tabsByProject[cwd] = [...here.slice(0, at), ...keys, ...here.slice(at)]
+            if (!this.windowProjects.includes(cwd))
+                this.windowProjects = [...this.windowProjects, cwd]
+            if (keys[0])
+                this.focus(keys[0], true)
         })
         this.persist()
     }

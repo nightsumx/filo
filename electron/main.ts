@@ -1,4 +1,4 @@
-import type { AgentStartOptions, GlobalCompactionPatch, SearchResult, StateSave, ThemePref, WindowBounds, WindowReport } from '@shared/ipc'
+import type { AgentStartOptions, GlobalCompactionPatch, SearchResult, StateSave, TabMove, ThemePref, WindowBounds, WindowReport } from '@shared/ipc'
 import { APP_INFO } from '@shared/app'
 import { resolveLang } from '@shared/i18n'
 import { stat } from 'node:fs/promises'
@@ -194,14 +194,14 @@ function registerIpc() {
         await shell.trashItem(file)
     })
 
-    ipcMain.handle(IPC.loadState, () => store.state)
+    ipcMain.handle(IPC.loadState, e => windows.stateFor(e.sender, store.state))
     ipcMain.handle(IPC.saveState, (e, save: StateSave) => {
         if (!save || typeof save !== 'object' || !save.prefs || !save.tabs || !save.activeTabs)
             return
         let changed = {}
-        const owned = windows.init(e.sender).projects
+        const { save: merged, owned } = windows.recordTabs(e.sender, save)
         const written = store.update((state) => {
-            const result = applySave(state, save, owned)
+            const result = applySave(state, merged, owned)
             changed = result.changed
             return result.state
         })
@@ -228,6 +228,16 @@ function registerIpc() {
     ipcMain.handle(IPC.closeProject, (e, cwd: unknown) => windows.closeProject(e.sender, absolutePath(cwd)))
     ipcMain.handle(IPC.mergeAllWindows, e => windows.mergeAll(e.sender))
     ipcMain.handle(IPC.focusWindow, e => windows.focusWindow(e.sender))
+    ipcMain.handle(IPC.moveTab, (e, move: TabMove) => {
+        if (!move || typeof move.key !== 'string' || typeof move.cwd !== 'string' || (move.to !== null && !Number.isInteger(move.to)))
+            throw new Error('bad tab move')
+        const at = move.at && Number.isFinite(move.at.x) && Number.isFinite(move.at.y) ? { x: move.at.x, y: move.at.y } : undefined
+        const index = Number.isInteger(move.index) ? move.index : undefined
+        // A window may pull a tab only into itself (its drop zone); otherwise it moves its own.
+        if (move.from != null && move.to !== e.sender.id)
+            throw new Error('bad tab move')
+        return windows.moveTab(e.sender, { key: move.key, cwd: move.cwd, from: Number.isInteger(move.from) ? move.from : undefined, to: move.to, index, at })
+    })
     ipcMain.handle(IPC.revealSession, async (e, cwd: unknown, session: unknown, entryId: unknown) => {
         if (typeof session !== 'string')
             throw new Error('expected a session path')
