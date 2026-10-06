@@ -619,6 +619,40 @@ export class Thread {
         }
     }
 
+    /**
+     * pi's fork: this process moves to a new session holding the branch before `entryId` (a user
+     * prompt), and the prompt comes back into the composer to edit. The old session stays as it was.
+     */
+    async fork(entryId: string): Promise<boolean> {
+        if (this.running) {
+            toast.error(tr('运行中不能分叉，先停止或等它结束', 'Cannot fork while running; stop it or wait for it to finish'))
+            return false
+        }
+        try {
+            const response = await this.request<{ text?: string, cancelled?: boolean }>({ type: 'fork', entryId })
+            if (response.data?.cancelled)
+                return false
+            await this.syncState()
+            // Forking at the first prompt leaves no conversation, and pi writes no file until there is one.
+            await this.load().catch(() => runInAction(() => {
+                this.items = []
+                this.loaded = true
+            }))
+            runInAction(() => {
+                // Otherwise the fork's file already holds the earlier turns: the tab survives a restart.
+                if (this.items.length)
+                    this.persisted = true
+                this.draft = response.data?.text ?? ''
+            })
+            await this.refreshStats()
+            return true
+        }
+        catch (error: any) {
+            toast.error(`${tr('分叉失败：', 'Fork failed: ')}${error.message}`)
+            return false
+        }
+    }
+
     async compact() {
         try {
             await this.request({ type: 'compact' })

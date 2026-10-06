@@ -7,7 +7,8 @@ import { USER_BUBBLE_MAX_HEIGHT } from '@/lib/rowEstimate'
 import { useT, verbFor } from '@/lib/transcriptText'
 import { cn, formatCost, formatCount } from '@/lib/utils'
 import copyText from 'copy-to-clipboard'
-import { Check, ChevronRight, Copy } from 'lucide-react'
+import { appStore } from '@/store/app'
+import { Check, ChevronRight, Copy, GitFork, PencilLine } from 'lucide-react'
 import { observer } from 'mobx-react-lite'
 import { turnStats } from '@/lib/turnSummary'
 import { createContext, Fragment, memo, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
@@ -34,8 +35,11 @@ function CopyAction({ text }: { text: string }) {
     )
 }
 
-// User prompt: a right-aligned chat bubble; the copy action sits to its left on hover.
-function UserBubble({ user }: { user: UserPrompt }) {
+/** Saved prompts (keyed by their session entry id) can be forked; live and pending ones not yet. */
+const forkable = (entryId: string | undefined) => !!entryId && !entryId.startsWith('live-') && entryId !== 'pending'
+
+// User prompt: a right-aligned chat bubble; copy, fork and edit sit to its left on hover.
+const UserBubble = observer(({ user, thread, entryId }: { user: UserPrompt, thread?: Thread, entryId?: string }) => {
     const t = useT()
     const bubbleRef = useRef<HTMLDivElement>(null)
     const [overflowing, setOverflowing] = useState(false)
@@ -54,7 +58,13 @@ function UserBubble({ user }: { user: UserPrompt }) {
             )}
             {user.text && (
                 <div className="flex max-w-full items-start gap-1">
-                    <div className="shrink-0 pt-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+                    <div className="flex shrink-0 gap-0.5 pt-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+                        {thread && forkable(entryId) && thread.sessionPath && (
+                            <>
+                                <ActionBtn icon={GitFork} size="small" title={t.forkHere} onClick={() => void appStore.forkThread(thread, entryId!, false)} />
+                                {!thread.running && <ActionBtn icon={PencilLine} size="small" title={t.editResend} onClick={() => void appStore.forkThread(thread, entryId!, true)} />}
+                            </>
+                        )}
                         <CopyAction text={user.text} />
                     </div>
                     {/* Long prompts (pasted logs, specs) scroll inside; focusable then, so the keyboard can scroll them too. */}
@@ -70,7 +80,7 @@ function UserBubble({ user }: { user: UserPrompt }) {
             )}
         </div>
     )
-}
+})
 
 /** Toggles a finished turn's fold; MessageList owns the open set because it changes the row list. */
 export const TurnFoldContext = createContext<(turnKey: string) => void>(() => {})
@@ -300,7 +310,7 @@ export const TranscriptRowView = memo(({ row, thread, top }: { row: TranscriptRo
     const pad = row.first && !top ? 'pt-6' : 'pt-3'
     switch (row.kind) {
         case 'user':
-            return <div className={pad}><UserBubble user={row.user} /></div>
+            return <div className={pad}><UserBubble user={row.user} thread={thread} entryId={row.turn.key} /></div>
         case 'fold':
             return <div className={pad}><FoldRow row={row} /></div>
         case 'item':

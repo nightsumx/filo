@@ -735,6 +735,35 @@ class AppStore implements ThreadHost {
         this.focus(thread.key, true)
     }
 
+    /**
+     * Edit an earlier prompt. In place: this tab moves to a fork of its session. Otherwise a new tab
+     * forks it (its own pi process resumes the session, then forks), and this tab carries on as is.
+     */
+    async forkThread(thread: Thread, entryId: string, inPlace: boolean) {
+        if (inPlace) {
+            if (await thread.fork(entryId))
+                this.focus(thread.key, true)
+            return
+        }
+        if (!thread.sessionPath)
+            return
+        const fork = new Thread(this, { key: `new:${uid()}`, cwd: thread.cwd, sessionPath: thread.sessionPath, name: thread.name, firstPrompt: thread.firstPrompt })
+        // Shows the transcript it forks from until pi has made the fork.
+        fork.items = thread.items.slice()
+        fork.loaded = true
+        this.threads.set(fork.key, fork)
+        this.insertTab(fork)
+        this.focus(fork.key)
+        if (await fork.fork(entryId)) {
+            this.focus(fork.key, true)
+            this.persist()
+            void this.refreshSessions()
+        }
+        else {
+            await this.closeTab(fork.key)
+        }
+    }
+
     async closeTab(key: string) {
         const thread = this.threads.get(key)
         if (!thread)
