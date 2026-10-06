@@ -3,7 +3,7 @@
     "productName": "Pi",
     "private": true,
     "version": "0.1.0",
-    "description": "pi 编码 Agent 的桌面工作台：按项目切换，线程以标签打开并自动分栏",
+    "description": "pi 编码 Agent 的桌面客户端：多项目多线程并行，实时状态，对话内提问",
     "author": "sum",
     "homepage": "https://pi.dev",
     "type": "module",
@@ -11,6 +11,7 @@
     "trustedDependencies": ["electron"],
     "scripts": {
         "dev": "vite",
+        "postinstall": "node scripts/dev-app-name.mjs",
         "build": "tsc -b && vite build",
         "typecheck": "tsc -b",
         "test": "vitest run",

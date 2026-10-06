@@ -1,8 +1,8 @@
-/** Product info shown in the About panel, the window title and the sidebar. Keep in sync with package.json. */
+/** Product info shown in the About panel, the window title and the sidebar. Keep in sync with package.json and index.html. */
 export const APP_INFO = {
     name: 'Pi',
-    tagline: 'pi 编码 Agent 的桌面工作台',
-    description: '按项目切换工作区，每个项目的线程以标签打开，并按窗口宽度自动分栏并行查看。对话、工具调用与代码改动在同一处呈现。',
+    tagline: 'pi 编码 Agent 的桌面客户端',
+    description: '多个项目、多个线程并行运行 pi，侧边栏实时显示每个线程在做什么。需要你回答时直接在对话里提问，窗口在后台时发系统通知。任务清单、提问等能力按项目开关，上下文压缩与终端 pi 共用设置。',
     author: 'sum',
     homepage: 'https://pi.dev',
 } as const

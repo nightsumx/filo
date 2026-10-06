@@ -81,7 +81,7 @@ function createWindow() {
         height: 880,
         minWidth: 880,
         minHeight: 560,
-        title: 'Pi',
+        title: APP_INFO.name,
         titleBarStyle: 'hiddenInset',
         // Centred in the 38px main toolbar.
         trafficLightPosition: { x: 14, y: 12 },
