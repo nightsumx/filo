@@ -1,5 +1,5 @@
-import { beforeEach, describe, expect, it } from 'vitest'
-import { appStore, MIN_PANE_WIDTH } from './app'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { AGENT_IDLE_MS, appStore, MIN_PANE_WIDTH } from './app'
 
 function reset() {
     appStore.threads.clear()
@@ -94,5 +94,57 @@ describe('capabilities per project', () => {
         appStore.setCapabilities('/p', [])
         expect(appStore.capabilitiesOf('/p')).toEqual([])
         expect(appStore.capabilitiesOf('/other')).toEqual(['todo', 'ask'])
+    })
+})
+
+describe('idle pi processes', () => {
+    beforeEach(reset)
+
+    /** stopAgent goes through the preload bridge; record which agent ids it was asked to stop. */
+    const stopped: string[] = []
+    beforeEach(() => {
+        stopped.length = 0
+        vi.stubGlobal('window', { pi: { agentStop: async (id: string) => void stopped.push(id) } })
+        return () => vi.unstubAllGlobals()
+    })
+
+    /** Gives a tab a fake ready process; the returned check says whether it was stopped. */
+    function live(key: string, lastUsed: number) {
+        const thread = appStore.threads.get(key)!
+        thread.agentId = `agent-${key}`
+        thread.agentStatus = 'ready'
+        thread.lastUsed = lastUsed
+        return () => stopped.includes(`agent-${key}`)
+    }
+
+    it('stops only processes idle off screen for an hour', () => {
+        const keys = openTabs(4)
+        appStore.setPaneCapacity(100)
+        appStore.focus(keys[3])
+        const now = 10 * AGENT_IDLE_MS
+        const stale = live(keys[0], now - AGENT_IDLE_MS)
+        const recent = live(keys[1], now - AGENT_IDLE_MS + 60_000)
+        const running = live(keys[2], 0)
+        appStore.threads.get(keys[2])!.running = true
+        const onScreen = live(keys[3], 0)
+
+        appStore.stopIdleAgents(now)
+        expect(stale()).toBe(true)
+        expect(recent()).toBe(false)
+        expect(running()).toBe(false)
+        expect(onScreen()).toBe(false)
+    })
+
+    it('counts idle time from when a thread was last running or on screen', () => {
+        const keys = openTabs(2)
+        appStore.setPaneCapacity(100)
+        appStore.focus(keys[1])
+        const stop = live(keys[1], 0)
+        appStore.stopIdleAgents(AGENT_IDLE_MS * 5)
+        appStore.focus(keys[0])
+        appStore.stopIdleAgents(AGENT_IDLE_MS * 5 + 60_000)
+        expect(stop()).toBe(false)
+        appStore.stopIdleAgents(AGENT_IDLE_MS * 6)
+        expect(stop()).toBe(true)
     })
 })

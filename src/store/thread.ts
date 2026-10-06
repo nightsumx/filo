@@ -38,7 +38,6 @@ export interface ThreadHost {
     registerAgent: (agentId: string, thread: Thread) => void
     rekey: (thread: Thread, oldKey: string) => void
     onSettled: (thread: Thread) => void
-    reserveAgentSlot: (thread: Thread) => Promise<void>
     capabilitiesOf: (cwd: string) => CapabilityId[]
 }
 
@@ -209,7 +208,6 @@ export class Thread {
     }
 
     private async startAgent(): Promise<string> {
-        await this.host.reserveAgentSlot(this)
         runInAction(() => {
             this.agentStatus = 'starting'
             this.agentError = ''

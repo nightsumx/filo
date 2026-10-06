@@ -11,8 +11,12 @@ import { Thread } from './thread'
 
 const api = () => window.pi
 
-/** pi processes kept alive; beyond this the least recently used idle, hidden one is stopped. */
-const MAX_AGENTS = 6
+/**
+ * No cap on pi processes. One that has sat idle off screen this long is stopped; the next message
+ * resumes the same session file. Running, waiting-for-user and on-screen threads are never stopped.
+ */
+export const AGENT_IDLE_MS = 60 * 60_000
+const IDLE_SWEEP_MS = 60_000
 /** Auto split: a pane needs this much width, and at most this many panes are shown. */
 export const MIN_PANE_WIDTH = 520
 export const MAX_PANES = 3
@@ -180,6 +184,7 @@ class AppStore implements ThreadHost {
                 runInAction(() => thread.handleExit(info))
         })
         window.addEventListener('focus', () => void this.refreshSessions())
+        setInterval(this.stopIdleAgents, IDLE_SWEEP_MS)
 
         const [env, state] = await Promise.all([api().resolveEnv(), api().loadState()])
         await this.refreshSessions()
@@ -345,6 +350,7 @@ class AppStore implements ThreadHost {
     }
 
     onSettled(thread: Thread) {
+        thread.lastUsed = Date.now()
         if (!this.isVisible(thread)) {
             thread.unread = true
             toast.success(`「${thread.title}」已完成`, {
@@ -355,14 +361,18 @@ class AppStore implements ThreadHost {
         void this.refreshSessions()
     }
 
-    async reserveAgentSlot(thread: Thread) {
-        const live = [...this.threads.values()].filter(t => t !== thread && t.agentId)
-        if (live.length < MAX_AGENTS)
-            return
-        const idle = live
-            .filter(t => !t.running && !t.waitingForUser && !this.isVisible(t))
-            .sort((a, b) => a.lastUsed - b.lastUsed)
-        await idle[0]?.stopAgent()
+    /** Stops pi processes idle for AGENT_IDLE_MS. Idle time counts from when a thread was last in use. */
+    stopIdleAgents(now = Date.now()) {
+        for (const thread of this.threads.values()) {
+            if (!thread.agentId || thread.agentStatus !== 'ready')
+                continue
+            if (thread.running || thread.waitingForUser || this.isVisible(thread)) {
+                thread.lastUsed = now
+                continue
+            }
+            if (now - thread.lastUsed >= AGENT_IDLE_MS)
+                void thread.stopAgent()
+        }
     }
 
     // ---------------------------------------------------------------- navigation
