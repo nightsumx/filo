@@ -1,7 +1,7 @@
-import { keyText, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Loader, truncateToWidth } from "@earendil-works/pi-tui";
+import { COLOR, fg, key } from "./lib/shared.ts";
 
-const fg = (code: number, s: string) => `\x1b[38;5;${code}m${s}\x1b[39m`;
 const FRAMES = ["·", "✢", "✳", "✶", "✻", "✽"];
 const SPIN = [...FRAMES, ...FRAMES.slice(1, -1).reverse()];
 const BAR_MAX = 40;
@@ -86,18 +86,18 @@ loader.render = function (width: number) {
 	}
 	const label = String(this.message ?? "").includes("overflow") ? "Context full, compacting conversation…" : "Compacting conversation…";
 	const out = outputTokens();
-	const meta = [duration(now - state.start), out ? `↓ ${count(out)} tokens` : "", `${keyText("app.interrupt") || "esc"} to cancel`].filter(Boolean).join(" · ");
+	const meta = [duration(now - state.start), out ? `↓ ${count(out)} tokens` : "", `${key("app.interrupt") || "esc"} to cancel`].filter(Boolean).join(" · ");
 	const spinner = SPIN[Math.floor((now - state.start) / 120) % SPIN.length];
 
 	const pct = Math.floor(progress(now));
 	const cells = Math.max(10, Math.min(BAR_MAX, width - 7));
 	const filled = Math.round((cells * pct) / 100);
-	const bar = fg(250, "▰".repeat(filled)) + fg(239, "▱".repeat(cells - filled));
+	const bar = fg(COLOR.barOn, "▰".repeat(filled)) + fg(COLOR.barOff, "▱".repeat(cells - filled));
 
 	return [
 		"",
-		truncateToWidth(`${fg(110, spinner)} ${fg(153, label)} ${fg(246, `(${meta})`)}`, width, ""),
-		truncateToWidth(`  ${bar} ${fg(246, `${pct}%`)}`, width, ""),
+		truncateToWidth(`${fg(COLOR.spinner, spinner)} ${fg(COLOR.info, label)} ${fg(COLOR.muted, `(${meta})`)}`, width, ""),
+		truncateToWidth(`  ${bar} ${fg(COLOR.muted, `${pct}%`)}`, width, ""),
 	];
 };
 

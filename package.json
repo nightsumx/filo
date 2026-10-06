@@ -22,10 +22,16 @@
     "extensions": [
       "./extensions/cc-tui.ts",
       "./extensions/cc-statusline.ts",
-      "./extensions/cc-compaction.ts"
+      "./extensions/cc-compaction.ts",
+      "./extensions/cc-transcript.ts",
+      "./extensions/cc-input.ts",
+      "./extensions/cc-permissions.ts",
+      "./extensions/cc-todo.ts",
+      "./extensions/cc-header.ts"
     ],
     "themes": [
-      "./themes/claude-code.json"
+      "./themes/claude-code.json",
+      "./themes/claude-code-light.json"
     ]
   },
   "peerDependencies": {
