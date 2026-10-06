@@ -200,7 +200,7 @@ export class Thread {
         this.startPromise ??= this.startAgent().catch((error) => {
             runInAction(() => {
                 this.agentStatus = 'error'
-                this.agentError = String(error?.message ?? error)
+                this.agentError = String(error?.message ?? error).replace(/^Error invoking remote method '[^']+': (Error: )?/, '')
                 this.startPromise = null
             })
             throw error

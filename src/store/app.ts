@@ -38,6 +38,8 @@ class AppStore implements ThreadHost {
     projectOrder: string[] = []
     /** Session-derived projects the user removed from the sidebar. */
     hiddenProjects: string[] = []
+    /** Project folders that no longer exist on disk; refreshed with the session list. */
+    missingProjects: string[] = []
 
     threads = observable.map<string, Thread>()
     /** Tab order per project (thread keys). New threads use "new:<uuid>" until pi writes a file. */
@@ -187,6 +189,7 @@ class AppStore implements ThreadHost {
             this.ready = true
             this.projectOrder = this.projects.map(p => p.cwd)
         })
+        await this.refreshMissing()
         const cwd = this.activeProject ?? this.projects[0]?.cwd
         if (env.ok && cwd)
             this.selectProject(cwd)
@@ -224,6 +227,13 @@ class AppStore implements ThreadHost {
         catch (error: any) {
             toast.error(`读取会话失败：${error.message}`)
         }
+        if (this.ready)
+            await this.refreshMissing()
+    }
+
+    private async refreshMissing() {
+        const missing = await api().missingFolders(this.projects.map(p => p.cwd)).catch(() => [])
+        runInAction(() => (this.missingProjects = missing))
     }
 
     // ---------------------------------------------------------------- persistence
@@ -406,6 +416,10 @@ class AppStore implements ThreadHost {
 
     /** New tab in a project; reuses an untouched new tab instead of stacking empty ones. */
     newThread(cwd: string) {
+        if (this.missingProjects.includes(cwd)) {
+            toast.error('项目目录不存在', { description: `${cwd} 已被删除或移动。可以在侧边栏的项目菜单里“从列表移除”。` })
+            return
+        }
         this.restoreTabs(cwd)
         const blank = this.tabsOf(cwd).find(t => t.isEmpty && !t.persisted)
         if (blank) {

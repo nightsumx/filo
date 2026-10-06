@@ -123,6 +123,8 @@ export interface PiBridge {
     gitFileDiff: (cwd: string, path: string, status: string) => Promise<GitFileDiff>
 
     openFolder: (path: string) => Promise<void>
+    /** The given folders that no longer exist (deleted or moved since they were added). */
+    missingFolders: (paths: string[]) => Promise<string[]>
     /** Sets nativeTheme.themeSource, which drives prefers-color-scheme and the window chrome. */
     setTheme: (theme: ThemePref) => Promise<void>
     openExternal: (url: string) => Promise<void>
@@ -148,6 +150,7 @@ export const IPC = {
     gitBranches: 'git:branches',
     gitFileDiff: 'git:file-diff',
     openFolder: 'shell:open-folder',
+    missingFolders: 'fs:missing-folders',
     setTheme: 'theme:set',
     openExternal: 'shell:open-external',
 } as const

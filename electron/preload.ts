@@ -39,6 +39,7 @@ const bridge: PiBridge = {
     gitFileDiff: (cwd, path, status) => ipcRenderer.invoke(IPC.gitFileDiff, cwd, path, status),
 
     openFolder: path => ipcRenderer.invoke(IPC.openFolder, path),
+    missingFolders: paths => ipcRenderer.invoke(IPC.missingFolders, paths),
     setTheme: theme => ipcRenderer.invoke(IPC.setTheme, theme),
     openExternal: url => ipcRenderer.invoke(IPC.openExternal, url),
 }

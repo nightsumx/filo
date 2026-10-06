@@ -1,6 +1,6 @@
 import type { AgentStartOptions, AppState, ThemePref } from '@shared/ipc'
 import { APP_INFO } from '@shared/app'
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
@@ -128,12 +128,16 @@ function registerIpc() {
         return result.canceled ? null : result.filePaths[0] ?? null
     })
 
+    const isDirectory = (dir: string) => stat(dir).then(s => s.isDirectory(), () => false)
     ipcMain.handle(IPC.agentStart, async (_e, options: AgentStartOptions) => {
         const env = await resolvePiEnv()
         if (!env.ok)
             throw new Error(env.error)
         if (options.sessionPath)
             await assertInSessionsDir(options.sessionPath)
+        // spawn reports a missing cwd as "spawn <node> ENOENT", which reads like node is missing.
+        if (!(await isDirectory(options.cwd)))
+            throw new Error(`项目目录不存在：${options.cwd}`)
         return agents.start(env.env, options)
     })
     ipcMain.handle(IPC.agentRequest, (_e, agentId: string, command: Record<string, unknown>) => agents.request(agentId, command))
@@ -150,6 +154,11 @@ function registerIpc() {
     ipcMain.handle(IPC.gitFileDiff, (_e, cwd: string, file: string, status: string) => gitFileDiff(cwd, file, status))
 
     ipcMain.handle(IPC.setTheme, (_e, theme: unknown) => applyTheme(theme))
+    ipcMain.handle(IPC.missingFolders, async (_e, paths: unknown) => {
+        const list = Array.isArray(paths) ? paths.filter((p): p is string => typeof p === 'string' && path.isAbsolute(p)).slice(0, 500) : []
+        const exists = await Promise.all(list.map(isDirectory))
+        return list.filter((_, i) => !exists[i])
+    })
     ipcMain.handle(IPC.openFolder, async (_e, folder: string) => {
         const error = await shell.openPath(folder)
         if (error)
