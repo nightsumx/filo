@@ -4,16 +4,13 @@
 //
 //   bun run build && bun run e2e:windows
 import type { AddressInfo } from 'node:net'
-import { spawn } from 'node:child_process'
 import { mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import http from 'node:http'
-import { createRequire } from 'node:module'
 import path from 'node:path'
 import process from 'node:process'
+import { check, launch, until, windows } from './app'
 
-const ROOT = path.resolve(import.meta.dirname, '..')
 const WORK = '/private/tmp/pi-gui-windows'
-const PORT = 9336
 const CHUNKS = Array.from({ length: 16 }, (_, i) => `part${i} `)
 const FULL = CHUNKS.join('')
 const CHUNK_MS = 150
@@ -40,91 +37,6 @@ async function slowModel() {
     })
     await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
     return { url: `http://127.0.0.1:${(server.address() as AddressInfo).port}/v1`, close: () => server.close() }
-}
-
-class Page {
-    private next = 0
-    constructor(private ws: WebSocket, readonly id: string) {}
-
-    static async connect(target: { id: string, webSocketDebuggerUrl: string }): Promise<Page> {
-        const ws = new WebSocket(target.webSocketDebuggerUrl)
-        await new Promise(resolve => ws.addEventListener('open', resolve, { once: true }))
-        return new Page(ws, target.id)
-    }
-
-    evaluate<T>(expression: string): Promise<T> {
-        const id = ++this.next
-        return new Promise((resolve, reject) => {
-            const onMessage = (e: MessageEvent) => {
-                const msg = JSON.parse(String(e.data))
-                if (msg.id !== id)
-                    return
-                this.ws.removeEventListener('message', onMessage)
-                const { result, exceptionDetails } = msg.result ?? {}
-                if (msg.error || exceptionDetails)
-                    reject(new Error(msg.error?.message ?? exceptionDetails.exception?.description ?? exceptionDetails.text))
-                else
-                    resolve(result.value)
-            }
-            this.ws.addEventListener('message', onMessage)
-            this.ws.send(JSON.stringify({ id, method: 'Runtime.evaluate', params: { expression: `(async () => (${expression}))()`, awaitPromise: true, returnByValue: true } }))
-        })
-    }
-
-    close() {
-        this.ws.close()
-    }
-}
-
-async function until<T>(what: string, probe: () => Promise<T | undefined | false | null>, timeoutMs = 20_000): Promise<T> {
-    const end = Date.now() + timeoutMs
-    for (;;) {
-        const value = await probe().catch(() => undefined)
-        if (value)
-            return value
-        if (Date.now() > end)
-            throw new Error(`timed out waiting for: ${what}`)
-        await new Promise(r => setTimeout(r, 150))
-    }
-}
-
-/** Every app window, once its store has loaded, keyed by the projects it shows. */
-async function windows(count: number): Promise<{ page: Page, projects: string[] }[]> {
-    return until(`${count} window(s)`, async () => {
-        const targets = (await (await fetch(`http://127.0.0.1:${PORT}/json`)).json() as any[]).filter(t => t.type === 'page')
-        if (targets.length !== count)
-            return undefined
-        const list = []
-        for (const t of targets) {
-            const page = await Page.connect(t)
-            const projects = await page.evaluate<string[] | null>('window.__app?.env ? [...window.__app.windowProjects] : null')
-            if (!projects) {
-                page.close()
-                return undefined
-            }
-            list.push({ page, projects })
-        }
-        return list
-    })
-}
-
-function check(ok: boolean, message: string) {
-    if (!ok)
-        throw new Error(`FAIL: ${message}`)
-    console.log(`ok - ${message}`)
-}
-
-async function launch(env: Record<string, string>) {
-    // The electron package's main export is the binary path; the .bin shim would outlive kill().
-    const electron = createRequire(import.meta.url)('electron') as string
-    const app = spawn(electron, ['.', `--remote-debugging-port=${PORT}`], { cwd: ROOT, env: { ...process.env, ...env }, stdio: 'ignore' })
-    return async () => {
-        const exited = new Promise(resolve => app.once('exit', resolve))
-        app.kill('SIGTERM')
-        await Promise.race([exited, new Promise(r => setTimeout(r, 3000))])
-        if (app.exitCode === null && app.signalCode === null)
-            app.kill('SIGKILL')
-    }
 }
 
 async function main() {
