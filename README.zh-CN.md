@@ -23,7 +23,7 @@
 pi install npm:pi-cc-tui
 ```
 
-然后用 `/theme` 选 `claude-code`，或者写进 `~/.pi/agent/settings.json`：
+如果还没设置过主题，会自动用暗色的 `claude-code` 主题。已经设置过的话，用 `/theme` 选 `claude-code`，或者写进 `~/.pi/agent/settings.json`：
 
 ```json
 { "theme": "claude-code" }

@@ -1,4 +1,6 @@
-import { AssistantMessageComponent, UserMessageComponent, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { AssistantMessageComponent, CONFIG_DIR_NAME, getAgentDir, UserMessageComponent, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Editor, Loader, Markdown, Text } from "@earendil-works/pi-tui";
 
 const fg = (code: number, s: string) => `\x1b[38;5;${code}m${s}\x1b[39m`;
@@ -88,6 +90,16 @@ const size = (message: any) =>
 		0,
 	);
 
+// True if the user picked a theme in global or project settings.json.
+const hasThemeSetting = (cwd: string) =>
+	[join(getAgentDir(), "settings.json"), join(cwd, CONFIG_DIR_NAME, "settings.json")].some((path) => {
+		try {
+			return typeof JSON.parse(readFileSync(path, "utf8")).theme === "string";
+		} catch {
+			return false;
+		}
+	});
+
 export default function (pi: ExtensionAPI) {
 	let start = 0;
 	let done = 0;
@@ -107,7 +119,10 @@ export default function (pi: ExtensionAPI) {
 	);
 
 	pi.on("session_start", (_e, ctx) => {
-		if (ctx.hasUI) ctx.ui.setWorkingIndicator({ frames: [...FRAMES, ...FRAMES.slice(1, -1).reverse()].map((f) => fg(174, f)), intervalMs: 120 });
+		if (!ctx.hasUI) return;
+		// Default to the dark claude-code theme unless the user already chose one.
+		if (!hasThemeSetting(ctx.cwd)) ctx.ui.setTheme("claude-code");
+		ctx.ui.setWorkingIndicator({ frames: [...FRAMES, ...FRAMES.slice(1, -1).reverse()].map((f) => fg(174, f)), intervalMs: 120 });
 	});
 
 	pi.on("agent_start", (_e, ctx) => {

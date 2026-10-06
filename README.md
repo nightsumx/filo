@@ -21,7 +21,7 @@ Make [pi](https://pi.dev) look like Claude Code.
 pi install npm:pi-cc-tui
 ```
 
-Then pick the theme with `/theme` → `claude-code`, or set it in `~/.pi/agent/settings.json`:
+The dark `claude-code` theme is applied automatically if you haven't set a theme yet. If you have, switch with `/theme` → `claude-code`, or set it in `~/.pi/agent/settings.json`:
 
 ```json
 { "theme": "claude-code" }
