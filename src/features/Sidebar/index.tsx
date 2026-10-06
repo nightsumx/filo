@@ -12,6 +12,7 @@ import { ChevronRight, ChevronsDownUp, EyeOff, FolderOpen, FolderPlus, Minus, Mo
 import { observer } from 'mobx-react-lite'
 import { useEffect, useState } from 'react'
 import { ProjectBadge } from '../Toolbar/ProjectBadge'
+import { newThreadLabel, tr } from '@/lib/i18n'
 
 /** Threads listed per project before a "show more" row. */
 const PAGE = 12
@@ -33,7 +34,7 @@ function moveFocus(from: HTMLElement, step: number) {
 }
 
 function sessionTitle(session: SessionSummary): string {
-    return appStore.threads.get(session.path)?.title ?? session.name ?? session.firstPrompt?.split('\n')[0] ?? '新线程'
+    return appStore.threads.get(session.path)?.title ?? session.name ?? session.firstPrompt?.split('\n')[0] ?? newThreadLabel()
 }
 
 /** A run with no pi event for this long gets a "no output" hint. */
@@ -67,9 +68,9 @@ const ActivityLine = observer(({ thread, now }: { thread: Thread, now: number })
         <div className="flex h-[18px] min-w-0 items-center gap-1.5 pl-5 text-[12px] leading-none">
             <span className={cn('min-w-0 flex-1 truncate', PHASE_TEXT[phase])}>
                 {text}
-                {stalled && <span className="text-amber-600 dark:text-amber-400">{` · ${Math.floor((now - thread.lastEventAt) / 60_000)} 分钟无输出`}</span>}
+                {stalled && <span className="text-amber-600 dark:text-amber-400">{tr(` · ${Math.floor((now - thread.lastEventAt) / 60_000)} 分钟无输出`, ` · no output for ${Math.floor((now - thread.lastEventAt) / 60_000)}m`)}</span>}
             </span>
-            {progress && <span className="shrink-0 tabular-nums text-gray-400" title="任务清单进度">{`${progress.done}/${progress.total}`}</span>}
+            {progress && <span className="shrink-0 tabular-nums text-gray-400" title={tr('任务清单进度', 'Todo progress')}>{`${progress.done}/${progress.total}`}</span>}
         </div>
     )
 })
@@ -81,7 +82,7 @@ const ThreadRow = observer(({ thread, session, selected }: { thread?: Thread, se
         else if (session)
             appStore.openSession(session)
     }
-    const title = thread ? (thread.isEmpty && !thread.persisted ? '新线程' : thread.title) : sessionTitle(session!)
+    const title = thread ? (thread.isEmpty && !thread.persisted ? newThreadLabel() : thread.title) : sessionTitle(session!)
     const updated = session?.updatedAt
     const activity = thread?.activity
     const busy = !!activity && activity.phase !== 'idle'
@@ -110,7 +111,7 @@ const ThreadRow = observer(({ thread, session, selected }: { thread?: Thread, se
                 {thread ? <StatusDot thread={thread} /> : <PiGlyph dim />}
                 <span className={cn('min-w-0 flex-1 truncate', thread ? 'text-gray-900' : 'text-gray-700')}>{title}</span>
                 {running
-                    ? <span className="shrink-0 text-[11px] tabular-nums text-gray-500" title="已运行">{formatElapsed(now - thread!.runStartedAt)}</span>
+                    ? <span className="shrink-0 text-[11px] tabular-nums text-gray-500" title={tr('已运行', 'Running for')}>{formatElapsed(now - thread!.runStartedAt)}</span>
                     : updated != null && <span className="shrink-0 text-[11px] tabular-nums text-gray-400">{relativeTime(updated)}</span>}
             </div>
             {busy && <ActivityLine thread={thread!} now={now} />}
@@ -164,7 +165,7 @@ const ProjectNode = observer(({ project, index, expanded, onToggle }: { project:
                 <button
                     type="button"
                     tabIndex={-1}
-                    aria-label={expanded ? '折叠' : '展开'}
+                    aria-label={expanded ? tr('折叠', 'Collapse') : tr('展开', 'Expand')}
                     onClick={(e) => {
                         e.stopPropagation()
                         onToggle()
@@ -185,8 +186,8 @@ const ProjectNode = observer(({ project, index, expanded, onToggle }: { project:
                     <button
                         type="button"
                         tabIndex={-1}
-                        aria-label={`在 ${project.name} 中新建线程`}
-                        title="新线程"
+                        aria-label={tr(`在 ${project.name} 中新建线程`, `New thread in ${project.name}`)}
+                        title={newThreadLabel()}
                         onClick={(e) => {
                             e.stopPropagation()
                             appStore.newThread(project.cwd)
@@ -197,22 +198,22 @@ const ProjectNode = observer(({ project, index, expanded, onToggle }: { project:
                         <Plus size={13} />
                     </button>
                     <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
-                        <DropdownMenuTrigger tabIndex={-1} aria-label="项目操作" onClick={e => e.stopPropagation()} className={cn(toolBtn, 'h-5 w-5')}>
+                        <DropdownMenuTrigger tabIndex={-1} aria-label={tr('项目操作', 'Project actions')} onClick={e => e.stopPropagation()} className={cn(toolBtn, 'h-5 w-5')}>
                             <MoreHorizontal size={13} />
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="start" onClick={e => e.stopPropagation()}>
                             <DropdownMenuItem onSelect={() => appStore.newThread(project.cwd)}>
                                 <Plus size={14} />
-                                新线程
+                                {newThreadLabel()}
                             </DropdownMenuItem>
                             <DropdownMenuItem onSelect={() => void window.pi.openFolder(project.cwd)}>
                                 <FolderOpen size={14} />
-                                在 Finder 中打开
+                                {tr('在 Finder 中打开', 'Show in Finder')}
                             </DropdownMenuItem>
                             <DropdownMenuSeparator />
                             <DropdownMenuItem onSelect={() => void appStore.removeProject(project.cwd)}>
                                 <EyeOff size={14} />
-                                从列表移除
+                                {tr('从列表移除', 'Remove from list')}
                             </DropdownMenuItem>
                         </DropdownMenuContent>
                     </DropdownMenu>
@@ -230,11 +231,11 @@ const ProjectNode = observer(({ project, index, expanded, onToggle }: { project:
                             onClick={() => setAll(v => !v)}
                             className="flex h-6 w-full items-center rounded-md pl-[30px] text-left text-[12px] text-gray-500 hover:bg-ide-hover hover:text-gray-800"
                         >
-                            {all ? '收起' : `显示全部 ${project.sessions.length} 个线程`}
+                            {all ? tr('收起', 'Show less') : tr(`显示全部 ${project.sessions.length} 个线程`, `Show all ${project.sessions.length} threads`)}
                         </button>
                     )}
                     {!drafts.length && !project.sessions.length && (
-                        <div className="flex h-6 items-center pl-[30px] text-[12px] text-gray-400">还没有线程</div>
+                        <div className="flex h-6 items-center pl-[30px] text-[12px] text-gray-400">{tr('还没有线程', 'No threads yet')}</div>
                     )}
                 </div>
             )}
@@ -262,20 +263,20 @@ export const Sidebar = observer(() => {
     })
 
     return (
-        <nav className="ide-island flex w-[272px] shrink-0 flex-col bg-ide-panel" aria-label="项目">
+        <nav className="ide-island flex w-[272px] shrink-0 flex-col bg-ide-panel" aria-label={tr('项目', 'Projects')}>
             <div className="flex h-[34px] shrink-0 items-center gap-0.5 pl-3 pr-1.5">
-                <span className="flex-1 text-[13px] font-semibold text-gray-900">项目</span>
-                <button type="button" aria-label="添加项目" title="添加项目" onClick={() => void appStore.addProject()} className={toolBtn}>
+                <span className="flex-1 text-[13px] font-semibold text-gray-900">{tr('项目', 'Projects')}</span>
+                <button type="button" aria-label={tr('添加项目', 'Add project')} title={tr('添加项目', 'Add project')} onClick={() => void appStore.addProject()} className={toolBtn}>
                     <FolderPlus size={14} />
                 </button>
-                <button type="button" aria-label="全部折叠" title="全部折叠" onClick={() => setExpanded(new Set())} className={toolBtn}>
+                <button type="button" aria-label={tr('全部折叠', 'Collapse all')} title={tr('全部折叠', 'Collapse all')} onClick={() => setExpanded(new Set())} className={toolBtn}>
                     <ChevronsDownUp size={14} />
                 </button>
-                <button type="button" aria-label="隐藏项目面板" title="隐藏（⌘B）" onClick={appStore.toggleSidebar} className={toolBtn}>
+                <button type="button" aria-label={tr('隐藏项目面板', 'Hide projects panel')} title={tr('隐藏（⌘B）', 'Hide (⌘B)')} onClick={appStore.toggleSidebar} className={toolBtn}>
                     <Minus size={14} />
                 </button>
             </div>
-            <div role="tree" aria-label="项目和线程" className="group/tree flex-1 overflow-y-auto px-1.5 pb-2 scrollbar-trigger">
+            <div role="tree" aria-label={tr('项目和线程', 'Projects and threads')} className="group/tree flex-1 overflow-y-auto px-1.5 pb-2 scrollbar-trigger">
                 {appStore.projects.map((project, i) => (
                     <ProjectNode
                         key={project.cwd}
@@ -291,7 +292,7 @@ export const Sidebar = observer(() => {
                         onClick={() => void appStore.addProject()}
                         className="mx-1.5 mt-2 w-[calc(100%-0.75rem)] rounded-lg border border-dashed border-gray-300 px-3 py-6 text-[12px] text-gray-500 hover:border-gray-400 hover:text-gray-700"
                     >
-                        添加一个项目文件夹开始
+                        {tr('添加一个项目文件夹开始', 'Add a project folder to start')}
                     </button>
                 )}
             </div>

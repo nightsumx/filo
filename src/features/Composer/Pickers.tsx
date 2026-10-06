@@ -7,18 +7,22 @@ import { cn, formatTokens } from '@/lib/utils'
 import { Brain, Check, ChevronDown, ClipboardList, Cpu, FilePen, ShieldCheck, Zap } from 'lucide-react'
 import { observer } from 'mobx-react-lite'
 import { useRef, useState } from 'react'
+import { tr } from '@/lib/i18n'
+import type { Localized } from '@shared/i18n'
 
 const pill = 'flex h-6 items-center gap-1 rounded-md px-1.5 text-[12px] text-gray-600 outline-none transition-colors hover:bg-black/[0.06] hover:text-gray-900 data-[state=open]:bg-black/[0.08] disabled:opacity-50'
 
-const levelLabel: Record<ThinkingLevel, string> = {
-    off: '关闭',
-    minimal: '最低',
-    low: '低',
-    medium: '中',
-    high: '高',
-    xhigh: '超高',
-    max: '最高',
+const LEVEL_LABEL: Record<ThinkingLevel, Localized> = {
+    off: { zh: '关闭', en: 'Off' },
+    minimal: { zh: '最低', en: 'Minimal' },
+    low: { zh: '低', en: 'Low' },
+    medium: { zh: '中', en: 'Medium' },
+    high: { zh: '高', en: 'High' },
+    xhigh: { zh: '超高', en: 'X-High' },
+    max: { zh: '最高', en: 'Max' },
 }
+
+const levelLabel = (level: ThinkingLevel): string => (LEVEL_LABEL[level] ? tr(LEVEL_LABEL[level]) : level)
 
 export const ModelPicker = observer(({ thread }: { thread: Thread }) => {
     const current = thread.state?.model
@@ -32,7 +36,7 @@ export const ModelPicker = observer(({ thread }: { thread: Thread }) => {
         <DropdownMenu>
             <DropdownMenuTrigger className={pill} disabled={!thread.models.length}>
                 <Cpu size={13} />
-                <span className="max-w-[180px] truncate">{current?.name ?? (thread.agentStatus === 'starting' ? '加载中…' : '选择模型')}</span>
+                <span className="max-w-[180px] truncate">{current?.name ?? (thread.agentStatus === 'starting' ? tr('加载中…', 'Loading…') : tr('选择模型', 'Choose model'))}</span>
                 <ChevronDown size={12} />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" className="w-72 max-h-[420px]">
@@ -88,15 +92,15 @@ function EffortSlider({ levels, value, onChange }: { levels: ThinkingLevel[], va
 
     return (
         <div className="select-none">
-            <div className="text-[12px] text-gray-500">思考强度</div>
+            <div className="text-[12px] text-gray-500">{tr('思考强度', 'Thinking effort')}</div>
             <div
                 role="slider"
                 tabIndex={0}
-                aria-label="思考强度"
+                aria-label={tr('思考强度', 'Thinking effort')}
                 aria-valuemin={0}
                 aria-valuemax={last}
                 aria-valuenow={shown}
-                aria-valuetext={levelLabel[levels[shown]] ?? levels[shown]}
+                aria-valuetext={levelLabel(levels[shown])}
                 className="group relative mt-2 h-6 cursor-pointer touch-none outline-none"
                 onPointerDown={(e) => {
                     e.currentTarget.setPointerCapture(e.pointerId)
@@ -131,7 +135,7 @@ function EffortSlider({ levels, value, onChange }: { levels: ThinkingLevel[], va
                         style={{ left: pct(i) }}
                         onClick={() => commit(i)}
                     >
-                        {levelLabel[level] ?? level}
+                        {levelLabel(level)}
                     </span>
                 ))}
             </div>
@@ -148,7 +152,7 @@ export const ThinkingPicker = observer(({ thread }: { thread: Thread }) => {
         <Popover>
             <PopoverTrigger className={pill}>
                 <Brain size={13} />
-                <span>{current ? levelLabel[current] ?? current : '思考'}</span>
+                <span>{current ? levelLabel(current) : tr('思考', 'Thinking')}</span>
                 <ChevronDown size={12} />
             </PopoverTrigger>
             <PopoverContent align="start" sideOffset={6} className="w-[300px] px-4 pt-3 pb-2.5">
@@ -158,11 +162,11 @@ export const ThinkingPicker = observer(({ thread }: { thread: Thread }) => {
     )
 })
 
-const MODES: { mode: ThreadMode, label: string, hint: string, icon: typeof Zap }[] = [
-    { mode: 'ask', label: '每次确认', hint: '改文件、跑命令前都先问你', icon: ShieldCheck },
-    { mode: 'edits', label: '自动编辑', hint: '项目里的文件改动直接做，命令仍先问你', icon: FilePen },
-    { mode: 'auto', label: '全自动', hint: '不再询问', icon: Zap },
-    { mode: 'plan', label: '计划', hint: '只读探索，写出计划等你批准后再动手', icon: ClipboardList },
+const MODES: { mode: ThreadMode, label: Localized, hint: Localized, icon: typeof Zap }[] = [
+    { mode: 'ask', label: { zh: '每次确认', en: 'Ask every time' }, hint: { zh: '改文件、跑命令前都先问你', en: 'Asks before any file edit or command' }, icon: ShieldCheck },
+    { mode: 'edits', label: { zh: '自动编辑', en: 'Auto-edit' }, hint: { zh: '项目里的文件改动直接做，命令仍先问你', en: 'Edits project files freely; still asks before commands' }, icon: FilePen },
+    { mode: 'auto', label: { zh: '全自动', en: 'Full auto' }, hint: { zh: '不再询问', en: 'Never asks' }, icon: Zap },
+    { mode: 'plan', label: { zh: '计划', en: 'Plan' }, hint: { zh: '只读探索，写出计划等你批准后再动手', en: 'Explores read-only and waits for you to approve a plan' }, icon: ClipboardList },
 ]
 
 /**
@@ -182,9 +186,9 @@ export const ModePicker = observer(({ thread }: { thread: Thread }) => {
     const Icon = active.icon
     return (
         <DropdownMenu>
-            <DropdownMenuTrigger className={cn(pill, current === 'plan' && 'text-ide-accent hover:text-ide-accent')} title={active.hint}>
+            <DropdownMenuTrigger className={cn(pill, current === 'plan' && 'text-ide-accent hover:text-ide-accent')} title={tr(active.hint)}>
                 <Icon size={13} />
-                <span>{active.label}</span>
+                <span>{tr(active.label)}</span>
                 <ChevronDown size={12} />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" className="w-80">
@@ -192,8 +196,8 @@ export const ModePicker = observer(({ thread }: { thread: Thread }) => {
                     <DropdownMenuItem key={mode} onSelect={() => void thread.setMode(mode)} className="h-auto items-start py-1.5">
                         <ItemIcon size={14} className="mt-0.5 shrink-0 text-gray-500" />
                         <span className="flex min-w-0 flex-1 flex-col">
-                            <span>{label}</span>
-                            <span className="text-[11.5px] text-gray-500">{hint}</span>
+                            <span>{tr(label)}</span>
+                            <span className="text-[11.5px] text-gray-500">{tr(hint)}</span>
                         </span>
                         {mode === current && <Check size={14} className="mt-0.5 text-ide-accent" />}
                     </DropdownMenuItem>

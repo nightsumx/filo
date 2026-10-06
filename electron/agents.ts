@@ -4,6 +4,7 @@ import type { ChildProcessWithoutNullStreams } from 'node:child_process'
 import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { capabilityArgs } from './capabilities'
+import { tr } from './i18n'
 import { JsonlSplitter } from './jsonl'
 import { piCommand, piSpawnEnv } from './pi-env'
 
@@ -81,7 +82,7 @@ class PiAgent {
 
     request(command: Record<string, unknown>): Promise<RpcResponse> {
         if (this.exited)
-            return Promise.reject(new Error('pi 进程已退出'))
+            return Promise.reject(new Error(tr('pi 进程已退出', 'pi process has exited')))
         const id = `gui-${++this.nextRequest}`
         return new Promise((resolve, reject) => {
             this.pending.set(id, { resolve, reject })
@@ -130,7 +131,7 @@ export class AgentManager {
     async request(agentId: string, command: Record<string, unknown>): Promise<RpcResponse> {
         const agent = this.agents.get(agentId)
         if (!agent)
-            throw new Error('pi 进程不存在或已退出')
+            throw new Error(tr('pi 进程不存在或已退出', 'pi process is gone or has exited'))
         return agent.request(command)
     }
 

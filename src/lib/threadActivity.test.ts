@@ -1,7 +1,12 @@
 import type { Step } from './timeline'
 import type { ActivityInput } from './threadActivity'
-import { describe, expect, it } from 'vitest'
+import { beforeAll, describe, expect, it } from 'vitest'
+import { applyLangPref } from './i18n'
 import { formatElapsed, threadActivity } from './threadActivity'
+
+beforeAll(() => {
+    applyLangPref('zh')
+})
 
 const tool = (name: string, args: Record<string, unknown>): Step => ({ kind: 'tool', key: name, call: { type: 'toolCall', id: name, name, arguments: args } as any, running: true })
 const base: ActivityInput = { running: false, starting: false, compacting: false, retry: null, agentError: '', steps: [], todo: null, cwd: '/p' }
@@ -12,6 +17,9 @@ describe('threadActivity', () => {
         expect(threadActivity({ ...base, running: true, steps: [tool('edit', { path: '/p/src/a.ts' })] }).text).toBe('编辑 src/a.ts')
         expect(threadActivity({ ...base, running: true, steps: [] }).text).toBe('思考中')
         expect(threadActivity({ ...base, running: true, steps: [{ kind: 'text', key: 't', text: 'x', streaming: true }] }).text).toBe('回复中')
+        applyLangPref('en')
+        expect(threadActivity({ ...base, running: true, steps: [tool('bash', { command: 'npm test' })] }).text).toBe('Running npm test')
+        applyLangPref('zh')
     })
 
     it('puts waiting first and reports open todo progress', () => {

@@ -3,6 +3,7 @@ import { execFile } from 'node:child_process'
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { promisify } from 'node:util'
+import { tr } from './i18n'
 
 const execFileAsync = promisify(execFile)
 const MAX_FILE_BYTES = 1024 * 1024
@@ -107,7 +108,7 @@ export async function gitFileDiff(cwd: string, file: string, status: string): Pr
     const root = (await git(cwd, ['rev-parse', '--show-toplevel'])).trim()
     const absolute = path.resolve(root, file)
     if (!absolute.startsWith(root + path.sep))
-        throw new Error('路径不在仓库内')
+        throw new Error(tr('路径不在仓库内', 'Path is outside the repository'))
     const untracked = status === '??' || status[0] === 'A'
     const oldText = untracked
         ? ''

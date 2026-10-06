@@ -3,7 +3,9 @@
 // synchronous, needs no CDN loader and stays cheap when hundreds of blocks are on screen.
 import copy from 'copy-to-clipboard'
 import hljs from 'highlight.js/lib/common'
+import { tr } from '@/lib/i18n'
 import { Check, Copy } from 'lucide-react'
+import { observer } from 'mobx-react-lite'
 import { memo, useMemo, useState } from 'react'
 
 const aliases: Record<string, string> = {
@@ -23,7 +25,7 @@ const aliases: Record<string, string> = {
     vue: 'xml',
 }
 
-function CopyBtn({ text }: { text: string }) {
+const CopyBtn = observer(({ text }: { text: string }) => {
     const [copied, setCopied] = useState(false)
     return (
         <button
@@ -38,13 +40,13 @@ function CopyBtn({ text }: { text: string }) {
                 })
             }}
             className="flex h-6 items-center gap-1 rounded px-1.5 text-[12px] text-gray-500 transition-colors select-none hover:bg-black/[0.06] hover:text-gray-800"
-            aria-label="复制代码"
+            aria-label={tr('复制代码', 'Copy code')}
         >
             {copied ? <Check size={13} /> : <Copy size={13} />}
-            {copied ? '已复制' : '复制'}
+            {copied ? tr('已复制', 'Copied') : tr('复制', 'Copy')}
         </button>
     )
-}
+})
 
 export const CodeBlock = memo(({ language, code }: { language?: string, code: string }) => {
     const text = code.replace(/\n$/, '')

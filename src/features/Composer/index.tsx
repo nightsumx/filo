@@ -12,6 +12,8 @@ import { toast } from 'sonner'
 import { StatusLine } from '../Thread/StatusLine'
 import { ModelPicker, ModePicker, ThinkingPicker } from './Pickers'
 import { TodoBar } from './TodoBar'
+import { tr } from '@/lib/i18n'
+import type { Localized } from '@shared/i18n'
 
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024
 
@@ -31,7 +33,7 @@ async function addImages(thread: Thread, files: File[]) {
     const images = files.filter(f => f.type.startsWith('image/'))
     for (const file of images) {
         if (file.size > MAX_IMAGE_BYTES) {
-            toast.error(`${file.name} 超过 8MB`)
+            toast.error(tr(`${file.name} 超过 8MB`, `${file.name} is larger than 8MB`))
             continue
         }
         const image = await readImage(file)
@@ -39,7 +41,11 @@ async function addImages(thread: Thread, files: File[]) {
     }
 }
 
-const sourceLabel: Record<SlashCommand['source'], string> = { extension: '扩展', prompt: '模板', skill: '技能' }
+const SOURCE_LABEL: Record<SlashCommand['source'], Localized> = {
+    extension: { zh: '扩展', en: 'extension' },
+    prompt: { zh: '模板', en: 'prompt' },
+    skill: { zh: '技能', en: 'skill' },
+}
 
 function SlashMenu({ commands, active, onPick }: { commands: SlashCommand[], active: number, onPick: (c: SlashCommand) => void }) {
     const listRef = useRef<HTMLDivElement>(null)
@@ -63,7 +69,7 @@ function SlashMenu({ commands, active, onPick }: { commands: SlashCommand[], act
                 >
                     <span className="font-mono text-[12.5px] text-gray-900">{`/${c.name}`}</span>
                     <span className="min-w-0 flex-1 truncate text-gray-500">{c.description}</span>
-                    <span className="shrink-0 text-[11px] text-gray-400">{sourceLabel[c.source] ?? c.source}</span>
+                    <span className="shrink-0 text-[11px] text-gray-400">{SOURCE_LABEL[c.source] ? tr(SOURCE_LABEL[c.source]) : c.source}</span>
                 </button>
             ))}
         </div>
@@ -174,7 +180,7 @@ export const Composer = observer(({ thread }: { thread: Thread }) => {
                 <div className="mb-2 flex flex-col gap-1">
                     {queued.map((text, i) => (
                         <div key={i} className="flex items-center gap-2 rounded-md bg-ide-sel px-2.5 py-1 text-[12px] text-gray-800">
-                            <span className="shrink-0 font-medium">排队中</span>
+                            <span className="shrink-0 font-medium">{tr('排队中', 'Queued')}</span>
                             <span className="truncate">{text}</span>
                         </div>
                     ))}
@@ -196,10 +202,10 @@ export const Composer = observer(({ thread }: { thread: Thread }) => {
                         <div className="flex flex-wrap gap-2 px-3 pt-2.5">
                             {thread.images.map((img, i) => (
                                 <div key={i} className="group relative">
-                                    <img src={`data:${img.mimeType};base64,${img.data}`} alt="待发送图片" className="h-14 w-14 rounded-md border border-gray-200 object-cover" />
+                                    <img src={`data:${img.mimeType};base64,${img.data}`} alt={tr('待发送图片', 'Image to send')} className="h-14 w-14 rounded-md border border-gray-200 object-cover" />
                                     <button
                                         type="button"
-                                        aria-label="移除图片"
+                                        aria-label={tr('移除图片', 'Remove image')}
                                         onClick={() => (thread.images = thread.images.filter((_, j) => j !== i))}
                                         className="absolute -right-1.5 -top-1.5 hidden h-5 w-5 items-center justify-center rounded-full bg-gray-800 text-white group-hover:flex"
                                     >
@@ -213,8 +219,8 @@ export const Composer = observer(({ thread }: { thread: Thread }) => {
                         ref={textareaRef}
                         value={thread.draft}
                         rows={2}
-                        aria-label="给 pi 发消息"
-                        placeholder={thread.running ? '继续输入以引导 pi（Esc 中断）' : thread.planMode ? '描述要做的事，pi 先写出计划给你审阅' : '让 pi 做点什么，输入 / 查看命令'}
+                        aria-label={tr('给 pi 发消息', 'Message pi')}
+                        placeholder={thread.running ? tr('继续输入以引导 pi（Esc 中断）', 'Type to steer pi (Esc to stop)') : thread.planMode ? tr('描述要做的事，pi 先写出计划给你审阅', 'Describe the task; pi writes a plan for you to review first') : tr('让 pi 做点什么，输入 / 查看命令', 'Ask pi to do something, or type / for commands')}
                         onChange={(e) => {
                             thread.draft = e.target.value
                             setSlashDismissed(false)
@@ -232,8 +238,8 @@ export const Composer = observer(({ thread }: { thread: Thread }) => {
                     <div className="flex items-center gap-0.5 px-1.5 pb-1.5">
                         <button
                             type="button"
-                            aria-label="添加图片"
-                            title="添加图片"
+                            aria-label={tr('添加图片', 'Add image')}
+                            title={tr('添加图片', 'Add image')}
                             onClick={() => fileRef.current?.click()}
                             className="flex h-6 w-6 items-center justify-center rounded-md text-gray-500 hover:bg-black/[0.06] hover:text-gray-800"
                         >
@@ -258,8 +264,8 @@ export const Composer = observer(({ thread }: { thread: Thread }) => {
                             ? (
                                     <button
                                         type="button"
-                                        aria-label="停止"
-                                        title="停止（Esc）"
+                                        aria-label={tr('停止', 'Stop')}
+                                        title={tr('停止（Esc）', 'Stop (Esc)')}
                                         onClick={() => void thread.abort()}
                                         className="ml-1 flex h-7 w-7 items-center justify-center rounded-md text-red-500 hover:bg-red-500/10"
                                     >
@@ -269,10 +275,10 @@ export const Composer = observer(({ thread }: { thread: Thread }) => {
                             : (
                                     <button
                                         type="button"
-                                        aria-label={thread.running ? '发送引导消息' : '发送'}
+                                        aria-label={thread.running ? tr('发送引导消息', 'Send steering message') : tr('发送', 'Send')}
                                         disabled={!canSend}
                                         onClick={() => void thread.send()}
-                                        title="发送（Enter）"
+                                        title={tr('发送（Enter）', 'Send (Enter)')}
                                         className="ml-1 flex h-7 w-7 items-center justify-center rounded-md bg-ide-accent text-always-white hover:bg-ide-accent-hover disabled:bg-gray-100 disabled:text-gray-400"
                                     >
                                         <ArrowUp size={15} />
@@ -288,7 +294,7 @@ export const Composer = observer(({ thread }: { thread: Thread }) => {
                 <div className="mt-1.5 flex flex-col gap-1 px-2 text-[11.5px] text-gray-500">
                     {(thread.agentStatus === 'error' || thread.agentStatus === 'exited') && (
                         <span className="text-red-500 whitespace-pre-wrap">
-                            {thread.agentStatus === 'error' ? `pi 启动失败：${thread.agentError}` : 'pi 进程已退出，发送消息会重新启动。'}
+                            {thread.agentStatus === 'error' ? `${tr('pi 启动失败：', 'pi failed to start: ')}${thread.agentError}` : tr('pi 进程已退出，发送消息会重新启动。', 'pi has exited; sending a message starts it again.')}
                         </span>
                     )}
                     {statuses.length > 0 && (

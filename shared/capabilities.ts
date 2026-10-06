@@ -4,14 +4,15 @@
 //   up:   the GUI runs hidden extension commands (`/gui-…`), which pi executes even mid-run.
 // Mode state (approval mode, plan on/off) comes down as `ctx.ui.setStatus` under GUI_STATUS keys.
 // Extensions import these types with `import type` only, so they stay loadable without this file.
+import type { Localized } from './i18n'
 import type { AgentMessage, AssistantMessage } from './pi'
 
 export type CapabilityId = 'todo' | 'ask' | 'approval' | 'plan' | 'subagent'
 
 export interface Capability {
     id: CapabilityId
-    label: string
-    description: string
+    label: Localized
+    description: Localized
     /** Extension file relative to the extensions directory. */
     entry: string
     /** Tools the extension registers; their calls get dedicated views in the transcript. */
@@ -23,40 +24,40 @@ export interface Capability {
 export const CAPABILITIES: readonly Capability[] = [
     {
         id: 'todo',
-        label: '任务清单',
-        description: '多步骤任务时维护一份清单，进度显示在输入框上方。',
+        label: { zh: '任务清单', en: 'Todo list' },
+        description: { zh: '多步骤任务时维护一份清单，进度显示在输入框上方。', en: 'Keeps a checklist for multi-step work, with progress shown above the input.' },
         entry: 'todo.ts',
         tools: ['todo'],
         contextTokens: 230,
     },
     {
         id: 'ask',
-        label: '向你提问',
-        description: '需求不清时，在对话里弹出选择题让你回答，而不是自己猜。',
+        label: { zh: '向你提问', en: 'Ask you' },
+        description: { zh: '需求不清时，在对话里弹出选择题让你回答，而不是自己猜。', en: 'When something is unclear, asks you multiple-choice questions in the conversation instead of guessing.' },
         entry: 'ask.ts',
         tools: ['ask'],
         contextTokens: 220,
     },
     {
         id: 'approval',
-        label: '操作确认',
-        description: '改文件、跑命令前先问你，可以在输入框旁切换为自动编辑或全自动。',
+        label: { zh: '操作确认', en: 'Approvals' },
+        description: { zh: '默认全自动；在输入框旁切换为每次确认或自动编辑后，改文件、跑命令前会先问你。', en: 'Full auto by default. Switch to Ask every time or Auto-edit next to the input to be asked before file edits and commands.' },
         entry: 'approval.ts',
         tools: [],
         contextTokens: 0,
     },
     {
         id: 'plan',
-        label: '计划模式',
-        description: '先只读探索、写出计划，你批准后再动手。在输入框旁切换。',
+        label: { zh: '计划模式', en: 'Plan mode' },
+        description: { zh: '先只读探索、写出计划，你批准后再动手。在输入框旁切换。', en: 'Explores read-only and writes a plan; changes start once you approve it. Toggle it next to the input.' },
         entry: 'plan.ts',
         tools: ['propose_plan'],
         contextTokens: 0,
     },
     {
         id: 'subagent',
-        label: '子 Agent',
-        description: '把独立的子任务交给另一个 pi 进程并行完成，可以中途引导或取消。',
+        label: { zh: '子 Agent', en: 'Subagents' },
+        description: { zh: '把独立的子任务交给另一个 pi 进程并行完成，可以中途引导或取消。', en: 'Hands independent subtasks to another pi process running in parallel, which you can steer or cancel.' },
         entry: 'subagent.ts',
         tools: ['subagent'],
         contextTokens: 300,
@@ -65,15 +66,15 @@ export const CAPABILITIES: readonly Capability[] = [
 
 export interface CapabilityPreset {
     id: string
-    label: string
-    hint: string
+    label: Localized
+    hint: Localized
     capabilities: readonly CapabilityId[]
 }
 
 export const PRESETS: readonly CapabilityPreset[] = [
-    { id: 'lean', label: '精简', hint: '只用 pi 本身的能力，上下文最小。', capabilities: [] },
-    { id: 'standard', label: '标准', hint: '适合日常开发。', capabilities: ['todo', 'ask', 'approval', 'plan'] },
-    { id: 'full', label: '完整', hint: '再加上子 Agent，适合大任务。', capabilities: ['todo', 'ask', 'approval', 'plan', 'subagent'] },
+    { id: 'lean', label: { zh: '精简', en: 'Lean' }, hint: { zh: '只用 pi 本身的能力，上下文最小。', en: 'Only what pi has built in; the smallest context.' }, capabilities: [] },
+    { id: 'standard', label: { zh: '标准', en: 'Standard' }, hint: { zh: '适合日常开发。', en: 'For everyday development.' }, capabilities: ['todo', 'ask', 'approval', 'plan'] },
+    { id: 'full', label: { zh: '完整', en: 'Full' }, hint: { zh: '再加上子 Agent，适合大任务。', en: 'Adds subagents, for large tasks.' }, capabilities: ['todo', 'ask', 'approval', 'plan', 'subagent'] },
 ]
 
 export const DEFAULT_CAPABILITIES: readonly CapabilityId[] = PRESETS.find(p => p.id === 'standard')!.capabilities

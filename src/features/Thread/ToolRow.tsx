@@ -15,6 +15,7 @@ import { observer } from 'mobx-react-lite'
 import { useThread } from './ThreadContext'
 import { useViewState } from './viewState'
 import { createContext, memo, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { tr } from '@/lib/i18n'
 
 /** Thread cwd, so absolute paths in tool calls print relative like the TUI. */
 export const CwdContext = createContext<string | undefined>(undefined)
@@ -207,7 +208,7 @@ const PendingLabel = observer(({ toolCallId }: { toolCallId: string }) => {
     const t = useT()
     const thread = useThread()
     if (thread?.approvalFor(toolCallId))
-        return <span className="text-amber-600 dark:text-amber-400">等你确认</span>
+        return <span className="text-amber-600 dark:text-amber-400">{tr('等你确认', 'awaiting approval')}</span>
     return <span className="text-gray-500">{t.pending}</span>
 })
 

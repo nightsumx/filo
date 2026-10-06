@@ -43,6 +43,7 @@ const bridge: PiBridge = {
     openFolder: path => ipcRenderer.invoke(IPC.openFolder, path),
     missingFolders: paths => ipcRenderer.invoke(IPC.missingFolders, paths),
     setTheme: theme => ipcRenderer.invoke(IPC.setTheme, theme),
+    setLang: lang => ipcRenderer.invoke(IPC.setLang, lang),
     openExternal: url => ipcRenderer.invoke(IPC.openExternal, url),
 
     notify: notice => ipcRenderer.invoke(IPC.notify, notice),

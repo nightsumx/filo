@@ -6,17 +6,18 @@ import { ChevronRight, ChevronsDownUp, ChevronsUpDown, Columns2, GitBranch, Load
 import { observer } from 'mobx-react-lite'
 import { useEffect, useState } from 'react'
 import { useGitStatus } from './useGitStatus'
+import { tr } from '@/lib/i18n'
 
 function statusBadge(status: string): { letter: string, className: string, nameClass: string, label: string } {
     if (status === '??')
-        return { letter: 'U', className: 'text-red-500', nameClass: 'text-red-600', label: '未跟踪' }
+        return { letter: 'U', className: 'text-red-500', nameClass: 'text-red-600', label: tr('未跟踪', 'Untracked') }
     if (status.includes('A'))
-        return { letter: 'A', className: 'text-emerald-600', nameClass: 'text-emerald-700', label: '新增' }
+        return { letter: 'A', className: 'text-emerald-600', nameClass: 'text-emerald-700', label: tr('新增', 'Added') }
     if (status.includes('D'))
-        return { letter: 'D', className: 'text-gray-500', nameClass: 'text-gray-500 line-through', label: '删除' }
+        return { letter: 'D', className: 'text-gray-500', nameClass: 'text-gray-500 line-through', label: tr('删除', 'Deleted') }
     if (status.includes('R'))
-        return { letter: 'R', className: 'text-blue-500', nameClass: 'text-blue-600', label: '重命名' }
-    return { letter: 'M', className: 'text-blue-500', nameClass: 'text-blue-600', label: '修改' }
+        return { letter: 'R', className: 'text-blue-500', nameClass: 'text-blue-600', label: tr('重命名', 'Renamed') }
+    return { letter: 'M', className: 'text-blue-500', nameClass: 'text-blue-600', label: tr('修改', 'Modified') }
 }
 
 /*
@@ -78,19 +79,19 @@ function FileDiff({ cwd, file, tick, mode, defaultOpen }: { cwd: string, file: G
             {open && (
                 <div className="px-2 pb-2 pt-0.5">
                     {file.binary
-                        ? <div className="px-1 py-2 text-[12px] text-gray-400">二进制文件</div>
+                        ? <div className="px-1 py-2 text-[12px] text-gray-400">{tr('二进制文件', 'Binary file')}</div>
                         : error
                             ? <div className="px-1 py-2 text-[12px] text-red-500">{error}</div>
                             : large && !forced
                                 ? (
                                         <div className="flex items-center gap-3 px-1 py-2 text-[12px] text-gray-400">
-                                            <span>{`改动较大（${changedLines} 行），显示可能会卡顿`}</span>
-                                            <button type="button" onClick={() => setForced(true)} className="rounded-md px-2 py-1 text-gray-600 hover:bg-black/5 hover:text-gray-800">仍然显示</button>
+                                            <span>{tr(`改动较大（${changedLines} 行），显示可能会卡顿`, `Large change (${changedLines} lines); showing it may be slow`)}</span>
+                                            <button type="button" onClick={() => setForced(true)} className="rounded-md px-2 py-1 text-gray-600 hover:bg-black/5 hover:text-gray-800">{tr('仍然显示', 'Show anyway')}</button>
                                         </div>
                                     )
                                 : diff
                                     ? <DiffBlock path={file.path} oldStr={diff.oldText} newStr={diff.newText} mode={mode} highlight={size <= HIGHLIGHT_MAX_BYTES} />
-                                    : <div className="px-1 py-2 text-[12px] text-gray-400">加载中…</div>}
+                                    : <div className="px-1 py-2 text-[12px] text-gray-400">{tr('加载中…', 'Loading…')}</div>}
                 </div>
             )}
         </div>
@@ -112,9 +113,9 @@ export const ReviewPanel = observer(({ thread, onClose }: { thread: Thread, onCl
     }
 
     return (
-        <aside className="flex h-full w-full flex-col bg-ide-panel" aria-label="代码改动">
+        <aside className="flex h-full w-full flex-col bg-ide-panel" aria-label={tr('代码改动', 'Code changes')}>
             <div className="flex h-[34px] shrink-0 items-center gap-2 pl-3 pr-1.5">
-                <span className="text-[13px] font-semibold text-gray-900">改动</span>
+                <span className="text-[13px] font-semibold text-gray-900">{tr('改动', 'Changes')}</span>
                 {status?.isRepo && (
                     <>
                         <span className="flex min-w-0 items-center gap-1 truncate text-[12px] text-gray-500">
@@ -129,26 +130,26 @@ export const ReviewPanel = observer(({ thread, onClose }: { thread: Thread, onCl
                 )}
                 <span className="flex-1" />
                 {files.length > 1 && (
-                    <button type="button" aria-label={(allOpen ?? autoOpen) ? '全部收起' : '全部展开'} title={(allOpen ?? autoOpen) ? '全部收起' : '全部展开'} onClick={toggleAll} className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-gray-500 hover:bg-black/[0.06] hover:text-gray-800">
+                    <button type="button" aria-label={(allOpen ?? autoOpen) ? tr('全部收起', 'Collapse all') : tr('全部展开', 'Expand all')} title={(allOpen ?? autoOpen) ? tr('全部收起', 'Collapse all') : tr('全部展开', 'Expand all')} onClick={toggleAll} className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-gray-500 hover:bg-black/[0.06] hover:text-gray-800">
                         {(allOpen ?? autoOpen) ? <ChevronsDownUp size={14} /> : <ChevronsUpDown size={14} />}
                     </button>
                 )}
-                <button type="button" aria-label={mode === 'unified' ? '并排显示' : '合并显示'} title={mode === 'unified' ? '并排显示' : '合并显示'} onClick={() => setMode(m => (m === 'unified' ? 'split' : 'unified'))} className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-gray-500 hover:bg-black/[0.06] hover:text-gray-800">
+                <button type="button" aria-label={mode === 'unified' ? tr('并排显示', 'Side by side') : tr('合并显示', 'Unified')} title={mode === 'unified' ? tr('并排显示', 'Side by side') : tr('合并显示', 'Unified')} onClick={() => setMode(m => (m === 'unified' ? 'split' : 'unified'))} className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-gray-500 hover:bg-black/[0.06] hover:text-gray-800">
                     {mode === 'unified' ? <Columns2 size={14} /> : <Rows2 size={14} />}
                 </button>
-                <button type="button" aria-label="刷新" title="刷新" onClick={refresh} className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-gray-500 hover:bg-black/[0.06] hover:text-gray-800">
+                <button type="button" aria-label={tr('刷新', 'Refresh')} title={tr('刷新', 'Refresh')} onClick={refresh} className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-gray-500 hover:bg-black/[0.06] hover:text-gray-800">
                     {loading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
                 </button>
-                <button type="button" aria-label="关闭改动面板" onClick={onClose} className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-gray-500 hover:bg-black/[0.06] hover:text-gray-800">
+                <button type="button" aria-label={tr('关闭改动面板', 'Close changes panel')} onClick={onClose} className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-gray-500 hover:bg-black/[0.06] hover:text-gray-800">
                     <X size={15} />
                 </button>
             </div>
             <div className="flex-1 overflow-y-auto px-1 pb-2">
                 {status && !status.isRepo && (
-                    <div className="px-6 py-10 text-center text-[13px] text-gray-500">这个文件夹不是 git 仓库</div>
+                    <div className="px-6 py-10 text-center text-[13px] text-gray-500">{tr('这个文件夹不是 git 仓库', 'This folder is not a git repository')}</div>
                 )}
                 {status?.isRepo && files.length === 0 && (
-                    <div className="px-6 py-10 text-center text-[13px] text-gray-500">没有未提交的改动</div>
+                    <div className="px-6 py-10 text-center text-[13px] text-gray-500">{tr('没有未提交的改动', 'No uncommitted changes')}</div>
                 )}
                 {files.map(file => (
                     <FileDiff

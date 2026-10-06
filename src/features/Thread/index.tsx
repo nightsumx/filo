@@ -9,15 +9,16 @@ import appIcon from '@/assets/logo.png'
 import { Composer } from '../Composer'
 import { ExtensionRequest } from './ExtensionRequest'
 import { MessageList } from './MessageList'
+import { newThreadLabel, tr } from '@/lib/i18n'
 
 /** Shortcut hints shown on empty editors, like WebStorm's empty editor area. */
 export function ShortcutHints({ className }: { className?: string }) {
     const rows: [string, string][] = [
-        ['新线程', '⌘T'],
-        ['切换项目', '⌘P'],
-        ['切换标签', '⌃Tab'],
-        ['项目面板', '⌘B'],
-        ['分栏 / 单栏', '⌘\\'],
+        [newThreadLabel(), '⌘T'],
+        [tr('切换项目', 'Switch project'), '⌘P'],
+        [tr('切换标签', 'Switch tab'), '⌃Tab'],
+        [tr('项目面板', 'Projects panel'), '⌘B'],
+        [tr('分栏 / 单栏', 'Split / single'), '⌘\\'],
     ]
     return (
         <dl className={cn('grid grid-cols-[auto_auto] gap-x-4 gap-y-1.5 text-[13px]', className)}>
@@ -39,11 +40,11 @@ const Hero = observer(({ thread }: { thread: Thread }) => {
     return (
         <div className="flex flex-1 flex-col items-center justify-center gap-2 overflow-y-auto px-6 pb-6">
             <img src={appIcon} alt="" className="h-12 w-12 select-none" draggable={false} />
-            <h2 className="!mt-1 !text-[17px] !font-semibold text-gray-900">开始构建</h2>
+            <h2 className="!mt-1 !text-[17px] !font-semibold text-gray-900">{tr('开始构建', 'Start building')}</h2>
             <p className="max-w-full truncate font-mono text-[12px] text-gray-500" title={thread.cwd}>{shortPath(thread.cwd)}</p>
             {recent.length > 0 && (
                 <div className="mt-5 flex w-full max-w-md flex-col">
-                    <span className="px-2 pb-1 text-[12px] text-gray-500">最近的线程</span>
+                    <span className="px-2 pb-1 text-[12px] text-gray-500">{tr('最近的线程', 'Recent threads')}</span>
                     {recent.map(session => (
                         <button
                             key={session.path}
@@ -51,7 +52,7 @@ const Hero = observer(({ thread }: { thread: Thread }) => {
                             onClick={() => appStore.openSession(session)}
                             className="flex h-7 items-center gap-3 rounded-md px-2 text-left text-[13px] text-gray-800 hover:bg-ide-hover"
                         >
-                            <span className="min-w-0 flex-1 truncate">{session.name ?? session.firstPrompt?.split('\n')[0] ?? '新线程'}</span>
+                            <span className="min-w-0 flex-1 truncate">{session.name ?? session.firstPrompt?.split('\n')[0] ?? newThreadLabel()}</span>
                             <span className="shrink-0 text-[11px] text-gray-400 tabular-nums">{relativeTime(session.updatedAt)}</span>
                         </button>
                     ))}

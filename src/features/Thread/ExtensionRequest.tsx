@@ -9,6 +9,7 @@ import { displayPath, tuiTitle } from '@/lib/toolMeta'
 import { observer } from 'mobx-react-lite'
 import { useContext, useState } from 'react'
 import { CwdContext, Gutter } from './ToolRow'
+import { tr } from '@/lib/i18n'
 
 type Payload = { value?: string, confirmed?: boolean, cancelled?: boolean }
 
@@ -24,7 +25,7 @@ function RequestForm({ request, onRespond }: { request: UiRequest, onRespond: (p
 
     if (request.method === 'select') {
         return (
-            <div role="group" aria-label={request.title || '选择'} onKeyDown={onKeyDown} className="flex flex-wrap items-center gap-1.5">
+            <div role="group" aria-label={request.title || tr('选择', 'Choose')} onKeyDown={onKeyDown} className="flex flex-wrap items-center gap-1.5">
                 {(request.options ?? []).map(option => (
                     <button
                         key={option}
@@ -35,7 +36,7 @@ function RequestForm({ request, onRespond }: { request: UiRequest, onRespond: (p
                         {option}
                     </button>
                 ))}
-                <Button type="button" variant="ghost" onClick={cancel}>取消</Button>
+                <Button type="button" variant="ghost" onClick={cancel}>{tr('取消', 'Cancel')}</Button>
             </div>
         )
     }
@@ -43,8 +44,8 @@ function RequestForm({ request, onRespond }: { request: UiRequest, onRespond: (p
     if (request.method === 'confirm') {
         return (
             <div onKeyDown={onKeyDown} className="flex items-center gap-2">
-                <Button variant="primary" className="min-w-[72px]" onClick={() => onRespond({ confirmed: true })}>确认</Button>
-                <Button variant="ghost" onClick={() => onRespond({ confirmed: false })}>取消</Button>
+                <Button variant="primary" className="min-w-[72px]" onClick={() => onRespond({ confirmed: true })}>{tr('确认', 'Confirm')}</Button>
+                <Button variant="ghost" onClick={() => onRespond({ confirmed: false })}>{tr('取消', 'Cancel')}</Button>
             </div>
         )
     }
@@ -72,7 +73,7 @@ function RequestForm({ request, onRespond }: { request: UiRequest, onRespond: (p
                             value={value}
                             onChange={e => setValue(e.target.value)}
                             rows={8}
-                            aria-label={request.title || '输入'}
+                            aria-label={request.title || tr('输入', 'Input')}
                             className={cn(flatFieldClass, 'h-auto w-full max-w-3xl py-2 font-mono leading-5')}
                         />
                     )
@@ -81,14 +82,14 @@ function RequestForm({ request, onRespond }: { request: UiRequest, onRespond: (p
                             value={value}
                             placeholder={request.placeholder}
                             onChange={e => setValue(e.target.value)}
-                            aria-label={request.title || '输入'}
+                            aria-label={request.title || tr('输入', 'Input')}
                             className={cn(flatFieldClass, 'w-full max-w-xl')}
                         />
                     )}
             <div className="flex items-center gap-2">
-                <Button type="submit" variant="primary" className="min-w-[72px]">确定</Button>
-                <Button type="button" variant="ghost" onClick={cancel}>取消</Button>
-                {editor && <span className="ml-auto text-[12px] text-[var(--jb-comment)]">⌘ Enter 提交</span>}
+                <Button type="submit" variant="primary" className="min-w-[72px]">{tr('确定', 'OK')}</Button>
+                <Button type="button" variant="ghost" onClick={cancel}>{tr('取消', 'Cancel')}</Button>
+                {editor && <span className="ml-auto text-[12px] text-[var(--jb-comment)]">{tr('⌘ Enter 提交', '⌘ Enter to submit')}</span>}
             </div>
         </form>
     )
@@ -103,7 +104,7 @@ function ApprovalPrompt({ thread, request }: { thread: Thread, request: UiReques
     const approval = request.approval!
     const options = request.options ?? []
     const isBash = approval.tool === 'bash'
-    const always = !approval.scope ? '' : isBash ? `总是允许 ${approval.scope} 命令` : `总是允许 ${tuiTitle(approval.scope)}`
+    const always = !approval.scope ? '' : isBash ? tr(`总是允许 ${approval.scope} 命令`, `Always allow ${approval.scope} commands`) : tr(`总是允许 ${tuiTitle(approval.scope)}`, `Always allow ${tuiTitle(approval.scope)}`)
     const summary = /^(edit|write|read)$/.test(approval.tool) ? displayPath(approval.summary, cwd) : approval.summary
     // A main-thread call's row sits right above and already shows a one-line summary; a subagent's
     // call is inside its card, and long commands are truncated in the row.
@@ -113,13 +114,13 @@ function ApprovalPrompt({ thread, request }: { thread: Thread, request: UiReques
         <Gutter mark={<span className="text-amber-500">?</span>}>
             <div className="flex min-h-6 items-center gap-1.5 text-[12.5px]">
                 <span className="font-mono font-semibold text-gray-900">{tuiTitle(approval.tool)}</span>
-                <span className="shrink-0 text-amber-600 dark:text-amber-400">需要你确认</span>
-                {approval.agent && <span className="min-w-0 truncate text-gray-500">{`· 子 Agent「${approval.agent}」`}</span>}
+                <span className="shrink-0 text-amber-600 dark:text-amber-400">{tr('需要你确认', 'needs your approval')}</span>
+                {approval.agent && <span className="min-w-0 truncate text-gray-500">{tr(`· 子 Agent「${approval.agent}」`, `· subagent “${approval.agent}”`)}</span>}
             </div>
             {showSummary && <pre className="mt-0.5 max-h-40 overflow-y-auto rounded-md bg-ide-block px-3 py-1.5 font-mono text-[12px] leading-5 whitespace-pre-wrap break-all text-gray-800 select-text">{summary}</pre>}
             <div
                 role="group"
-                aria-label={`是否允许 ${tuiTitle(approval.tool)}`}
+                aria-label={tr(`是否允许 ${tuiTitle(approval.tool)}`, `Allow ${tuiTitle(approval.tool)}?`)}
                 className="mt-2 mb-1 flex flex-wrap items-center gap-2"
                 onKeyDown={(e) => {
                     if (e.key === 'Escape') {
@@ -128,10 +129,10 @@ function ApprovalPrompt({ thread, request }: { thread: Thread, request: UiReques
                     }
                 }}
             >
-                <Button variant="primary" className="min-w-[72px]" onClick={() => thread.answerApproval(request, 'allow')}>允许</Button>
+                <Button variant="primary" className="min-w-[72px]" onClick={() => thread.answerApproval(request, 'allow')}>{tr('允许', 'Allow')}</Button>
                 {canAlways && <Button onClick={() => thread.answerApproval(request, 'always')}>{always}</Button>}
-                <Button variant="ghost" onClick={() => thread.answerApproval(request, 'deny')}>拒绝</Button>
-                {canAlways && <span className="ml-auto text-[12px] text-[var(--jb-comment)]">「总是允许」只在这个线程里有效</span>}
+                <Button variant="ghost" onClick={() => thread.answerApproval(request, 'deny')}>{tr('拒绝', 'Deny')}</Button>
+                {canAlways && <span className="ml-auto text-[12px] text-[var(--jb-comment)]">{tr('「总是允许」只在这个线程里有效', '“Always allow” lasts for this thread only')}</span>}
             </div>
         </Gutter>
     )
@@ -148,7 +149,7 @@ export const ExtensionRequest = observer(({ thread }: { thread: Thread }) => {
     return (
         <Gutter mark={<span className="text-amber-500">?</span>}>
             <div className="flex min-h-6 items-center gap-1.5 text-[12.5px]">
-                <span className="font-medium text-gray-900 [overflow-wrap:anywhere]">{request.title || '扩展请求'}</span>
+                <span className="font-medium text-gray-900 [overflow-wrap:anywhere]">{request.title || tr('扩展请求', 'Extension request')}</span>
                 <span className="shrink-0 text-amber-600 dark:text-amber-400">{t.askWaiting}</span>
             </div>
             {request.message && <div className="mt-0.5 whitespace-pre-wrap text-[13px] leading-5 text-gray-600">{request.message}</div>}

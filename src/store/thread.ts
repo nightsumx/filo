@@ -14,6 +14,7 @@ import type {
 } from '@shared/pi'
 import type { ThreadActivity } from '@/lib/threadActivity'
 import type { BlockTime, Step, TimelineMessage, ToolExecState, ToolResultView } from '@/lib/timeline'
+import { newThreadLabel, tr } from '@/lib/i18n'
 import { parsePartialJson } from '@/lib/partialJson'
 import { threadActivity } from '@/lib/threadActivity'
 import { blockTimeKey, buildTurns, contentText } from '@/lib/timeline'
@@ -59,10 +60,11 @@ export interface ThreadHost {
     registerAgent: (agentId: string, thread: Thread) => void
     rekey: (thread: Thread, oldKey: string) => void
     onSettled: (thread: Thread) => void
-    capabilitiesOf: (cwd: string) => CapabilityId[]
-    /** Approval mode new sessions of the project start in; updated when a thread switches mode. */
-    approvalModeOf: (cwd: string) => ApprovalMode | undefined
-    setApprovalModeOf: (cwd: string, mode: ApprovalMode) => void
+    /** Plain copy (sent over IPC); the same for every project. */
+    readonly enabledCapabilities: CapabilityId[]
+    /** Approval mode new sessions start in (all projects); updated when a thread switches mode. */
+    readonly approvalMode: ApprovalMode | undefined
+    setApprovalMode: (mode: ApprovalMode) => void
     /** Bumps when pi's own settings.json changes from the app; pi reads it only at startup. */
     piSettingsEpoch: number
 }
@@ -157,7 +159,7 @@ export class Thread {
             return this.name
         const first = [...this.items, ...this.live].find(m => m.message.role === 'user')
         const text = first ? contentText((first.message as any).content) : this.firstPrompt ?? this.pendingPrompt?.text
-        return text?.trim().split('\n')[0].slice(0, 80) || '新线程'
+        return text?.trim().split('\n')[0].slice(0, 80) || newThreadLabel()
     }
 
     get isEmpty(): boolean {
@@ -310,10 +312,10 @@ export class Thread {
         })
         // A path pi never wrote (thread left empty) cannot be resumed; start fresh instead.
         const resumable = this.persisted ? this.sessionPath : undefined
-        const capabilities = this.host.capabilitiesOf(this.cwd)
+        const capabilities = this.host.enabledCapabilities
         this.loadedConfig = this.configKey()
         this.restartPending = false
-        const agentId = await api().agentStart({ cwd: this.cwd, sessionPath: resumable, capabilities, approvalMode: this.host.approvalModeOf(this.cwd) })
+        const agentId = await api().agentStart({ cwd: this.cwd, sessionPath: resumable, capabilities, approvalMode: this.host.approvalMode })
         runInAction(() => {
             this.agentId = agentId
             this.stopping = false
@@ -340,7 +342,7 @@ export class Thread {
     }
 
     private configKey(): string {
-        return `${this.host.capabilitiesOf(this.cwd).join(',')}#${this.host.piSettingsEpoch}`
+        return `${this.host.enabledCapabilities.join(',')}#${this.host.piSettingsEpoch}`
     }
 
     /**
@@ -375,7 +377,7 @@ export class Thread {
         // Observables (e.g. the images array) are proxies that IPC structured clone rejects.
         const response = await api().agentRequest<T>(agentId, toJS(command))
         if (!response.success)
-            throw new Error(response.error || `${command.type} 失败`)
+            throw new Error(response.error || tr(`${command.type} 失败`, `${command.type} failed`))
         return response
     }
 
@@ -554,7 +556,7 @@ export class Thread {
     private async guiCommand(name: GuiCommands[keyof GuiCommands], args: string) {
         const response = await this.request<{ disposition: string }>({ type: 'prompt', message: `/${name} ${args}` })
         if (response.data?.disposition !== 'handled')
-            throw new Error(`/${name} 未被处理，能力扩展可能没有加载`)
+            throw new Error(tr(`/${name} 未被处理，能力扩展可能没有加载`, `/${name} was not handled; the capability extension may not be loaded`))
     }
 
     async answerAsk(toolCallId: string, response: AskResponse) {
@@ -577,7 +579,7 @@ export class Thread {
                 await this.guiCommand('gui-plan', 'off')
             if (this.approvalMode !== undefined) {
                 await this.guiCommand('gui-approval', mode)
-                this.host.setApprovalModeOf(this.cwd, mode)
+                this.host.setApprovalMode(mode)
             }
         }
         catch (error: any) {
@@ -681,7 +683,7 @@ export class Thread {
             case 'compaction_end':
                 this.compacting = false
                 if (event.errorMessage)
-                    toast.error(`压缩失败：${readableError(event.errorMessage)}`)
+                    toast.error(`${tr('压缩失败：', 'Compaction failed: ')}${readableError(event.errorMessage)}`)
                 break
             case 'auto_retry_start':
                 this.retry = { attempt: event.attempt, maxAttempts: event.maxAttempts, errorMessage: readableError(event.errorMessage ?? '') }
@@ -702,7 +704,7 @@ export class Thread {
                 this.handleUiRequest(event)
                 break
             case 'extension_error':
-                toast.error(`扩展出错：${event.error}`, { description: event.extensionPath })
+                toast.error(`${tr('扩展出错：', 'Extension error: ')}${event.error}`, { description: event.extensionPath })
                 break
             case 'agent_settled':
                 void this.settle()
@@ -854,8 +856,8 @@ export class Thread {
         this.uiRequests = []
         this.tools.clear()
         if (unexpected) {
-            this.agentError = info.stderr.trim().split('\n').slice(-6).join('\n') || `pi 进程退出（${info.code ?? info.signal}）`
-            toast.error('pi 进程意外退出', { description: this.agentError.slice(0, 300) })
+            this.agentError = info.stderr.trim().split('\n').slice(-6).join('\n') || tr(`pi 进程退出（${info.code ?? info.signal}）`, `pi exited (${info.code ?? info.signal})`)
+            toast.error(tr('pi 进程意外退出', 'pi exited unexpectedly'), { description: this.agentError.slice(0, 300) })
         }
     }
 }

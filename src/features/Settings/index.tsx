@@ -1,9 +1,11 @@
 // Settings dialog (⌘,): pages listed on the left. Changes apply immediately, so there is no button bar.
+import type { LangPref, Localized } from '@shared/i18n'
 import type { ThemePref, TranscriptLang } from '@shared/ipc'
 import type { LucideIcon } from 'lucide-react'
 import type { SettingsPageId } from '@/store/app'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
 import { Segmented, SettingRow, SettingsPage } from '@/components/ui/form'
+import { systemLang, tr } from '@/lib/i18n'
 import { TRANSCRIPT_TEXT } from '@/lib/transcriptText'
 import { cn } from '@/lib/utils'
 import { appStore } from '@/store/app'
@@ -46,51 +48,78 @@ function TranscriptPreview({ lang }: { lang: TranscriptLang }) {
     )
 }
 
-const THEME_OPTIONS: { value: ThemePref, label: string }[] = [
-    { value: 'system', label: '跟随系统' },
-    { value: 'light', label: '浅色' },
-    { value: 'dark', label: '深色' },
+const THEME_OPTIONS: { value: ThemePref, label: Localized }[] = [
+    { value: 'system', label: { zh: '跟随系统', en: 'System' } },
+    { value: 'light', label: { zh: '浅色', en: 'Light' } },
+    { value: 'dark', label: { zh: '深色', en: 'Dark' } },
 ]
 
-const LANG_OPTIONS: { value: TranscriptLang, label: string }[] = [
+/** Language names stay in their own language, so the right one is findable from either. */
+const UI_LANG_OPTIONS: { value: LangPref, label: string }[] = [
+    { value: 'zh', label: '中文' },
+    { value: 'en', label: 'English' },
+]
+
+const TRANSCRIPT_LANG_OPTIONS: { value: TranscriptLang, label: string }[] = [
     { value: 'en', label: 'English' },
     { value: 'zh', label: '中文' },
 ]
 
-const LANG_HINTS: Record<TranscriptLang, string> = {
-    en: '与 pi 终端界面（pi-cc-extensions）用词一致。',
-    zh: '工具结果、diff、运行状态等提示改为中文。',
+const TRANSCRIPT_LANG_HINTS: Record<TranscriptLang, Localized> = {
+    en: { zh: '与 pi 终端界面（pi-cc-extensions）用词一致。', en: 'Same wording as pi in the terminal (pi-cc-extensions).' },
+    zh: { zh: '工具结果、diff、运行状态等提示改为中文。', en: 'Tool results, diffs and run status in Chinese.' },
 }
 
-const AppearancePage = observer(() => (
-    <SettingsPage title="外观">
+const AppearancePage = observer(() => {
+    const system = systemLang() === 'zh' ? '中文' : 'English'
+    return (
+        <SettingsPage title={tr('外观', 'Appearance')}>
+            <SettingRow
+                title={tr('语言', 'Language')}
+                description={appStore.langPref === 'system'
+                    ? tr(`跟随系统，当前是${system}。`, `Follows the system, now ${system}.`)
+                    : tr('菜单、按钮和提示的语言。', 'Language of menus, buttons and messages.')}
+                control={({ labelId }) => (
+                    <Segmented
+                        labelledBy={labelId}
+                        value={appStore.langPref}
+                        options={[{ value: 'system', label: tr('跟随系统', 'System') }, ...UI_LANG_OPTIONS]}
+                        onChange={v => appStore.setLangPref(v)}
+                    />
+                )}
+            />
+            <SettingRow
+                title={tr('主题', 'Theme')}
+                control={({ labelId }) => <Segmented labelledBy={labelId} value={appStore.themePref} options={THEME_OPTIONS.map(o => ({ value: o.value, label: tr(o.label) }))} onChange={v => appStore.setTheme(v)} />}
+            />
+            <TranscriptLangRow />
+        </SettingsPage>
+    )
+})
+
+const TranscriptLangRow = observer(() => (
         <SettingRow
-            title="主题"
-            control={({ labelId }) => <Segmented labelledBy={labelId} value={appStore.themePref} options={THEME_OPTIONS} onChange={v => appStore.setTheme(v)} />}
-        />
-        <SettingRow
-            title="对话显示语言"
-            description={`${LANG_HINTS[appStore.transcriptLang]}只影响对话记录，界面其余部分不变。`}
-            control={({ labelId }) => <Segmented labelledBy={labelId} value={appStore.transcriptLang} options={LANG_OPTIONS} onChange={v => appStore.setTranscriptLang(v)} />}
+            title={tr('对话记录用词', 'Transcript wording')}
+            description={`${tr(TRANSCRIPT_LANG_HINTS[appStore.transcriptLang])}${tr('只影响对话记录。', ' Only affects the transcript.')}`}
+            control={({ labelId }) => <Segmented labelledBy={labelId} value={appStore.transcriptLang} options={TRANSCRIPT_LANG_OPTIONS} onChange={v => appStore.setTranscriptLang(v)} />}
         >
             <div className="mt-2.5">
                 <TranscriptPreview lang={appStore.transcriptLang} />
             </div>
         </SettingRow>
-    </SettingsPage>
 ))
 
-const PAGES: { id: SettingsPageId, label: string, icon: LucideIcon, page: React.FC }[] = [
-    { id: 'appearance', label: '外观', icon: Palette, page: AppearancePage },
-    { id: 'capabilities', label: '能力', icon: Puzzle, page: CapabilitiesPage },
-    { id: 'compaction', label: '上下文压缩', icon: Archive, page: CompactionPage },
+const PAGES: { id: SettingsPageId, label: Localized, icon: LucideIcon, page: React.FC }[] = [
+    { id: 'appearance', label: { zh: '外观', en: 'Appearance' }, icon: Palette, page: AppearancePage },
+    { id: 'capabilities', label: { zh: '能力', en: 'Capabilities' }, icon: Puzzle, page: CapabilitiesPage },
+    { id: 'compaction', label: { zh: '上下文压缩', en: 'Compaction' }, icon: Archive, page: CompactionPage },
 ]
 
 /** Page list on the left, like the tree in JetBrains Settings; Up/Down move between pages. */
 const PageList = observer(() => {
     const current = appStore.settingsPage
     return (
-        <nav aria-label="设置分类" className="group/nav flex w-[180px] shrink-0 flex-col gap-px bg-[var(--jb-dialog-side)] px-2 pb-3 pt-12">
+        <nav aria-label={tr('设置分类', 'Settings sections')} className="group/nav flex w-[180px] shrink-0 flex-col gap-px bg-[var(--jb-dialog-side)] px-2 pb-3 pt-12">
             {PAGES.map(({ id, label, icon: Icon }, i) => (
                 <button
                     key={id}
@@ -113,7 +142,7 @@ const PageList = observer(() => {
                     )}
                 >
                     <Icon size={14} className="shrink-0 text-gray-500" />
-                    {label}
+                    {tr(label)}
                 </button>
             ))}
         </nav>
@@ -133,8 +162,8 @@ export const SettingsDialog = observer(() => {
                     ;(e.currentTarget as HTMLElement).focus()
                 }}
             >
-                <DialogTitle className="absolute left-4 top-0 flex h-12 items-center text-[14px]">设置</DialogTitle>
-                <DialogDescription className="sr-only">外观、能力和上下文压缩设置，改动立即生效。</DialogDescription>
+                <DialogTitle className="absolute left-4 top-0 flex h-12 items-center text-[14px]">{tr('设置', 'Settings')}</DialogTitle>
+                <DialogDescription className="sr-only">{tr('外观、能力和上下文压缩设置，改动立即生效。', 'Appearance, capabilities and compaction settings; changes apply immediately.')}</DialogDescription>
                 <PageList />
                 <div className="min-w-0 flex-1 overflow-y-auto px-6 pb-5 scrollbar-trigger">
                     <Page />

@@ -9,6 +9,7 @@ import { runInAction } from 'mobx'
 import { observer } from 'mobx-react-lite'
 import { useEffect, useRef, useState } from 'react'
 import { closeTabWithConfirm, renaming, ThreadActions } from './ThreadActions'
+import { newThreadLabel, tr } from '@/lib/i18n'
 
 const iconBtn = 'flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-gray-500 hover:bg-black/[0.06] hover:text-gray-800 outline-none data-[state=open]:bg-black/[0.08]'
 
@@ -41,7 +42,7 @@ function TitleEditor({ thread }: { thread: Thread }) {
         <input
             ref={ref}
             defaultValue={thread.title}
-            aria-label="线程名称"
+            aria-label={tr('线程名称', 'Thread name')}
             spellCheck={false}
             onBlur={() => void finish(true)}
             onKeyDown={(e) => {
@@ -128,13 +129,13 @@ const Tab = observer(({ thread, index, visible }: { thread: Thread, index: numbe
                 ? <TitleEditor thread={thread} />
                 : (
                         <span className="min-w-0 flex-1 truncate">
-                            {thread.isEmpty && !thread.persisted ? '新线程' : thread.title}
+                            {thread.isEmpty && !thread.persisted ? newThreadLabel() : thread.title}
                         </span>
                     )}
             <button
                 type="button"
-                aria-label={`关闭 ${thread.title}`}
-                title={index < 9 ? `关闭（⌘W）` : '关闭'}
+                aria-label={tr(`关闭 ${thread.title}`, `Close ${thread.title}`)}
+                title={index < 9 ? tr('关闭（⌘W）', 'Close (⌘W)') : tr('关闭', 'Close')}
                 onClick={(e) => {
                     e.stopPropagation()
                     void closeTabWithConfirm(thread)
@@ -159,7 +160,7 @@ const ActiveThreadMenu = observer(() => {
         return null
     return (
         <DropdownMenu>
-            <DropdownMenuTrigger className={iconBtn} aria-label="线程操作" title="线程操作（也可右键标签）">
+            <DropdownMenuTrigger className={iconBtn} aria-label={tr('线程操作', 'Thread actions')} title={tr('线程操作（也可右键标签）', 'Thread actions (or right-click a tab)')}>
                 <MoreHorizontal size={15} />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-48" onCloseAutoFocus={e => renaming.key && e.preventDefault()}>
@@ -177,15 +178,15 @@ const HistoryMenu = observer(() => {
     const open = new Set(appStore.tabs.map(t => t.key))
     return (
         <DropdownMenu>
-            <DropdownMenuTrigger className={iconBtn} aria-label="全部线程" title="全部线程">
+            <DropdownMenuTrigger className={iconBtn} aria-label={tr('全部线程', 'All threads')} title={tr('全部线程', 'All threads')}>
                 <ChevronDown size={15} />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-80 max-h-[480px]">
-                <DropdownMenuLabel>{`${project.name} 的线程`}</DropdownMenuLabel>
-                {project.sessions.length === 0 && <div className="px-2 py-1.5 text-[12px] text-gray-500">还没有线程</div>}
+                <DropdownMenuLabel>{tr(`${project.name} 的线程`, `Threads in ${project.name}`)}</DropdownMenuLabel>
+                {project.sessions.length === 0 && <div className="px-2 py-1.5 text-[12px] text-gray-500">{tr('还没有线程', 'No threads yet')}</div>}
                 {project.sessions.map(session => (
                     <DropdownMenuItem key={session.path} onSelect={() => appStore.openSession(session)}>
-                        <span className="min-w-0 flex-1 truncate">{appStore.threads.get(session.path)?.title ?? session.name ?? session.firstPrompt?.split('\n')[0] ?? '新线程'}</span>
+                        <span className="min-w-0 flex-1 truncate">{appStore.threads.get(session.path)?.title ?? session.name ?? session.firstPrompt?.split('\n')[0] ?? newThreadLabel()}</span>
                         <span className="shrink-0 text-[11px] text-gray-400 tabular-nums">{relativeTime(session.updatedAt)}</span>
                         <span className="w-3.5 shrink-0">{open.has(session.path) && <Check size={14} className="text-ide-accent" />}</span>
                     </DropdownMenuItem>
@@ -193,7 +194,7 @@ const HistoryMenu = observer(() => {
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onSelect={() => appStore.newThread(project.cwd)}>
                     <Plus size={14} />
-                    新线程
+                    {newThreadLabel()}
                     <span className="ml-auto text-[11px] text-gray-400">⌘T</span>
                 </DropdownMenuItem>
             </DropdownMenuContent>
@@ -206,13 +207,13 @@ export const TabBar = observer(() => {
     const visible = new Set(appStore.visibleTabs.map(t => t.key))
     return (
         <div className="flex h-[36px] shrink-0 items-center gap-1 bg-ide-panel px-1.5">
-            <div role="tablist" aria-label="线程标签" className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto px-px py-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            <div role="tablist" aria-label={tr('线程标签', 'Thread tabs')} className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto px-px py-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                 {appStore.tabs.map((thread, i) => (
                     <Tab key={thread.key} thread={thread} index={i} visible={visible.has(thread.key) && appStore.tabs.length > 1} />
                 ))}
             </div>
             {appStore.project && (
-                <button type="button" aria-label="新线程" title="新线程（⌘T）" onClick={() => appStore.newThread(appStore.project!.cwd)} className={iconBtn}>
+                <button type="button" aria-label={newThreadLabel()} title={tr('新线程（⌘T）', 'New thread (⌘T)')} onClick={() => appStore.newThread(appStore.project!.cwd)} className={iconBtn}>
                     <Plus size={15} />
                 </button>
             )}

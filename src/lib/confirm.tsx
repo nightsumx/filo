@@ -1,6 +1,7 @@
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { createRoot } from 'react-dom/client'
+import { tr } from './i18n'
 
 interface ConfirmOptions {
     title?: string
@@ -11,10 +12,10 @@ interface ConfirmOptions {
 
 export function confirm(options: ConfirmOptions | string): Promise<boolean> {
     const {
-        title = '确认',
+        title = tr('确认', 'Confirm'),
         description = typeof options === 'string' ? options : '',
-        confirmText = '确认',
-        cancelText = '取消',
+        confirmText = tr('确认', 'Confirm'),
+        cancelText = tr('取消', 'Cancel'),
     } = typeof options === 'string' ? {} : options
 
     return new Promise((resolve) => {

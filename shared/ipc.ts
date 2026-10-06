@@ -1,4 +1,5 @@
 import type { ApprovalMode, CapabilityId } from './capabilities'
+import type { LangPref } from './i18n'
 import type { AgentMessage, PiEvent, RpcResponse } from './pi'
 
 export interface PiEnv {
@@ -66,12 +67,18 @@ export interface AppState {
     layout: 'split' | 'single'
     /** Appearance; `system` follows macOS. */
     theme?: ThemePref
+    /** App UI language; absent or `system` follows the OS preferred languages. */
+    lang?: LangPref
     /** Wording inside the conversation (tool rows, diffs, status lines). */
     transcriptLang?: TranscriptLang
-    /** Capabilities per project cwd; projects not listed use DEFAULT_CAPABILITIES. */
-    capabilities?: Record<string, CapabilityId[]>
-    /** Approval mode new threads start in, per project cwd (the last one chosen there). */
+    /** Capabilities every pi process loads; absent means DEFAULT_CAPABILITIES. Older state has a map per project cwd. */
+    capabilities?: CapabilityId[] | Record<string, CapabilityId[]>
+    /** Approval mode new threads start in: the last one chosen in any thread. */
+    approvalMode?: ApprovalMode
+    /** Older state: the same, per project cwd. Read once, then dropped. */
     approvalModes?: Record<string, ApprovalMode>
+    /** Tokens at which every model compacts (see lib/compactAt); null: none, absent: not decided yet. */
+    compactAt?: number | null
 }
 
 /** Global compaction settings as the Settings page shows them (pi defaults filled in). */
@@ -79,13 +86,16 @@ export interface GlobalCompaction {
     enabled: boolean
     reserveTokens: number
     keepRecentTokens: number
-    /** compaction.modelOverrides has entries: some models use their own numbers. */
-    modelOverrides: boolean
+    /** compaction.modelOverrides[provider/id].reserveTokens: models that compact at their own point. */
+    modelReserves: Record<string, number>
     /** The given project's .pi/settings.json sets compaction fields of its own. */
     projectOverride: boolean
 }
 
-export type GlobalCompactionPatch = Partial<Pick<GlobalCompaction, 'enabled' | 'reserveTokens' | 'keepRecentTokens'>>
+export type GlobalCompactionPatch = Partial<Pick<GlobalCompaction, 'enabled' | 'reserveTokens' | 'keepRecentTokens'>> & {
+    /** Per-model reserves to set; null removes one so the model follows reserveTokens again. */
+    modelReserves?: Record<string, number | null>
+}
 
 /** pi's effective auto-compaction settings for a project + model. */
 export interface CompactionInfo {
@@ -151,6 +161,8 @@ export interface PiBridge {
     missingFolders: (paths: string[]) => Promise<string[]>
     /** Sets nativeTheme.themeSource, which drives prefers-color-scheme and the window chrome. */
     setTheme: (theme: ThemePref) => Promise<void>
+    /** Main process wording (menus, errors) follows the UI language. */
+    setLang: (lang: LangPref) => Promise<void>
     openExternal: (url: string) => Promise<void>
 
     /** System notification; clicking it focuses the window and reports `key` back. */
@@ -193,6 +205,7 @@ export const IPC = {
     openFolder: 'shell:open-folder',
     missingFolders: 'fs:missing-folders',
     setTheme: 'theme:set',
+    setLang: 'lang:set',
     openExternal: 'shell:open-external',
     notify: 'app:notify',
     notificationClick: 'app:notification-click',

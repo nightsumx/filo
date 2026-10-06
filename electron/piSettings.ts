@@ -6,6 +6,7 @@ import { mkdir, readFile, rename, rmdir, stat, writeFile } from 'node:fs/promise
 import os from 'node:os'
 import path from 'node:path'
 import process from 'node:process'
+import { tr } from './i18n'
 
 export const DEFAULT_RESERVE_TOKENS = 16384
 export const DEFAULT_KEEP_RECENT_TOKENS = 20000
@@ -63,7 +64,11 @@ export function readGlobalCompaction(global: Record<string, any>, project: Recor
         enabled: c.enabled !== false,
         reserveTokens: tokenSetting(c.reserveTokens) ?? DEFAULT_RESERVE_TOKENS,
         keepRecentTokens: tokenSetting(c.keepRecentTokens) ?? DEFAULT_KEEP_RECENT_TOKENS,
-        modelOverrides: isObject(c.modelOverrides) && Object.keys(c.modelOverrides).length > 0,
+        modelReserves: Object.fromEntries(Object.entries(isObject(c.modelOverrides) ? c.modelOverrides : {})
+            .flatMap(([model, o]) => {
+                const reserve = isObject(o) ? tokenSetting(o.reserveTokens) : undefined
+                return reserve === undefined ? [] : [[model, reserve] as const]
+            })),
         projectOverride: ['enabled', 'reserveTokens', 'keepRecentTokens'].some(k => k in p),
     }
 }
@@ -85,6 +90,25 @@ export function patchCompaction(settings: Record<string, any>, patch: GlobalComp
     set('enabled', patch.enabled, true)
     set('reserveTokens', patch.reserveTokens, DEFAULT_RESERVE_TOKENS)
     set('keepRecentTokens', patch.keepRecentTokens, DEFAULT_KEEP_RECENT_TOKENS)
+    if (patch.modelReserves && Object.keys(patch.modelReserves).length) {
+        // Other fields of a model's entry (keepRecentTokens) and unlisted models stay as they are.
+        const overrides: Record<string, any> = isObject(compaction.modelOverrides) ? { ...compaction.modelOverrides } : {}
+        for (const [model, reserveTokens] of Object.entries(patch.modelReserves)) {
+            const entry: Record<string, any> = isObject(overrides[model]) ? { ...overrides[model] } : {}
+            if (reserveTokens === null)
+                delete entry.reserveTokens
+            else
+                entry.reserveTokens = reserveTokens
+            if (Object.keys(entry).length)
+                overrides[model] = entry
+            else
+                delete overrides[model]
+        }
+        if (Object.keys(overrides).length)
+            compaction.modelOverrides = overrides
+        else
+            delete compaction.modelOverrides
+    }
     const next = { ...settings }
     if (Object.keys(compaction).length)
         next.compaction = compaction
@@ -109,7 +133,7 @@ async function withSettingsLock<T>(file: string, fn: () => Promise<T>): Promise<
         }
         catch (error: any) {
             if (error?.code !== 'EEXIST' || attempt >= 100)
-                throw new Error('pi 的 settings.json 正被占用，稍后再试')
+                throw new Error(tr('pi 的 settings.json 正被占用，稍后再试', 'pi\'s settings.json is in use; try again in a moment'))
             const age = await stat(lock).then(s => Date.now() - s.mtimeMs, () => 0)
             if (age > LOCK_STALE_MS)
                 await rmdir(lock).catch(() => {})
@@ -130,10 +154,17 @@ const TOKEN_LIMIT = 10_000_000
 function validPatch(patch: unknown): GlobalCompactionPatch {
     const p = isObject(patch) ? patch : {}
     const tokens = (v: unknown) => (typeof v === 'number' && Number.isSafeInteger(v) && v >= 0 && v <= TOKEN_LIMIT ? v : undefined)
+    const modelReserves: Record<string, number | null> = {}
+    for (const [model, value] of Object.entries(isObject(p.modelReserves) ? p.modelReserves : {}).slice(0, 1000)) {
+        const reserve = value === null ? null : tokens(value)
+        if (model.length > 0 && model.length <= 200 && reserve !== undefined)
+            modelReserves[model] = reserve
+    }
     return {
         enabled: typeof p.enabled === 'boolean' ? p.enabled : undefined,
         reserveTokens: tokens(p.reserveTokens),
         keepRecentTokens: tokens(p.keepRecentTokens),
+        modelReserves,
     }
 }
 
@@ -161,10 +192,10 @@ export async function setGlobalCompaction(patch: unknown): Promise<void> {
                 current = JSON.parse(text.replace(/^\uFEFF/, ''))
             }
             catch {
-                throw new Error('settings.json 不是有效的 JSON，没有修改')
+                throw new Error(tr('settings.json 不是有效的 JSON，没有修改', 'settings.json is not valid JSON; nothing was changed'))
             }
             if (!isObject(current))
-                throw new Error('settings.json 不是一个对象，没有修改')
+                throw new Error(tr('settings.json 不是一个对象，没有修改', 'settings.json is not an object; nothing was changed'))
         }
         const tmp = `${file}.${process.pid}.tmp`
         await writeFile(tmp, `${JSON.stringify(patchCompaction(current, valid), null, 2)}\n`, 'utf8')

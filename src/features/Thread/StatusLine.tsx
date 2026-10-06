@@ -6,6 +6,7 @@ import { basename } from '@/lib/utils'
 import { appStore } from '@/store/app'
 import { observer } from 'mobx-react-lite'
 import { useEffect, useState } from 'react'
+import { tr } from '@/lib/i18n'
 
 // xterm-256 colours cc-statusline uses (108, 110, 141, 244, 179, 174); light theme gets darker twins in index.css.
 const OK = 'text-[var(--sl-ok)]'
@@ -96,7 +97,7 @@ export const StatusLine = observer(({ thread }: { thread: Thread }) => {
         const filled = Math.min(5, Math.floor(ratio * 5 + 0.5))
         const color = pct >= 80 ? DANGER : pct >= 50 ? WARN : OK
         parts.push(
-            <span key="ctx" title="上下文用量">
+            <span key="ctx" title={tr('上下文用量', 'Context usage')}>
                 <span className={color}>{'█'.repeat(filled)}</span>
                 <span className={MUTED}>{'░'.repeat(5 - filled)}</span>
                 {' '}
@@ -109,7 +110,7 @@ export const StatusLine = observer(({ thread }: { thread: Thread }) => {
 
     if (recentOut) {
         parts.push(
-            <span key="rate" title="最近 60 秒输出">
+            <span key="rate" title={tr('最近 60 秒输出', 'Output over the last 60s')}>
                 <span className={OK}>{`⚡ ${recentOut >= 1000 ? `${(recentOut / 1000).toFixed(1)}k` : recentOut}tok`}</span>
                 {' '}
                 <span className={MUTED}>{`${Math.round(recentOut / 60)}/s`}</span>
@@ -118,11 +119,11 @@ export const StatusLine = observer(({ thread }: { thread: Thread }) => {
     }
 
     if (cost)
-        parts.push(<span key="cost" className={cost >= 5 ? DANGER : cost >= 1 ? WARN : MUTED} title="会话花费">{`$${cost.toFixed(2)}`}</span>)
+        parts.push(<span key="cost" className={cost >= 5 ? DANGER : cost >= 1 ? WARN : MUTED} title={tr('会话花费', 'Session cost')}>{`$${cost.toFixed(2)}`}</span>)
 
     if (add || del) {
         parts.push(
-            <span key="lines" title="本会话改动行数">
+            <span key="lines" title={tr('本会话改动行数', 'Lines changed this session')}>
                 <span className={OK}>{`+${add}`}</span>
                 {' '}
                 <span className={DANGER}>{`-${del}`}</span>
@@ -149,7 +150,7 @@ export const StatusLine = observer(({ thread }: { thread: Thread }) => {
         // Anthropic's prompt cache lives 5 minutes: amber from 4m, red once it has likely expired.
         const s = Math.max(0, Math.floor((now - lastReply) / 1000))
         parts.push(
-            <span key="ago" className={s >= 300 ? DANGER : s >= 240 ? WARN : OK} title="距上次回复（提示缓存约 5 分钟过期）">
+            <span key="ago" className={s >= 300 ? DANGER : s >= 240 ? WARN : OK} title={tr('距上次回复（提示缓存约 5 分钟过期）', 'Since the last reply (the prompt cache expires after about 5 minutes)')}>
                 {`${s >= 300 ? '✗' : '⏱'} ${ago(s)}`}
             </span>,
         )

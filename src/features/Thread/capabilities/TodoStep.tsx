@@ -5,9 +5,11 @@ import type { ToolCall } from '@shared/pi'
 import type { ToolResultView } from '@/lib/timeline'
 import { useT } from '@/lib/transcriptText'
 import { cn } from '@/lib/utils'
+import { observer } from 'mobx-react-lite'
 import { memo } from 'react'
 import { Gutter, StatusMark } from '../ToolRow'
 import { useViewState } from '../viewState'
+import { tr } from '@/lib/i18n'
 
 /** Items from the result, or from the streamed arguments while the call is still running. */
 function itemsOf(call: ToolCall, result?: ToolResultView): TodoItem[] {
@@ -18,13 +20,13 @@ function itemsOf(call: ToolCall, result?: ToolResultView): TodoItem[] {
     return Array.isArray(args) ? args.filter(i => typeof i?.text === 'string') : []
 }
 
-export function TodoList({ items, className }: { items: TodoItem[], className?: string }) {
+export const TodoList = observer(({ items, className }: { items: TodoItem[], className?: string }) => {
     return (
         <ul className={cn('flex flex-col', className)}>
             {items.map((item, i) => (
                 <li key={i} className="flex min-h-[22px] items-start gap-2 leading-[22px]">
                     <span
-                        aria-label={item.status === 'done' ? '已完成' : item.status === 'in_progress' ? '进行中' : '待办'}
+                        aria-label={item.status === 'done' ? tr('已完成', 'Done') : item.status === 'in_progress' ? tr('进行中', 'In progress') : tr('待办', 'To do')}
                         className={cn('w-3 shrink-0 select-none text-center font-mono', item.status === 'done' ? 'text-ide-success' : item.status === 'in_progress' ? 'text-ide-accent' : 'text-gray-400')}
                     >
                         {item.status === 'done' ? '✓' : item.status === 'in_progress' ? '▸' : '○'}
@@ -36,7 +38,7 @@ export function TodoList({ items, className }: { items: TodoItem[], className?: 
             ))}
         </ul>
     )
-}
+})
 
 export const TodoStep = memo(({ call, result, running }: { call: ToolCall, result?: ToolResultView, running: boolean }) => {
     const t = useT()

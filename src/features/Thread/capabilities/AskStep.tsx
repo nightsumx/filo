@@ -11,6 +11,7 @@ import { observer } from 'mobx-react-lite'
 import { useId, useState } from 'react'
 import { useThread } from '../ThreadContext'
 import { Gutter, StatusMark } from '../ToolRow'
+import { tr } from '@/lib/i18n'
 
 function answerText(a?: AskAnswer): string {
     const parts = [...(a?.selected ?? []), ...(a?.text?.trim() ? [a.text.trim()] : [])]
@@ -30,7 +31,7 @@ function QuestionField({ index, question, answer, onChange }: { index: number, q
             <legend className="mb-2 flex items-baseline gap-2 text-[13px] text-gray-900">
                 <span className="font-mono text-[12px] text-gray-400">{index + 1}</span>
                 <span className="font-medium">{question.question}</span>
-                {question.multiple && <span className="text-[12px] text-[var(--jb-comment)]">可多选</span>}
+                {question.multiple && <span className="text-[12px] text-[var(--jb-comment)]">{tr('可多选', 'choose any')}</span>}
             </legend>
             <div className="flex flex-wrap gap-1.5">
                 {question.options.map(option => (
@@ -47,8 +48,8 @@ function QuestionField({ index, question, answer, onChange }: { index: number, q
                 <input
                     value={answer.text ?? ''}
                     onChange={e => onChange({ ...answer, text: e.target.value })}
-                    placeholder="其他，自己填写…"
-                    aria-label={`${question.question}：自己填写`}
+                    placeholder={tr('其他，自己填写…', 'Other, type your own…')}
+                    aria-label={tr(`${question.question}：自己填写`, `${question.question}: your own answer`)}
                     className={cn(flatFieldClass, 'min-w-48 flex-1')}
                 />
             </div>
@@ -73,7 +74,7 @@ const AskForm = observer(({ toolCallId, questions }: { toolCallId: string, quest
 
     return (
         <form
-            aria-label="回答 pi 的问题"
+            aria-label={tr('回答 pi 的问题', 'Answer pi’s questions')}
             onSubmit={(e) => {
                 e.preventDefault()
                 submit()
@@ -90,10 +91,10 @@ const AskForm = observer(({ toolCallId, questions }: { toolCallId: string, quest
                 <QuestionField key={q.id} index={i} question={q} answer={answers[q.id]} onChange={a => setAnswers(prev => ({ ...prev, [q.id]: a }))} />
             ))}
             <div className="flex items-center gap-2">
-                <Button type="submit" variant="primary" disabled={sending || !answered} title="提交（⌘ Enter）" className="min-w-[72px]">提交</Button>
-                <Button type="button" variant="ghost" disabled={sending} onClick={() => void send({ cancelled: true })}>跳过</Button>
+                <Button type="submit" variant="primary" disabled={sending || !answered} title={tr('提交（⌘ Enter）', 'Submit (⌘ Enter)')} className="min-w-[72px]">{tr('提交', 'Submit')}</Button>
+                <Button type="button" variant="ghost" disabled={sending} onClick={() => void send({ cancelled: true })}>{tr('跳过', 'Skip')}</Button>
                 <span className="ml-auto text-[12px] text-[var(--jb-comment)] tabular-nums">
-                    {questions.length > 1 ? `已回答 ${answered}/${questions.length} · ⌘ Enter 提交` : '⌘ Enter 提交'}
+                    {questions.length > 1 ? tr(`已回答 ${answered}/${questions.length} · ⌘ Enter 提交`, `${answered}/${questions.length} answered · ⌘ Enter to submit`) : tr('⌘ Enter 提交', '⌘ Enter to submit')}
                 </span>
             </div>
         </form>

@@ -12,13 +12,14 @@ import { StatusBar } from './features/StatusBar'
 import { closeTabWithConfirm, TabBar } from './features/Tabs/TabBar'
 import { ShortcutHints, ThreadPane } from './features/Thread'
 import { MainToolbar } from './features/Toolbar'
+import { newThreadLabel, tr } from '@/lib/i18n'
 
 const EnvError = observer(({ error }: { error: string }) => (
     <div className="app-drag flex h-full w-full flex-col items-center justify-center gap-4 px-8 text-center">
         <AlertTriangle size={28} className="text-amber-500" />
-        <h1 className="!text-lg !font-semibold">没有找到可用的 pi</h1>
+        <h1 className="!text-lg !font-semibold">{tr('没有找到可用的 pi', 'No working pi found')}</h1>
         <p className="max-w-md whitespace-pre-wrap text-[13px] text-gray-500 select-text">{error}</p>
-        <Button variant="primary" onClick={() => void appStore.retryEnv()}>重试</Button>
+        <Button variant="primary" onClick={() => void appStore.retryEnv()}>{tr('重试', 'Retry')}</Button>
     </div>
 ))
 
@@ -50,21 +51,21 @@ const Panes = observer(() => {
                     {project
                         ? (
                                 <>
-                                    <span>{`${project.name} 没有打开的标签`}</span>
+                                    <span>{tr(`${project.name} 没有打开的标签`, `No open tabs in ${project.name}`)}</span>
                                     <Button variant="outline" size="sm" onClick={() => appStore.newThread(project.cwd)}>
                                         <Plus size={14} />
-                                        新线程
+                                        {newThreadLabel()}
                                     </Button>
                                     <ShortcutHints className="mt-6" />
                                 </>
                             )
                         : (
                                 <>
-                                    <span>{appStore.projects.length ? '从左侧选择一个项目' : '先添加一个项目文件夹'}</span>
+                                    <span>{appStore.projects.length ? tr('从左侧选择一个项目', 'Pick a project on the left') : tr('先添加一个项目文件夹', 'Add a project folder to start')}</span>
                                     {!appStore.projects.length && (
                                         <Button variant="outline" size="sm" onClick={() => void appStore.addProject()}>
                                             <FolderPlus size={14} />
-                                            添加项目
+                                            {tr('添加项目', 'Add project')}
                                         </Button>
                                     )}
                                 </>

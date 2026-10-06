@@ -12,12 +12,14 @@ import { useState } from 'react'
 import { useThread } from '../ThreadContext'
 import { Gutter, StatusMark } from '../ToolRow'
 import { useViewState } from '../viewState'
+import { tr } from '@/lib/i18n'
+import type { Localized } from '@shared/i18n'
 
-const STATUS_LABEL: Record<PlanDetails['status'], string> = {
-    pending: '等你审阅',
-    approved: '已批准，开始执行',
-    revised: '已要求修改',
-    cancelled: '已搁置',
+const STATUS_LABEL: Record<PlanDetails['status'], Localized> = {
+    pending: { zh: '等你审阅', en: 'waiting for your review' },
+    approved: { zh: '已批准，开始执行', en: 'approved, carrying it out' },
+    revised: { zh: '已要求修改', en: 'changes requested' },
+    cancelled: { zh: '已搁置', en: 'set aside' },
 }
 
 function PlanBody({ plan, streaming }: { plan: string, streaming?: boolean }) {
@@ -66,24 +68,24 @@ const Review = observer(({ toolCallId }: { toolCallId: string }) => {
                     value={feedback}
                     onChange={e => setFeedback(e.target.value)}
                     rows={3}
-                    aria-label="要怎么改这个计划"
-                    placeholder="要怎么改？比如：先别动数据库，分两步做…"
+                    aria-label={tr('要怎么改这个计划', 'How to change this plan')}
+                    placeholder={tr('要怎么改？比如：先别动数据库，分两步做…', 'What should change? e.g. leave the database alone, do it in two steps…')}
                     className={cn(flatFieldClass, 'h-auto w-full py-2 leading-5')}
                 />
                 <div className="flex items-center gap-2">
-                    <Button type="submit" variant="primary" disabled={sending || !feedback.trim()} className="min-w-[72px]">发送修改意见</Button>
-                    <Button type="button" variant="ghost" onClick={() => setRevising(false)}>返回</Button>
-                    <span className="ml-auto text-[12px] text-[var(--jb-comment)]">⌘ Enter 发送</span>
+                    <Button type="submit" variant="primary" disabled={sending || !feedback.trim()} className="min-w-[72px]">{tr('发送修改意见', 'Send feedback')}</Button>
+                    <Button type="button" variant="ghost" onClick={() => setRevising(false)}>{tr('返回', 'Back')}</Button>
+                    <span className="ml-auto text-[12px] text-[var(--jb-comment)]">{tr('⌘ Enter 发送', '⌘ Enter to send')}</span>
                 </div>
             </form>
         )
     }
     return (
         <div className="mt-2 mb-1 flex flex-wrap items-center gap-2">
-            <Button variant="primary" disabled={sending} onClick={() => void decide({ approve: true })}>批准并开始执行</Button>
-            <Button disabled={sending} onClick={() => setRevising(true)}>修改…</Button>
-            <Button variant="ghost" disabled={sending} onClick={() => void decide({ cancelled: true })}>先不做</Button>
-            <span className="ml-auto text-[12px] text-[var(--jb-comment)]">批准后退出计划模式，pi 接着按计划改代码</span>
+            <Button variant="primary" disabled={sending} onClick={() => void decide({ approve: true })}>{tr('批准并开始执行', 'Approve and start')}</Button>
+            <Button disabled={sending} onClick={() => setRevising(true)}>{tr('修改…', 'Revise…')}</Button>
+            <Button variant="ghost" disabled={sending} onClick={() => void decide({ cancelled: true })}>{tr('先不做', 'Not now')}</Button>
+            <span className="ml-auto text-[12px] text-[var(--jb-comment)]">{tr('批准后退出计划模式，pi 接着按计划改代码', 'Approving leaves plan mode and pi starts on the plan')}</span>
         </div>
     )
 })
@@ -101,7 +103,7 @@ export const PlanStep = observer(({ call, result, running }: { call: ToolCall, r
             <Gutter mark={<span className="text-amber-500">?</span>}>
                 <div className="flex h-6 items-center gap-1.5 text-[12.5px]">
                     <span className="font-mono font-semibold text-gray-900">Plan</span>
-                    <span className="text-amber-600 dark:text-amber-400">{STATUS_LABEL.pending}</span>
+                    <span className="text-amber-600 dark:text-amber-400">{tr(STATUS_LABEL.pending)}</span>
                 </div>
                 <PlanBody plan={plan} />
                 <Review toolCallId={call.id} />
@@ -110,14 +112,14 @@ export const PlanStep = observer(({ call, result, running }: { call: ToolCall, r
     }
 
     const mark = running ? <StatusMark status="running" /> : status === 'approved' ? <StatusMark status="success" /> : <span className="text-gray-400">⎿</span>
-    const label = status ? STATUS_LABEL[status] : running ? '正在写计划…' : '未完成'
+    const label = status ? tr(STATUS_LABEL[status]) : running ? tr('正在写计划…', 'writing a plan…') : tr('未完成', 'unfinished')
     return (
         <Gutter mark={mark}>
             <button type="button" onClick={() => setOpen(v => !v)} aria-expanded={open} className="group/res flex h-6 w-full min-w-0 items-center gap-1.5 text-left text-[12.5px]">
                 <span className="shrink-0 font-mono font-semibold text-gray-900">Plan</span>
                 <span className="min-w-0 truncate text-gray-500">
                     {label}
-                    {plan && <span className="text-gray-400 group-hover/res:text-gray-800">{` · ${open ? '收起' : '展开'}`}</span>}
+                    {plan && <span className="text-gray-400 group-hover/res:text-gray-800">{` · ${open ? tr('收起', 'collapse') : tr('展开', 'expand')}`}</span>}
                 </span>
             </button>
             {details?.status === 'revised' && (

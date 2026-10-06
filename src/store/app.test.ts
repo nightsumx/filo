@@ -78,22 +78,48 @@ describe('tabs and auto split', () => {
     })
 })
 
-describe('capabilities per project', () => {
+describe('capabilities', () => {
     beforeEach(() => {
         reset()
-        appStore.capabilitiesByProject = {}
+        appStore.capabilities = ['todo', 'ask', 'approval', 'plan']
     })
 
     it('defaults to the standard preset and returns plain, cloneable arrays', () => {
-        expect(appStore.capabilitiesOf('/p')).toEqual(['todo', 'ask', 'approval', 'plan'])
-        appStore.setCapabilities('/p', ['ask', 'bogus' as any, 'todo'])
-        const ids = appStore.capabilitiesOf('/p')
+        expect(appStore.enabledCapabilities).toEqual(['todo', 'ask', 'approval', 'plan'])
+        appStore.setCapabilities(['ask', 'bogus' as any, 'todo'])
+        const ids = appStore.enabledCapabilities
         expect(ids).toEqual(['todo', 'ask'])
         // agentStart sends this over IPC; MobX proxies fail structured clone.
         expect(() => structuredClone(ids)).not.toThrow()
-        appStore.setCapabilities('/p', [])
-        expect(appStore.capabilitiesOf('/p')).toEqual([])
-        expect(appStore.capabilitiesOf('/other')).toEqual(['todo', 'ask', 'approval', 'plan'])
+        appStore.setCapabilities([])
+        expect(appStore.enabledCapabilities).toEqual([])
+    })
+
+    it('restores the active project\'s set from the old per-project state', () => {
+        const restore = (state: object) => {
+            ;(appStore as any).restoreState(state)
+            return appStore.enabledCapabilities
+        }
+        expect(restore({})).toEqual(['todo', 'ask', 'approval', 'plan'])
+        expect(restore({ capabilities: ['plan', 'todo'] })).toEqual(['todo', 'plan'])
+        const old = { capabilities: { '/a': ['todo'], '/b': ['todo', 'ask', 'subagent'] } }
+        expect(restore({ ...old, activeProject: '/a' })).toEqual(['todo'])
+        expect(restore({ ...old, activeProject: '/c' })).toEqual(['todo', 'ask', 'subagent'])
+    })
+
+    it('keeps one approval mode for all projects, reading the old per-project map once', () => {
+        const restore = (state: object) => {
+            ;(appStore as any).restoreState(state)
+            return appStore.approvalMode
+        }
+        expect(restore({})).toBe('auto')
+        expect(restore({ approvalMode: 'edits' })).toBe('edits')
+        expect(restore({ approvalMode: 'bogus' })).toBe('auto')
+        const old = { approvalModes: { '/a': 'auto', '/b': 'edits' } }
+        expect(restore({ ...old, activeProject: '/a' })).toBe('auto')
+        expect(restore({ ...old, activeProject: '/c' })).toBe('edits')
+        appStore.setApprovalMode('ask')
+        expect(appStore.approvalMode).toBe('ask')
     })
 })
 

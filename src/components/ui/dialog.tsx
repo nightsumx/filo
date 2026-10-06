@@ -1,3 +1,4 @@
+import { tr } from '@/lib/i18n'
 import { cn } from '@/lib/utils'
 import * as DialogPrimitive from '@radix-ui/react-dialog'
 import { X } from 'lucide-react'
@@ -79,7 +80,7 @@ const DialogContent = React.forwardRef<
                             {!hideClose && (
                                 <DialogPrimitive.Close className="absolute right-3 top-3 flex h-6 w-6 items-center justify-center rounded-[4px] text-gray-500 hover:bg-ide-hover hover:text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-ide-accent/50">
                                     <X className="h-4 w-4" />
-                                    <span className="sr-only">关闭</span>
+                                    <span className="sr-only">{tr('关闭', 'Close')}</span>
                                 </DialogPrimitive.Close>
                             )}
                         </DialogPrimitive.Content>

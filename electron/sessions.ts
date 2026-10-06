@@ -4,6 +4,7 @@ import { open, readdir, readFile, stat } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import process from 'node:process'
+import { tr } from './i18n'
 
 const FULL_READ_LIMIT = 4 * 1024 * 1024
 const PARTIAL_CHUNK = 512 * 1024
@@ -202,5 +203,5 @@ export async function assertInSessionsDir(filePath: string) {
     const root = path.resolve(await sessionsDir())
     const resolved = path.resolve(filePath)
     if (!resolved.startsWith(root + path.sep) || !resolved.endsWith('.jsonl'))
-        throw new Error('拒绝访问会话目录之外的文件')
+        throw new Error(tr('拒绝访问会话目录之外的文件', 'Refusing to read files outside the sessions folder'))
 }

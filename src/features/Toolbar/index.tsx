@@ -10,6 +10,7 @@ import { observer } from 'mobx-react-lite'
 import { useEffect, useRef, useState } from 'react'
 import { useGitStatus } from '../Review/useGitStatus'
 import { ProjectBadge } from './ProjectBadge'
+import { newThreadLabel, tr } from '@/lib/i18n'
 
 export const toolbarBtn = 'flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-[13px] text-gray-800 outline-none transition-colors hover:bg-black/[0.06] data-[state=open]:bg-black/[0.08] focus-visible:ring-2 focus-visible:ring-ide-accent/50 disabled:opacity-40 disabled:hover:bg-transparent'
 const iconBtn = cn(toolbarBtn, 'w-7 justify-center px-0 text-gray-600')
@@ -52,8 +53,8 @@ function ProjectItem({ project, branch, active, current, shortcut, onPick, onHov
             {onRemove && (
                 <button
                     type="button"
-                    aria-label={`从列表移除 ${project.name}`}
-                    title="从列表移除"
+                    aria-label={tr(`从列表移除 ${project.name}`, `Remove ${project.name} from list`)}
+                    title={tr('从列表移除', 'Remove from list')}
                     onClick={(e) => {
                         e.stopPropagation()
                         onRemove()
@@ -93,8 +94,8 @@ const ProjectSwitcher = observer(() => {
     const actions = q
         ? []
         : [
-                { key: 'new', label: '新线程', hint: '⌘T', Icon: Plus, run: () => project && appStore.newThread(project.cwd), disabled: !project },
-                { key: 'open', label: '打开文件夹…', hint: '', Icon: FolderOpen, run: () => void appStore.addProject(), disabled: false },
+                { key: 'new', label: newThreadLabel(), hint: '⌘T', Icon: Plus, run: () => project && appStore.newThread(project.cwd), disabled: !project },
+                { key: 'open', label: tr('打开文件夹…', 'Open folder…'), hint: '', Icon: FolderOpen, run: () => void appStore.addProject(), disabled: false },
             ]
     const items = [...actions.map(a => ({ kind: 'action' as const, a })), ...[...openProjects, ...recentProjects].map(p => ({ kind: 'project' as const, p }))]
 
@@ -176,9 +177,9 @@ const ProjectSwitcher = observer(() => {
 
     return (
         <Popover open={open} onOpenChange={setOpen}>
-            <PopoverTrigger className={cn(toolbarBtn, 'max-w-[280px] pl-1.5 font-semibold')} title="切换项目（⌘P）">
+            <PopoverTrigger className={cn(toolbarBtn, 'max-w-[280px] pl-1.5 font-semibold')} title={tr('切换项目（⌘P）', 'Switch project (⌘P)')}>
                 {project ? <ProjectBadge name={project.name} /> : <FolderPlus size={15} className="text-gray-500" />}
-                <span className="truncate">{project?.name ?? '选择项目'}</span>
+                <span className="truncate">{project?.name ?? tr('选择项目', 'Choose project')}</span>
                 <ChevronDown size={13} className="shrink-0 text-gray-500" />
             </PopoverTrigger>
             <PopoverContent
@@ -198,7 +199,7 @@ const ProjectSwitcher = observer(() => {
                     listRef.current?.focus()
                 }}
             >
-                <div ref={listRef} tabIndex={-1} role="listbox" aria-label="项目" onKeyDown={onKeyDown} className="max-h-[min(640px,calc(100vh-80px))] overflow-y-auto p-1 outline-none">
+                <div ref={listRef} tabIndex={-1} role="listbox" aria-label={tr('项目', 'Projects')} onKeyDown={onKeyDown} className="max-h-[min(640px,calc(100vh-80px))] overflow-y-auto p-1 outline-none">
                     {query && (
                         <div className="mb-1 flex h-7 items-center gap-2 rounded-md bg-gray-50 px-2 text-[13px] text-gray-900">
                             <Search size={13} className="text-gray-500" />
@@ -224,18 +225,18 @@ const ProjectSwitcher = observer(() => {
                     {openProjects.length > 0 && (
                         <>
                             {actions.length > 0 && <div className="mx-2 my-1 h-px bg-gray-200" />}
-                            <SectionTitle>打开的项目</SectionTitle>
+                            <SectionTitle>{tr('打开的项目', 'Open projects')}</SectionTitle>
                             {openProjects.map((p, i) => projectRow(p, actions.length + i))}
                         </>
                     )}
                     {recentProjects.length > 0 && (
                         <>
                             {(actions.length > 0 || openProjects.length > 0) && <div className="mx-2 my-1 h-px bg-gray-200" />}
-                            <SectionTitle>最近的项目</SectionTitle>
+                            <SectionTitle>{tr('最近的项目', 'Recent projects')}</SectionTitle>
                             {recentProjects.map((p, i) => projectRow(p, actions.length + openProjects.length + i))}
                         </>
                     )}
-                    {q && matches.length === 0 && <div className="px-2 py-3 text-[12.5px] text-gray-500">没有匹配的项目</div>}
+                    {q && matches.length === 0 && <div className="px-2 py-3 text-[12.5px] text-gray-500">{tr('没有匹配的项目', 'No matching projects')}</div>}
                 </div>
             </PopoverContent>
         </Popover>
@@ -254,7 +255,7 @@ const BranchWidget = observer(({ cwd }: { cwd: string }) => {
             onClick={appStore.toggleReview}
             disabled={!appStore.active}
             aria-pressed={appStore.reviewOpen}
-            title={dirty ? `${status.files.length} 个文件有未提交的改动` : '没有未提交的改动'}
+            title={dirty ? tr(`${status.files.length} 个文件有未提交的改动`, `${status.files.length} ${status.files.length === 1 ? 'file has' : 'files have'} uncommitted changes`) : tr('没有未提交的改动', 'No uncommitted changes')}
             className={cn(toolbarBtn, 'max-w-[260px]', appStore.reviewOpen && 'bg-black/[0.08]')}
         >
             <GitBranch size={14} className="shrink-0 text-gray-500" />
@@ -280,19 +281,19 @@ export const MainToolbar = observer(() => {
             <button
                 type="button"
                 aria-pressed={split}
-                aria-label={split ? '切换为单栏' : '切换为自动分栏'}
-                title={split ? `自动分栏：当前 ${appStore.visibleTabs.length} 栏（⌘\\）` : '单栏（⌘\\ 切换自动分栏）'}
+                aria-label={split ? tr('切换为单栏', 'Switch to single pane') : tr('切换为自动分栏', 'Switch to auto split')}
+                title={split ? tr(`自动分栏：当前 ${appStore.visibleTabs.length} 栏（⌘\\）`, `Auto split: ${appStore.visibleTabs.length} panes now (⌘\\)`) : tr('单栏（⌘\\ 切换自动分栏）', 'Single pane (⌘\\ for auto split)')}
                 onClick={appStore.toggleLayout}
                 className={cn(toolbarBtn, 'text-gray-600')}
             >
                 {split ? <Columns3 size={15} /> : <Square size={14} />}
-                <span className="text-[12.5px]">{split ? '分栏' : '单栏'}</span>
+                <span className="text-[12.5px]">{split ? tr('分栏', 'Split') : tr('单栏', 'Single')}</span>
             </button>
             <span className="mx-1 h-4 w-px bg-gray-300 dark:bg-gray-200" />
-            <button type="button" aria-pressed={appStore.sidebarOpen} aria-label="项目面板" title="项目面板（⌘B）" onClick={appStore.toggleSidebar} className={cn(iconBtn, appStore.sidebarOpen && 'text-gray-900')}>
+            <button type="button" aria-pressed={appStore.sidebarOpen} aria-label={tr('项目面板', 'Projects panel')} title={tr('项目面板（⌘B）', 'Projects panel (⌘B)')} onClick={appStore.toggleSidebar} className={cn(iconBtn, appStore.sidebarOpen && 'text-gray-900')}>
                 <PanelLeft size={16} />
             </button>
-            <button type="button" aria-pressed={appStore.reviewOpen} aria-label="改动面板" title="改动面板" disabled={!appStore.active} onClick={appStore.toggleReview} className={cn(iconBtn, appStore.reviewOpen && 'text-gray-900')}>
+            <button type="button" aria-pressed={appStore.reviewOpen} aria-label={tr('改动面板', 'Changes panel')} title={tr('改动面板', 'Changes panel')} disabled={!appStore.active} onClick={appStore.toggleReview} className={cn(iconBtn, appStore.reviewOpen && 'text-gray-900')}>
                 <PanelRight size={16} />
             </button>
         </header>

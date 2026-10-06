@@ -4,6 +4,7 @@ import { existsSync, realpathSync } from 'node:fs'
 import path from 'node:path'
 import process from 'node:process'
 import { promisify } from 'node:util'
+import { tr } from './i18n'
 
 const execFileAsync = promisify(execFile)
 
@@ -51,9 +52,9 @@ async function resolveUncached(): Promise<PiEnvResult> {
     }
 
     if (!piPath || !existsSync(piPath))
-        return { ok: false, error: '找不到 pi 命令。请先安装：npm install -g @earendil-works/pi-coding-agent，或设置环境变量 PI_GUI_PI。' }
+        return { ok: false, error: tr('找不到 pi 命令。请先安装：npm install -g @earendil-works/pi-coding-agent，或设置环境变量 PI_GUI_PI。', 'pi command not found. Install it with npm install -g @earendil-works/pi-coding-agent, or set PI_GUI_PI.') }
     if (/\.[cm]?js$/.test(piPath) && (!nodePath || !existsSync(nodePath)))
-        return { ok: false, error: '找不到 node。pi 需要 Node.js 22.19 以上，或设置环境变量 PI_GUI_NODE。' }
+        return { ok: false, error: tr('找不到 node。pi 需要 Node.js 22.19 以上，或设置环境变量 PI_GUI_NODE。', 'node not found. pi needs Node.js 22.19 or later; or set PI_GUI_NODE.') }
 
     const env: PiEnv = { nodePath, piPath, version: '' }
     const { file, args } = piCommand(env, ['--version'])
@@ -62,7 +63,7 @@ async function resolveUncached(): Promise<PiEnvResult> {
         env.version = stdout.trim()
     }
     catch (error: any) {
-        return { ok: false, error: `pi 无法启动：${error?.stderr || error?.message || error}` }
+        return { ok: false, error: `${tr('pi 无法启动：', 'pi failed to start: ')}${error?.stderr || error?.message || error}` }
     }
     return { ok: true, env }
 }

@@ -2,6 +2,7 @@
 import type { ClassValue } from 'clsx'
 import { clsx } from 'clsx'
 import { twMerge } from 'tailwind-merge'
+import { lang, tr } from './i18n'
 
 export function cn(...inputs: ClassValue[]) {
     return twMerge(clsx(inputs))
@@ -37,24 +38,24 @@ export function tildify(p: string, home?: string): string {
 export function formatDuration(ms: number): string {
     const s = Math.max(0, Math.round(ms / 1000))
     if (s < 60)
-        return `${s} 秒`
+        return tr(`${s} 秒`, `${s}s`)
     const m = Math.floor(s / 60)
     if (m < 60)
-        return `${m} 分 ${s % 60} 秒`
-    return `${Math.floor(m / 60)} 小时 ${m % 60} 分`
+        return tr(`${m} 分 ${s % 60} 秒`, `${m}m ${s % 60}s`)
+    return tr(`${Math.floor(m / 60)} 小时 ${m % 60} 分`, `${Math.floor(m / 60)}h ${m % 60}m`)
 }
 
 export function relativeTime(ts: number, now = Date.now()): string {
     const s = Math.max(0, Math.floor((now - ts) / 1000))
     if (s < 60)
-        return '刚刚'
+        return tr('刚刚', 'now')
     if (s < 3600)
-        return `${Math.floor(s / 60)} 分钟`
+        return tr(`${Math.floor(s / 60)} 分钟`, `${Math.floor(s / 60)}m`)
     if (s < 86400)
-        return `${Math.floor(s / 3600)} 小时`
+        return tr(`${Math.floor(s / 3600)} 小时`, `${Math.floor(s / 3600)}h`)
     if (s < 86400 * 30)
-        return `${Math.floor(s / 86400)} 天`
-    return new Date(ts).toLocaleDateString()
+        return tr(`${Math.floor(s / 86400)} 天`, `${Math.floor(s / 86400)}d`)
+    return new Date(ts).toLocaleDateString(lang() === 'zh' ? 'zh-CN' : 'en-US')
 }
 
 export function uid(): string {

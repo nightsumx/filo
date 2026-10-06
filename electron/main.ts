@@ -1,5 +1,6 @@
 import type { AgentStartOptions, AppState, ThemePref } from '@shared/ipc'
 import { APP_INFO } from '@shared/app'
+import { resolveLang } from '@shared/i18n'
 import { mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import process from 'node:process'
@@ -8,6 +9,7 @@ import { DEFAULT_THEME, IPC, THEME_PREFS } from '@shared/ipc'
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, Notification, shell } from 'electron'
 import { AgentManager } from './agents'
 import { gitBranch, gitFileDiff, gitStatus } from './git'
+import { mainLang, setMainLang, tr } from './i18n'
 import { compactionInfo, globalCompaction, setGlobalCompaction } from './piSettings'
 import { resolvePiEnv } from './pi-env'
 import { assertInSessionsDir, listSessions, readSession } from './sessions'
@@ -73,6 +75,22 @@ const windowBackground = () => (nativeTheme.shouldUseDarkColors ? '#26282c' : '#
 
 function applyTheme(theme: unknown) {
     nativeTheme.themeSource = THEME_PREFS.includes(theme as ThemePref) ? (theme as ThemePref) : DEFAULT_THEME
+}
+
+/** Menus and the About panel are built from the current language, so both are redone on a change. */
+function applyLang(pref: unknown) {
+    setMainLang(resolveLang(pref, app.getPreferredSystemLanguages()))
+    app.setAboutPanelOptions({
+        applicationName: APP_INFO.name,
+        applicationVersion: app.getVersion(),
+        // Second line of the macOS About panel.
+        version: APP_INFO.tagline[mainLang()],
+        credits: APP_INFO.description[mainLang()],
+        copyright: `© ${new Date().getFullYear()} ${APP_INFO.author}`,
+        website: APP_INFO.homepage,
+        iconPath: path.join(__dirname, '../../build/icon.png'),
+    })
+    buildMenu()
 }
 
 function createWindow() {
@@ -164,7 +182,7 @@ function registerIpc() {
             await assertInSessionsDir(options.sessionPath)
         // spawn reports a missing cwd as "spawn <node> ENOENT", which reads like node is missing.
         if (!(await isDirectory(options.cwd)))
-            throw new Error(`项目目录不存在：${options.cwd}`)
+            throw new Error(tr(`项目目录不存在：${options.cwd}`, `Project folder not found: ${options.cwd}`))
         return agents.start(env.env, options)
     })
     ipcMain.handle(IPC.agentRequest, (_e, agentId: string, command: Record<string, unknown>) => agents.request(agentId, command))
@@ -183,6 +201,7 @@ function registerIpc() {
     ipcMain.handle(IPC.gitFileDiff, (_e, cwd: string, file: string, status: string) => gitFileDiff(cwd, file, status))
 
     ipcMain.handle(IPC.setTheme, (_e, theme: unknown) => applyTheme(theme))
+    ipcMain.handle(IPC.setLang, (_e, lang: unknown) => applyLang(lang))
     ipcMain.handle(IPC.missingFolders, async (_e, paths: unknown) => {
         const list = Array.isArray(paths) ? paths.filter((p): p is string => typeof p === 'string' && path.isAbsolute(p)).slice(0, 500) : []
         const exists = await Promise.all(list.map(isDirectory))
@@ -210,7 +229,7 @@ function registerIpc() {
 function buildMenu() {
     const isMac = process.platform === 'darwin'
     const settings = {
-        label: '设置…',
+        label: tr('设置…', 'Settings…'),
         accelerator: 'CmdOrCtrl+,',
         click: () => win?.webContents.send(IPC.openSettings),
     }
@@ -232,10 +251,10 @@ function buildMenu() {
                         { role: 'quit' as const },
                     ],
                 }]
-            : [{ label: '文件', submenu: [settings, { type: 'separator' as const }, { role: 'quit' as const }] }]),
+            : [{ label: tr('文件', 'File'), submenu: [settings, { type: 'separator' as const }, { role: 'quit' as const }] }]),
         { role: 'editMenu' },
         {
-            label: '视图',
+            label: tr('视图', 'View'),
             submenu: [
                 { role: 'reload' },
                 { role: 'toggleDevTools' },
@@ -248,7 +267,7 @@ function buildMenu() {
             ],
         },
         {
-            label: '窗口',
+            label: tr('窗口', 'Window'),
             submenu: [
                 { role: 'minimize' },
                 { role: 'zoom' },
@@ -260,22 +279,13 @@ function buildMenu() {
 
 app.whenReady().then(async () => {
     // Apply the saved appearance before the window exists so the first frame already matches.
-    applyTheme((await loadState()).theme)
+    const state = await loadState()
+    applyTheme(state.theme)
     nativeTheme.on('updated', () => win?.setBackgroundColor(windowBackground()))
     // Packaged builds take the icon from build/icon.icns; in dev the Dock would show Electron's.
     if (process.platform === 'darwin' && !app.isPackaged)
         app.dock?.setIcon(path.join(__dirname, '../../build/icon.png'))
-    app.setAboutPanelOptions({
-        applicationName: APP_INFO.name,
-        applicationVersion: app.getVersion(),
-        // Second line of the macOS About panel.
-        version: APP_INFO.tagline,
-        credits: APP_INFO.description,
-        copyright: `© ${new Date().getFullYear()} ${APP_INFO.author}`,
-        website: APP_INFO.homepage,
-        iconPath: path.join(__dirname, '../../build/icon.png'),
-    })
-    buildMenu()
+    applyLang(state.lang)
     registerIpc()
     createWindow()
     // Warm up env resolution so the first thread starts faster.

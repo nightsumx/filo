@@ -1,10 +1,15 @@
 import type { ApprovalMode, CapabilityId } from '@shared/capabilities'
+import type { LangPref } from '@shared/i18n'
 import type { AppState, GlobalCompactionPatch, PiEnvResult, SessionSummary, ThemePref, TranscriptLang } from '@shared/ipc'
 import { APPROVAL_MODES, DEFAULT_CAPABILITIES, normalizeCapabilities } from '@shared/capabilities'
+import { LANG_PREFS } from '@shared/i18n'
 import { DEFAULT_THEME, THEME_PREFS, TRANSCRIPT_LANGS } from '@shared/ipc'
-import type { PiEvent } from '@shared/pi'
+import type { PiEvent, PiModel } from '@shared/pi'
 import type { ThreadHost } from './thread'
-import { WAITING_LABEL } from '@/lib/threadActivity'
+import type { ModelWindow } from '@/lib/compactAt'
+import { autoReserve, inferCompactAt, syncReserves } from '@/lib/compactAt'
+import { applyLangPref, tr } from '@/lib/i18n'
+import { waitingLabel } from '@/lib/threadActivity'
 import { basename, uid } from '@/lib/utils'
 import { makeAutoObservable, observable, reaction, runInAction } from 'mobx'
 import { toast } from 'sonner'
@@ -67,16 +72,25 @@ class AppStore implements ThreadHost {
     layout: 'split' | 'single' = 'split'
     /** Appearance preference; the resolved scheme lives in lib/theme. */
     themePref: ThemePref = DEFAULT_THEME
+    /** UI language preference; the resolved language lives in lib/i18n. */
+    langPref: LangPref = 'system'
     /** Conversation wording; English matches pi's TUI. */
     transcriptLang: TranscriptLang = 'en'
-    /** Capabilities chosen per project; absent means DEFAULT_CAPABILITIES. */
-    capabilitiesByProject: Record<string, CapabilityId[]> = {}
-    approvalModeByProject: Record<string, ApprovalMode> = {}
+    /** Capability extensions every pi process loads, the same for all projects. */
+    capabilities: CapabilityId[] = [...DEFAULT_CAPABILITIES]
+    /** Mode new threads start in, the same for all projects; undefined until one is chosen. */
+    /** Mode new threads start in; 全自动 until the user picks another. */
+    approvalMode: ApprovalMode = 'auto'
     settingsOpen = false
     /** Page shown in Settings; kept while the app runs so reopening returns to it. */
     settingsPage: SettingsPageId = 'appearance'
     /** See ThreadHost.piSettingsEpoch. */
     piSettingsEpoch = 0
+    /** Bumps on every compaction write, including ones no running thread needs a restart for. */
+    compactionRevision = 0
+    /** Tokens at which every model compacts (lib/compactAt); null: none, undefined: not decided yet. */
+    compactAt: number | null | undefined = undefined
+    private reconciling = false
     /** How many panes fit side by side; measured by the pane container. */
     paneCapacity = 1
     /** Bumped to move keyboard focus into a thread's composer. */
@@ -93,8 +107,9 @@ class AppStore implements ThreadHost {
     private ready = false
 
     constructor() {
-        makeAutoObservable<this, 'agentThreads' | 'eventQueue' | 'flushTimer' | 'savedState' | 'ready'>(this, {
+        makeAutoObservable<this, 'agentThreads' | 'eventQueue' | 'flushTimer' | 'savedState' | 'ready' | 'reconciling'>(this, {
             agentThreads: false,
+            reconciling: false,
             eventQueue: false,
             flushTimer: false,
             savedState: false,
@@ -172,6 +187,25 @@ class AppStore implements ThreadHost {
         return tabs.slice(start, start + capacity)
     }
 
+    /**
+     * Models pi offers and the focused thread's model, for Settings. Every pi process lists the
+     * same models, so any thread that has loaded them will do.
+     */
+    get modelCatalog(): { models: PiModel[], current?: PiModel } {
+        const current = this.active?.state?.model
+        const models = this.active?.models.length ? this.active.models : [...this.threads.values()].find(t => t.models.length)?.models ?? []
+        return { models, current }
+    }
+
+    /** Context windows of the models pi offers, plus the focused thread's model. */
+    get modelWindows(): ModelWindow[] {
+        const { models, current } = this.modelCatalog
+        const windows = new Map(models.map(m => [`${m.provider}/${m.id}`, m.contextWindow]))
+        if (current?.contextWindow)
+            windows.set(`${current.provider}/${current.id}`, current.contextWindow)
+        return [...windows].map(([key, contextWindow]) => ({ key, contextWindow }))
+    }
+
     isVisible(thread: Thread): boolean {
         return this.visibleTabs.includes(thread)
     }
@@ -202,7 +236,7 @@ class AppStore implements ThreadHost {
             if (thread?.agentId === agentId) {
                 runInAction(() => thread.handleExit(info))
                 if (thread.agentStatus === 'exited')
-                    this.notify(thread, '出错', thread.activity.text)
+                    this.notify(thread, tr('出错', 'Error'), thread.activity.text)
             }
         })
         api().onNotificationClick(key => runInAction(() => this.focus(key, true)))
@@ -214,12 +248,14 @@ class AppStore implements ThreadHost {
                 for (const key of keys) {
                     const thread = this.threads.get(key)
                     if (thread && !waiting.has(key))
-                        this.notify(thread, WAITING_LABEL[thread.waitingKind ?? 'question'], thread.waitingFor || '需要你的确认', true)
+                        this.notify(thread, waitingLabel(thread.waitingKind), thread.waitingFor || tr('需要你的确认', 'Needs your approval'), true)
                 }
                 waiting = new Set(keys)
                 void api().setBadge(keys.length)
             },
         )
+        // Gives models pi lists for the first time (or after an update) the global compaction point.
+        reaction(() => [this.modelWindows.length, this.compactAt], () => void this.reconcileCompaction())
         window.addEventListener('focus', () => void this.refreshSessions())
         setInterval(this.stopIdleAgents, IDLE_SWEEP_MS)
 
@@ -267,7 +303,7 @@ class AppStore implements ThreadHost {
             this.persist()
         }
         catch (error: any) {
-            toast.error(`读取会话失败：${error.message}`)
+            toast.error(`${tr('读取会话失败：', 'Could not read sessions: ')}${error.message}`)
         }
         if (this.ready)
             await this.refreshMissing()
@@ -285,10 +321,13 @@ class AppStore implements ThreadHost {
         this.hiddenProjects = state.hiddenProjects ?? []
         this.layout = state.layout === 'single' ? 'single' : 'split'
         this.themePref = THEME_PREFS.includes(state.theme as ThemePref) ? state.theme! : DEFAULT_THEME
+        this.langPref = LANG_PREFS.includes(state.lang as LangPref) ? state.lang! : 'system'
+        applyLangPref(this.langPref)
         this.transcriptLang = TRANSCRIPT_LANGS.includes(state.transcriptLang as TranscriptLang) ? state.transcriptLang! : 'en'
         this.activeProject = state.activeProject ?? null
-        this.capabilitiesByProject = Object.fromEntries(Object.entries(state.capabilities ?? {}).map(([cwd, ids]) => [cwd, normalizeCapabilities(ids)]))
-        this.approvalModeByProject = Object.fromEntries(Object.entries(state.approvalModes ?? {}).filter(([, mode]) => APPROVAL_MODES.includes(mode)))
+        this.capabilities = restoreCapabilities(state)
+        this.approvalMode = restoreApprovalMode(state)
+        this.compactAt = state.compactAt === null || (typeof state.compactAt === 'number' && state.compactAt > 0) ? state.compactAt : undefined
         // Thread objects are created lazily per project (restoreTabs); keep the saved order for now.
         this.tabsByProject = { ...state.tabs }
         this.activeTabByProject = { ...state.activeTabs }
@@ -321,9 +360,11 @@ class AppStore implements ThreadHost {
             activeTabs,
             layout: this.layout,
             theme: this.themePref,
+            lang: this.langPref === 'system' ? undefined : this.langPref,
             transcriptLang: this.transcriptLang,
-            capabilities: this.capabilitiesByProject,
-            approvalModes: this.approvalModeByProject,
+            capabilities: this.capabilities,
+            approvalMode: this.approvalMode,
+            compactAt: this.compactAt,
         }
         const json = JSON.stringify(state)
         if (json === this.savedState)
@@ -359,23 +400,19 @@ class AppStore implements ThreadHost {
             firstPrompt: session.firstPrompt,
         })
         this.threads.set(thread.key, thread)
-        void thread.load().catch(error => toast.error(`打开线程失败：${error.message}`))
+        void thread.load().catch(error => toast.error(`${tr('打开线程失败：', 'Could not open thread: ')}${error.message}`))
         return thread
     }
 
     // ---------------------------------------------------------------- ThreadHost
 
     /** A plain copy: it is sent over IPC, which cannot clone MobX arrays. */
-    capabilitiesOf(cwd: string): CapabilityId[] {
-        return [...(this.capabilitiesByProject[cwd] ?? DEFAULT_CAPABILITIES)]
+    get enabledCapabilities(): CapabilityId[] {
+        return [...this.capabilities]
     }
 
-    approvalModeOf(cwd: string): ApprovalMode | undefined {
-        return this.approvalModeByProject[cwd]
-    }
-
-    setApprovalModeOf(cwd: string, mode: ApprovalMode) {
-        this.approvalModeByProject[cwd] = mode
+    setApprovalMode(mode: ApprovalMode) {
+        this.approvalMode = mode
         this.persist()
     }
 
@@ -408,13 +445,13 @@ class AppStore implements ThreadHost {
         thread.lastUsed = Date.now()
         const activity = thread.activity
         if (activity.phase === 'error')
-            this.notify(thread, '出错', activity.text)
+            this.notify(thread, tr('出错', 'Error'), activity.text)
         else
-            this.notify(thread, '已完成', lastAnswer(thread))
+            this.notify(thread, tr('已完成', 'Done'), lastAnswer(thread))
         if (!this.isVisible(thread)) {
             thread.unread = true
-            toast.success(`「${thread.title}」已完成`, {
-                action: { label: '查看', onClick: () => this.focus(thread.key, true) },
+            toast.success(tr(`「${thread.title}」已完成`, `“${thread.title}” is done`), {
+                action: { label: tr('查看', 'View'), onClick: () => this.focus(thread.key, true) },
             })
         }
         this.persist()
@@ -487,7 +524,7 @@ class AppStore implements ThreadHost {
     /** New tab in a project; reuses an untouched new tab instead of stacking empty ones. */
     newThread(cwd: string) {
         if (this.missingProjects.includes(cwd)) {
-            toast.error('项目目录不存在', { description: `${cwd} 已被删除或移动。可以在侧边栏的项目菜单里“从列表移除”。` })
+            toast.error(tr('项目目录不存在', 'Project folder not found'), { description: tr(`${cwd} 已被删除或移动。可以在侧边栏的项目菜单里“从列表移除”。`, `${cwd} was deleted or moved. You can remove it from the list in the sidebar's project menu.`) })
             return
         }
         this.restoreTabs(cwd)
@@ -558,16 +595,23 @@ class AppStore implements ThreadHost {
         this.persist()
     }
 
+    setLangPref(pref: LangPref) {
+        this.langPref = pref
+        applyLangPref(pref)
+        void api().setLang(pref)
+        this.persist()
+    }
+
     setTranscriptLang(lang: TranscriptLang) {
         this.transcriptLang = lang
         this.persist()
     }
 
-    /** Live threads of the project restart with the new set once idle, resuming their session. */
-    setCapabilities(cwd: string, ids: CapabilityId[]) {
-        this.capabilitiesByProject[cwd] = normalizeCapabilities(ids)
+    /** Live threads restart with the new set once idle, resuming their session. */
+    setCapabilities(ids: CapabilityId[]) {
+        this.capabilities = normalizeCapabilities(ids)
         this.persist()
-        for (const thread of this.tabsOf(cwd))
+        for (const thread of this.threads.values())
             void thread.applyConfig()
     }
 
@@ -578,10 +622,75 @@ class AppStore implements ThreadHost {
     async setGlobalCompaction(patch: GlobalCompactionPatch) {
         await api().setGlobalCompaction(patch)
         runInAction(() => {
+            this.compactionRevision++
             this.piSettingsEpoch++
         })
         for (const thread of this.threads.values())
             void thread.applyConfig()
+    }
+
+    /** Moves every model that follows the global point to `at` (null: back to pi's reserve). */
+    async setCompactAt(at: number | null) {
+        const from = this.compactAt ?? null
+        const info = await api().globalCompaction()
+        const patch = syncReserves(this.modelWindows, info.modelReserves, from, at)
+        runInAction(() => {
+            this.compactAt = at
+            this.persist()
+        })
+        await this.writeReserves(patch)
+    }
+
+    /** A per-model exception; null puts the model back on the global point. */
+    async setModelCompactAt(key: string, contextWindow: number, at: number | null) {
+        const global = this.compactAt ?? null
+        const reserve = at !== null ? contextWindow - at : global !== null ? autoReserve(contextWindow, global) : null
+        await this.writeReserves({ [key]: reserve })
+    }
+
+    private async reconcileCompaction() {
+        // Wait for pi's model list; the focused thread's model alone shows up first and is too few
+        // to tell a global point from one exception.
+        const models = this.modelWindows
+        if (!this.modelCatalog.models.length || this.reconciling || !this.ready)
+            return
+        this.reconciling = true
+        try {
+            const info = await api().globalCompaction()
+            if (this.compactAt === undefined) {
+                runInAction(() => {
+                    this.compactAt = inferCompactAt(models, info.modelReserves)
+                    this.persist()
+                })
+            }
+            const at = this.compactAt ?? null
+            if (at !== null)
+                await this.writeReserves(syncReserves(models, info.modelReserves, at, at))
+        }
+        catch {
+            // Settings page shows the error when the user edits; nothing to do in the background.
+        }
+        finally {
+            this.reconciling = false
+        }
+    }
+
+    /** Only threads whose model changed need a restart to pick the new reserve up. */
+    private async writeReserves(patch: Record<string, number | null>) {
+        const keys = Object.keys(patch)
+        if (!keys.length)
+            return
+        await api().setGlobalCompaction({ modelReserves: patch })
+        const affected = [...this.threads.values()].some(t => t.state?.model && keys.includes(`${t.state.model.provider}/${t.state.model.id}`))
+        runInAction(() => {
+            this.compactionRevision++
+            if (affected)
+                this.piSettingsEpoch++
+        })
+        if (affected) {
+            for (const thread of this.threads.values())
+                void thread.applyConfig()
+        }
     }
 
     setSettingsOpen(open: boolean) {
@@ -603,7 +712,7 @@ class AppStore implements ThreadHost {
             await api().trashSession(session.path)
         }
         catch (error: any) {
-            toast.error(`删除失败：${error.message}`)
+            toast.error(`${tr('删除失败：', 'Delete failed: ')}${error.message}`)
         }
         await this.refreshSessions()
     }
@@ -648,3 +757,27 @@ class AppStore implements ThreadHost {
 }
 
 export const appStore = new AppStore()
+
+/**
+ * Older state kept a set per project. Keep the active project's set (the one the user last saw in
+ * Settings), else the most recently saved one.
+ */
+function restoreCapabilities(state: AppState): CapabilityId[] {
+    const saved = state.capabilities
+    if (Array.isArray(saved))
+        return normalizeCapabilities(saved)
+    if (!saved || typeof saved !== 'object')
+        return [...DEFAULT_CAPABILITIES]
+    const ids = (state.activeProject && saved[state.activeProject]) || Object.values(saved).at(-1)
+    return ids ? normalizeCapabilities(ids) : [...DEFAULT_CAPABILITIES]
+}
+
+/** Older state kept the mode per project; same choice as restoreCapabilities. */
+function restoreApprovalMode(state: AppState): ApprovalMode {
+    const valid = (mode: unknown): mode is ApprovalMode => APPROVAL_MODES.includes(mode as ApprovalMode)
+    if (valid(state.approvalMode))
+        return state.approvalMode
+    const old = state.approvalModes ?? {}
+    const mode = (state.activeProject && old[state.activeProject]) || Object.values(old).at(-1)
+    return valid(mode) ? mode : 'auto'
+}

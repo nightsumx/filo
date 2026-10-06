@@ -6,6 +6,7 @@ import { appStore } from '@/store/app'
 import { Archive, FolderOpen, Pencil, Trash2, X, XCircle } from 'lucide-react'
 import { observable, runInAction } from 'mobx'
 import { observer } from 'mobx-react-lite'
+import { tr } from '@/lib/i18n'
 
 interface MenuParts {
     Item: React.ComponentType<{ onSelect?: () => void, disabled?: boolean, className?: string, children: React.ReactNode }>
@@ -17,7 +18,7 @@ export const renaming = observable({ key: null as string | null })
 
 export async function closeTabWithConfirm(thread: Thread) {
     if (thread.running) {
-        const ok = await confirm({ title: '关闭标签', description: `「${thread.title}」还在运行，关闭会中断它。`, confirmText: '中断并关闭' })
+        const ok = await confirm({ title: tr('关闭标签', 'Close tab'), description: tr(`「${thread.title}」还在运行，关闭会中断它。`, `“${thread.title}” is still running; closing stops it.`), confirmText: tr('中断并关闭', 'Stop and close') })
         if (!ok)
             return
     }
@@ -28,7 +29,7 @@ async function closeOthers(thread: Thread) {
     const others = appStore.tabsOf(thread.cwd).filter(t => t !== thread)
     const running = others.filter(t => t.running).length
     if (running) {
-        const ok = await confirm({ title: '关闭其他标签', description: `有 ${running} 个线程还在运行，关闭会中断它们。`, confirmText: '中断并关闭' })
+        const ok = await confirm({ title: tr('关闭其他标签', 'Close other tabs'), description: tr(`有 ${running} 个线程还在运行，关闭会中断它们。`, `${running} ${running === 1 ? 'thread is' : 'threads are'} still running; closing stops them.`), confirmText: tr('中断并关闭', 'Stop and close') })
         if (!ok)
             return
     }
@@ -45,39 +46,39 @@ export const ThreadActions = observer(({ thread, parts: { Item, Separator } }: {
                 <>
                     <Item onSelect={() => runInAction(() => (renaming.key = thread.key))}>
                         <Pencil size={14} />
-                        重命名
+                        {tr('重命名', 'Rename')}
                     </Item>
                     <Item disabled={thread.running} onSelect={() => void thread.compact()}>
                         <Archive size={14} />
-                        压缩上下文
+                        {tr('压缩上下文', 'Compact context')}
                     </Item>
                 </>
             )}
             <Item onSelect={() => void window.pi.openFolder(thread.cwd)}>
                 <FolderOpen size={14} />
-                在 Finder 中打开
+                {tr('在 Finder 中打开', 'Show in Finder')}
             </Item>
             <Separator />
             <Item onSelect={() => void closeTabWithConfirm(thread)}>
                 <X size={14} />
-                <span className="flex-1">关闭标签</span>
+                <span className="flex-1">{tr('关闭标签', 'Close tab')}</span>
                 <span className="text-[11px] text-gray-400">⌘W</span>
             </Item>
             <Item disabled={!hasOthers} onSelect={() => void closeOthers(thread)}>
                 <XCircle size={14} />
-                关闭其他标签
+                {tr('关闭其他标签', 'Close other tabs')}
             </Item>
             {session && (
                 <Item
                     className="text-red-600 focus:text-red-600"
                     onSelect={async () => {
-                        const ok = await confirm({ title: '删除线程', description: `「${thread.title}」的会话文件会移到废纸篓。`, confirmText: '删除' })
+                        const ok = await confirm({ title: tr('删除线程', 'Delete thread'), description: tr(`「${thread.title}」的会话文件会移到废纸篓。`, `The session file of “${thread.title}” goes to the Trash.`), confirmText: tr('删除', 'Delete') })
                         if (ok)
                             await appStore.deleteSession(session)
                     }}
                 >
                     <Trash2 size={14} />
-                    删除线程
+                    {tr('删除线程', 'Delete thread')}
                 </Item>
             )}
         </>

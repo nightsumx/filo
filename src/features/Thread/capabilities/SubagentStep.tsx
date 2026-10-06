@@ -15,6 +15,8 @@ import { StepView } from '../StepView'
 import { useThread } from '../ThreadContext'
 import { Gutter, StatusMark, ToolGroup, useNow } from '../ToolRow'
 import { useViewState } from '../viewState'
+import { tr } from '@/lib/i18n'
+import type { Localized } from '@shared/i18n'
 
 /** The child's transcript as parent-style turns; the first prompt is the task, shown separately. */
 function useChildTurns(details: SubagentDetails, running: boolean) {
@@ -50,7 +52,7 @@ function Transcript({ details, running }: { details: SubagentDetails, running: b
                 <div key={turn.key}>
                     {ti > 0 && turn.user && (
                         <div className="my-1 text-[12.5px] leading-5 text-gray-600 [overflow-wrap:anywhere]">
-                            <span className="text-ide-accent">↳ 你的引导：</span>
+                            <span className="text-ide-accent">{tr('↳ 你的引导：', '↳ Your steer: ')}</span>
                             {turn.user.text}
                         </div>
                     )}
@@ -82,7 +84,7 @@ const Controls = observer(({ toolCallId, steering }: { toolCallId: string, steer
         <div className="mt-1.5 mb-1 flex flex-col gap-1">
             {steering.map((s, i) => (
                 <div key={i} className="flex min-w-0 items-center gap-2 text-[12px] text-gray-600">
-                    <span className="shrink-0 rounded-[4px] bg-ide-sel px-1.5 text-gray-800">排队中</span>
+                    <span className="shrink-0 rounded-[4px] bg-ide-sel px-1.5 text-gray-800">{tr('排队中', 'Queued')}</span>
                     <span className="truncate">{s}</span>
                 </div>
             ))}
@@ -96,8 +98,8 @@ const Controls = observer(({ toolCallId, steering }: { toolCallId: string, steer
                 <input
                     value={text}
                     onChange={e => setText(e.target.value)}
-                    placeholder="引导这个子 Agent，当前工具跑完后送达…"
-                    aria-label="引导子 Agent"
+                    placeholder={tr('引导这个子 Agent，当前工具跑完后送达…', 'Steer this subagent; delivered after the current tool finishes…')}
+                    aria-label={tr('引导子 Agent', 'Steer subagent')}
                     className={cn(flatFieldClass, 'h-7 min-w-0 flex-1 text-[12.5px]')}
                 />
                 <button
@@ -105,18 +107,18 @@ const Controls = observer(({ toolCallId, steering }: { toolCallId: string, steer
                     onClick={() => void thread?.cancelSubagent(toolCallId)}
                     className="h-7 shrink-0 rounded-[4px] px-2.5 text-[12.5px] text-red-600 hover:bg-red-500/10 dark:text-red-400"
                 >
-                    取消子 Agent
+                    {tr('取消子 Agent', 'Cancel subagent')}
                 </button>
             </form>
         </div>
     )
 })
 
-const STATUS: Record<SubagentDetails['status'], string> = {
-    running: '运行中',
-    done: '完成',
-    failed: '失败',
-    cancelled: '已取消',
+const STATUS: Record<SubagentDetails['status'], Localized> = {
+    running: { zh: '运行中', en: 'running' },
+    done: { zh: '完成', en: 'done' },
+    failed: { zh: '失败', en: 'failed' },
+    cancelled: { zh: '已取消', en: 'cancelled' },
 }
 
 export const SubagentStep = observer(({ call, result, running }: { call: ToolCall, result?: ToolResultView, running: boolean }) => {
@@ -136,9 +138,9 @@ export const SubagentStep = observer(({ call, result, running }: { call: ToolCal
     // No result and not running: the process ended mid-run (app quit), so nothing was recorded.
     const interrupted = !running && !result
     const meta = [
-        interrupted ? t.aborted : details ? STATUS[details.status] : '启动中…',
+        interrupted ? t.aborted : details ? tr(STATUS[details.status]) : tr('启动中…', 'starting…'),
         details && elapsed > 0 ? t.elapsed(elapsed) : '',
-        tools ? `${tools} 次工具调用` : '',
+        tools ? tr(`${tools} 次工具调用`, `${tools} tool ${tools === 1 ? 'call' : 'calls'}`) : '',
         usage && (usage.input || usage.output) ? `↑ ${formatCount(usage.input + usage.cacheRead + usage.cacheWrite)} ↓ ${formatCount(usage.output)}` : '',
         usage?.cost ? formatCost(usage.cost) : '',
     ].filter(Boolean).join(' · ')
@@ -156,7 +158,7 @@ export const SubagentStep = observer(({ call, result, running }: { call: ToolCal
             {open && (
                 <div className="mt-0.5 mb-1 border-l-2 border-ide-line pl-3">
                     <button type="button" onClick={() => setTaskOpen(v => !v)} aria-expanded={taskOpen} className="flex min-h-6 w-full min-w-0 items-center gap-1.5 text-left text-[12.5px] text-gray-500 hover:text-gray-800">
-                        <span className="shrink-0">任务</span>
+                        <span className="shrink-0">{tr('任务', 'Task')}</span>
                         {!taskOpen && <span className="min-w-0 truncate text-gray-700">{task.split('\n')[0]}</span>}
                     </button>
                     {taskOpen && (

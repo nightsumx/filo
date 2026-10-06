@@ -13,7 +13,7 @@ const STATUS = 'gui-approval'
 const ENTRY = 'gui-approval'
 const TITLE_PREFIX = 'gui-approval '
 const MODES: ApprovalMode[] = ['ask', 'edits', 'auto']
-const DEFAULT_MODE: ApprovalMode = 'ask'
+const DEFAULT_MODE: ApprovalMode = 'auto'
 
 /** Built-in tools that only read; pi does not annotate its own tools. */
 const READ_ONLY = new Set(['read', 'grep', 'find', 'ls'])
