@@ -177,6 +177,29 @@ function editDiff(call: ToolCall, result?: ToolResultView): DiffModel | null {
     return edits.length ? diffFromEdits(edits) : null
 }
 
+/** Re-renders every second while `active`; returns the current time. */
+function useNow(active: boolean): number {
+    const [now, setNow] = useState(Date.now())
+    useEffect(() => {
+        if (!active)
+            return
+        setNow(Date.now())
+        const timer = setInterval(() => setNow(Date.now()), 1000)
+        return () => clearInterval(timer)
+    }, [active])
+    return now
+}
+
+/** " · 2.4s" after a tool's result line: execution time, ticking while it runs. */
+function ToolTime({ running, startedAt, ms }: { running: boolean, startedAt?: number, ms?: number }) {
+    const t = useT()
+    const now = useNow(running && startedAt !== undefined)
+    const value = running ? (startedAt !== undefined ? now - startedAt : undefined) : ms
+    if (value === undefined || (running && value < 1000))
+        return null
+    return <span className="tabular-nums text-gray-400">{` · ${running ? t.duration(value) : t.elapsed(value)}`}</span>
+}
+
 /** Live tail of a running command's output, so long builds are not a silent spinner. */
 function LiveTail({ text }: { text: string }) {
     const tail = text.replace(/\n+$/, '').split('\n').slice(-5).join('\n')
@@ -185,7 +208,7 @@ function LiveTail({ text }: { text: string }) {
     return <pre className="mt-0.5 whitespace-pre-wrap break-all pl-4 font-mono text-[12px] text-gray-400">{tail}</pre>
 }
 
-export const ToolRow = memo(({ call, result, running }: { call: ToolCall, result?: ToolResultView, running: boolean }) => {
+export const ToolRow = memo(({ call, result, running, startedAt, ms }: { call: ToolCall, result?: ToolResultView, running: boolean, startedAt?: number, ms?: number }) => {
     const cwd = useContext(CwdContext)
     const t = useT()
     const [expanded, setExpanded] = useViewState(`tool:${call.id}`, false)
@@ -210,17 +233,24 @@ export const ToolRow = memo(({ call, result, running }: { call: ToolCall, result
     const mode = diff && diff.added > 0 && diff.removed > 0 && width >= SPLIT_MIN_WIDTH ? 'split' : 'unified'
 
     const toggle = () => setExpanded(v => !v)
+    const time = <ToolTime running={status === 'running'} startedAt={startedAt} ms={ms} />
     const hint = <span className="text-gray-400 group-hover/res:text-gray-800">{` · ${expanded ? t.collapse : t.expand}`}</span>
 
     let resultLine: React.ReactNode
     if (status === 'running') {
-        resultLine = <span className="text-gray-500">{t.pending}</span>
+        resultLine = (
+            <>
+                <span className="text-gray-500">{t.pending}</span>
+                {time}
+            </>
+        )
     }
     else if (failed) {
         const first = output.trim().split('\n')[0] || t.failed
         resultLine = (
             <>
                 <span className="text-red-500">{first.length > 160 ? `${first.slice(0, 160)}…` : first}</span>
+                {time}
                 {hint}
             </>
         )
@@ -235,6 +265,7 @@ export const ToolRow = memo(({ call, result, running }: { call: ToolCall, result
                 <span className="font-mono text-gray-500">{mode}</span>
                 {' '}
                 <StatBar added={diff.added} removed={diff.removed} />
+                {time}
             </>
         )
     }
@@ -242,6 +273,7 @@ export const ToolRow = memo(({ call, result, running }: { call: ToolCall, result
         resultLine = (
             <>
                 <span className="text-gray-500">{t.linesWritten(diff.added)}</span>
+                {time}
                 {hint}
             </>
         )
@@ -252,6 +284,7 @@ export const ToolRow = memo(({ call, result, running }: { call: ToolCall, result
         resultLine = (
             <>
                 <span className="text-gray-500">{n ? (name === 'read' ? t.linesLoaded(n) : t.linesReturned(n)) : t.done}</span>
+                {time}
                 {(n > 0 || formatToolInput(call.arguments)) && hint}
             </>
         )
@@ -344,7 +377,7 @@ export const ToolGroup = memo(({ steps }: { steps: ToolStep[] }) => {
                 {expanded
                     ? (
                             <div className="mt-1 flex flex-col gap-1.5 rounded-md bg-ide-block py-2 pl-1 pr-3">
-                                {steps.map(step => <ToolRow key={step.key} call={step.call} result={step.result} running={step.running} />)}
+                                {steps.map(step => <ToolRow key={step.key} call={step.call} result={step.result} running={step.running} startedAt={step.startedAt} ms={step.ms} />)}
                             </div>
                         )
                     : (
@@ -359,6 +392,9 @@ export const ToolGroup = memo(({ steps }: { steps: ToolStep[] }) => {
                                             <span className="min-w-0 truncate text-gray-500">
                                                 {main}
                                                 {detail}
+                                            </span>
+                                            <span className="shrink-0 font-sans text-[12px]">
+                                                <ToolTime running={step.running} startedAt={step.startedAt} ms={step.ms} />
                                             </span>
                                         </button>
                                     )

@@ -4,7 +4,8 @@
 //
 //   bun run build && bun run density            compare against test/density-baseline.json
 //   bun run density --save                       write the baseline
-//   bun run density --shots /tmp/density         also save screenshots of each screen (--dark for dark)
+//   bun run density --shots /tmp/density         also save screenshots of each screen (--dark for dark,
+//                                                --open to unfold every finished turn first)
 import type { MockReply, MockRequest } from './harness'
 import { spawn } from 'node:child_process'
 import { createRequire } from 'node:module'
@@ -26,6 +27,7 @@ const args = process.argv.slice(2)
 const save = args.includes('--save')
 const shotsDir = args.includes('--shots') ? args[args.indexOf('--shots') + 1] : null
 const theme = args.includes('--dark') ? 'dark' : 'light'
+const unfold = args.includes('--open')
 
 // ---------------------------------------------------------------- the conversation
 
@@ -274,6 +276,13 @@ async function measure(agentDir: string, userData: string): Promise<Metrics> {
         const raw = await cdp.evaluate<{ height: number, viewport: Metrics['viewport'], rows: RowSample[] }>(MEASURE)
         if (shotsDir) {
             await mkdir(shotsDir, { recursive: true })
+            // Unfold turns one at a time: the transcript is virtualized, so rows re-render after each click.
+            for (let i = 0; unfold && i < 50; i++) {
+                const clicked = await cdp.evaluate<boolean>(`() => { const b = document.querySelector('[data-transcript] button[aria-expanded="false"][class~="group/fold"]'); b?.click(); return !!b }`)
+                if (!clicked)
+                    break
+                await new Promise(r => setTimeout(r, 150))
+            }
             for (let screen = 0; ; screen++) {
                 const done = await cdp.evaluate<boolean>(`() => { const s = document.querySelector('[data-transcript]'); s.scrollTop = ${screen} * s.clientHeight; return s.scrollTop + s.clientHeight >= s.scrollHeight - 1 }`)
                 await new Promise(r => setTimeout(r, 250))

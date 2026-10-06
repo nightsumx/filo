@@ -13,10 +13,10 @@ import type {
     ThinkingLevel,
 } from '@shared/pi'
 import type { ThreadActivity } from '@/lib/threadActivity'
-import type { Step, TimelineMessage, ToolExecState, ToolResultView } from '@/lib/timeline'
+import type { BlockTime, Step, TimelineMessage, ToolExecState, ToolResultView } from '@/lib/timeline'
 import { parsePartialJson } from '@/lib/partialJson'
 import { threadActivity } from '@/lib/threadActivity'
-import { buildTurns, contentText } from '@/lib/timeline'
+import { blockTimeKey, buildTurns, contentText } from '@/lib/timeline'
 import { GUI_COMMAND_PREFIX } from '@shared/capabilities'
 import { readableError } from '@/lib/utils'
 import { makeAutoObservable, observable, runInAction, toJS } from 'mobx'
@@ -65,6 +65,8 @@ export class Thread {
     live: TimelineMessage[] = []
     streaming: AssistantMessage | null = null
     tools = observable.map<string, ToolExecState>()
+    /** Exact block start / end times seen while streaming; kept for the app session so reloads stay exact. */
+    blockTimes = observable.map<string, BlockTime>()
     pendingPrompt: { text: string, images: ImageContent[], timestamp: number } | null = null
     loaded = false
     /** True once the session exists on disk (opened from the list, or after a completed run). */
@@ -141,6 +143,7 @@ export class Thread {
     get turns() {
         return buildTurns([...this.items, ...this.live], {
             tools: this.tools,
+            blockTimes: this.blockTimes,
             pendingPrompt: this.pendingPrompt,
             running: this.running,
         })
@@ -212,7 +215,7 @@ export class Thread {
         const consumed = this.live.length
         const snapshot = await api().readSession(this.sessionPath)
         runInAction(() => {
-            this.items = snapshot.items.map(i => ({ key: i.entryId, message: i.message }))
+            this.items = snapshot.items.map(i => ({ key: i.entryId, message: i.message, endedAt: i.endedAt }))
             this.live.splice(0, consumed)
             if (snapshot.name)
                 this.name = snapshot.name
@@ -504,7 +507,7 @@ export class Thread {
     // ---------------------------------------------------------------- events
 
     private pushLive(message: AgentMessage) {
-        this.live.push({ key: `live-${this.liveCounter++}`, message })
+        this.live.push({ key: `live-${this.liveCounter++}`, message, endedAt: Date.now() })
     }
 
     handleEvent(event: PiEvent) {
@@ -537,13 +540,13 @@ export class Thread {
                 break
             }
             case 'tool_execution_start':
-                this.tools.set(event.toolCallId, { running: true })
+                this.tools.set(event.toolCallId, { running: true, startedAt: Date.now() })
                 break
             case 'tool_execution_update':
-                this.tools.set(event.toolCallId, { running: true, partial: toolView(event.partialResult) })
+                this.tools.set(event.toolCallId, { ...this.tools.get(event.toolCallId), running: true, partial: toolView(event.partialResult) })
                 break
             case 'tool_execution_end':
-                this.tools.set(event.toolCallId, { running: false, result: toolView({ ...event.result, isError: event.isError }) })
+                this.tools.set(event.toolCallId, { startedAt: this.tools.get(event.toolCallId)?.startedAt, endedAt: Date.now(), running: false, result: toolView({ ...event.result, isError: event.isError }) })
                 if (['edit', 'write', 'bash'].includes(event.toolName))
                     this.changeTick++
                 break
@@ -593,6 +596,13 @@ export class Thread {
         const message = this.streaming ??= { role: 'assistant', content: [], stopReason: 'pending', timestamp: Date.now() }
         const i: number = update.contentIndex
         const block: any = message.content[i]
+        if (typeof update.type === 'string' && typeof i === 'number') {
+            const timeKey = blockTimeKey(message.timestamp, i)
+            if (update.type.endsWith('_start'))
+                this.blockTimes.set(timeKey, { start: Date.now() })
+            else if (update.type.endsWith('_end'))
+                this.blockTimes.set(timeKey, { start: this.blockTimes.get(timeKey)?.start ?? Date.now(), end: Date.now() })
+        }
         switch (update.type) {
             case 'text_start':
                 message.content[i] = { type: 'text', text: '' }

@@ -72,7 +72,7 @@ export const StepView = memo(({ step }: { step: Step }) => {
     const t = useT()
     switch (step.kind) {
         case 'thinking':
-            return <ThinkingBlock id={step.key} text={step.text} streaming={step.streaming} redacted={step.redacted} />
+            return <ThinkingBlock id={step.key} text={step.text} streaming={step.streaming} redacted={step.redacted} ms={step.ms} />
         case 'text':
             // Assistant prose hangs off a ● like the TUI's ⏺ bullet.
             return (
@@ -85,7 +85,7 @@ export const StepView = memo(({ step }: { step: Step }) => {
                 return <TodoStep call={step.call} result={step.result} running={step.running} />
             if (step.call.name === 'ask')
                 return <AskStep call={step.call} result={step.result} running={step.running} />
-            return <ToolRow call={step.call} result={step.result} running={step.running} />
+            return <ToolRow call={step.call} result={step.result} running={step.running} startedAt={step.startedAt} ms={step.ms} />
         case 'bash':
             return <BashExecution id={step.key} message={step.message} />
         case 'note':

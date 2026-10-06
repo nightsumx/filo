@@ -33,6 +33,10 @@ export interface TurnStats {
     other: number
     failed: number
     thinking: boolean
+    /** Time spent generating thinking blocks, when known. */
+    thinkingMs?: number
+    /** When the last of these steps finished, when known. */
+    endedAt?: number
 }
 
 const SEARCH_TOOLS = new Set(['grep', 'find', 'ls', 'glob'])
@@ -74,8 +78,13 @@ export function turnStats(steps: Step[]): TurnStats {
     const read = new Set<string>()
     const edited = new Set<string>()
     for (const step of steps) {
+        const end = 'endedAt' in step ? step.endedAt : undefined
+        if (end !== undefined)
+            stats.endedAt = Math.max(stats.endedAt ?? 0, end)
         if (step.kind === 'thinking') {
             stats.thinking = true
+            if (step.ms !== undefined)
+                stats.thinkingMs = (stats.thinkingMs ?? 0) + step.ms
             continue
         }
         if (step.kind !== 'tool')

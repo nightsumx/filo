@@ -23,6 +23,8 @@ const en = {
     failedCount: 'failed',
     thinking: 'Thinking…',
     thinkingRedacted: 'Thinking (redacted)',
+    thought: 'Thought',
+    thoughtFor: (d: string) => `Thought for ${d}`,
     exitCode: (code: number) => `exit code ${code}`,
     aborted: 'Aborted',
     requestFailed: 'Request failed',
@@ -51,7 +53,15 @@ const en = {
         const m = Math.floor(s / 60)
         return m < 60 ? `${m}m ${s % 60}s` : `${Math.floor(m / 60)}h ${m % 60}m`
     },
+    /** Short step timings: "340ms", "2.4s", then duration(). */
+    elapsed: (ms: number) => (ms < 1000 ? `${Math.round(ms)}ms` : ms < 10_000 ? `${(ms / 1000).toFixed(1)}s` : en.duration(ms)),
     clock: (ts: number) => new Date(ts).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }),
+    dateTime: (ts: number) => new Date(ts).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'medium' }),
+    requests: (n: number) => `${n} ${n === 1 ? 'request' : 'requests'}`,
+    cached: (pct: number) => `${pct}% cached`,
+    reasoningTokens: (n: string) => `${n} thinking`,
+    tokensIn: 'Input tokens (incl. cache reads and writes)',
+    tokensOut: 'Output tokens',
     copy: 'Copy',
     copied: 'Copied',
     todoProgress: (done: number, total: number) => `${done}/${total} done`,
@@ -67,6 +77,7 @@ const en = {
     foldOther: (n: number) => `${n} other ${n === 1 ? 'tool' : 'tools'}`,
     foldFailed: (n: number) => `${n} failed`,
     foldThought: 'thought',
+    foldThoughtFor: (d: string) => `thought for ${d}`,
     foldSep: ', ',
     /** Sentence-case the first part in English. */
     foldCase: (s: string) => s.charAt(0).toUpperCase() + s.slice(1),
@@ -94,6 +105,8 @@ const zh: TranscriptText = {
     failedCount: '失败',
     thinking: '思考中…',
     thinkingRedacted: '思考（已加密）',
+    thought: '已思考',
+    thoughtFor: d => `思考了 ${d}`,
     exitCode: code => `退出码 ${code}`,
     aborted: '已中断',
     requestFailed: '请求失败',
@@ -112,10 +125,17 @@ const zh: TranscriptText = {
         const m = Math.floor(s / 60)
         return m < 60 ? `${m} 分 ${s % 60} 秒` : `${Math.floor(m / 60)} 小时 ${m % 60} 分`
     },
+    elapsed: ms => (ms < 1000 ? `${Math.round(ms)} 毫秒` : ms < 10_000 ? `${(ms / 1000).toFixed(1)} 秒` : zh.duration(ms)),
     clock: (ts) => {
         const d = new Date(ts)
         return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
     },
+    dateTime: ts => new Date(ts).toLocaleString('zh-CN', { dateStyle: 'medium', timeStyle: 'medium' }),
+    requests: n => `${n} 次请求`,
+    cached: pct => `缓存命中 ${pct}%`,
+    reasoningTokens: n => `思考 ${n}`,
+    tokensIn: '输入 token（含缓存读写）',
+    tokensOut: '输出 token',
     copy: '复制',
     copied: '已复制',
     todoProgress: (done, total) => `已完成 ${done}/${total}`,
@@ -130,6 +150,7 @@ const zh: TranscriptText = {
     foldOther: n => `调用了 ${n} 个工具`,
     foldFailed: n => `${n} 个失败`,
     foldThought: '已思考',
+    foldThoughtFor: d => `思考了 ${d}`,
     foldSep: '，',
     foldCase: s => s,
 }

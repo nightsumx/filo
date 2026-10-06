@@ -1,5 +1,5 @@
-// Thinking is printed inline in dim italics, the way pi's TUI shows it, rather than behind a toggle.
-// Long thoughts are clipped to five lines: while streaming the clip follows the newest text, once
+// Thinking is printed inline in dim italics, the way pi's TUI shows it, rather than behind a toggle,
+// under a "∴ Thought for 12s" header like Claude Code's. Long thoughts are clipped to five lines: while streaming the clip follows the newest text, once
 // done it shows the first lines with a "… N more lines" toggle.
 import { Markdown } from '@/components/Markdown'
 import { useT } from '@/lib/transcriptText'
@@ -41,7 +41,21 @@ function lineBoxes(el: HTMLElement): { top: number, bottom: number }[] {
     return lines
 }
 
-export const ThinkingBlock = memo(({ id, text, streaming, redacted }: { id: string, text: string, streaming: boolean, redacted: boolean }) => {
+/** "∴ Thought for 12s" / "∴ Thinking…" line on top of a thinking block. */
+function Header({ streaming, redacted, ms }: { streaming: boolean, redacted: boolean, ms?: number }) {
+    const t = useT()
+    const duration = ms !== undefined ? t.elapsed(ms) : undefined
+    const label = redacted
+        ? `${t.thinkingRedacted}${!streaming && duration ? ` · ${duration}` : ''}`
+        : streaming ? t.thinking : duration ? t.thoughtFor(duration) : t.thought
+    return (
+        <div className={cn('flex h-6 items-center text-[12.5px] text-gray-500 tabular-nums', streaming && 'text-shimmer')}>
+            {label}
+        </div>
+    )
+}
+
+export const ThinkingBlock = memo(({ id, text, streaming, redacted, ms }: { id: string, text: string, streaming: boolean, redacted: boolean, ms?: number }) => {
     const t = useT()
     const [expanded, setExpanded] = useViewState(`${id}:thinking`, false)
     // Height that shows exactly MAX_LINES lines, and how many lines that hides; null when it all fits.
@@ -72,10 +86,8 @@ export const ThinkingBlock = memo(({ id, text, streaming, redacted }: { id: stri
 
     if (redacted || !text) {
         return (
-            <Gutter>
-                <div className={cn('flex h-6 items-center text-[13px] italic text-gray-500', streaming && 'text-shimmer')}>
-                    {redacted ? t.thinkingRedacted : t.thinking}
-                </div>
+            <Gutter mark="∴" markClassName="text-gray-400">
+                <Header streaming={streaming} redacted={redacted} ms={ms} />
             </Gutter>
         )
     }
@@ -83,7 +95,8 @@ export const ThinkingBlock = memo(({ id, text, streaming, redacted }: { id: stri
     const clipped = !expanded && (streaming || clip)
     const mask = clipped && clip ? (streaming ? FADE_TOP : FADE_BOTTOM) : undefined
     return (
-        <Gutter>
+        <Gutter mark="∴" markClassName="text-gray-400">
+            <Header streaming={streaming} redacted={false} ms={ms} />
             <div
                 ref={boxRef}
                 className="overflow-hidden"

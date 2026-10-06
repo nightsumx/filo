@@ -25,6 +25,8 @@ export interface SessionItem {
     /** Stable entry id from the session file. */
     entryId: string
     message: AgentMessage
+    /** Entry write time (ms): when pi finished the message. */
+    endedAt?: number
 }
 
 export interface SessionSnapshot {

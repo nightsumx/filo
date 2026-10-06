@@ -11,6 +11,8 @@ export interface Usage {
     output: number
     cacheRead: number
     cacheWrite: number
+    /** Reasoning tokens (already part of output), when the provider reports them. */
+    reasoning?: number
     totalTokens: number
     cost: { input: number, output: number, cacheRead: number, cacheWrite: number, total: number }
 }
@@ -21,6 +23,8 @@ export interface AssistantMessage {
     content: (TextContent | ThinkingContent | ToolCall)[]
     provider?: string
     model?: string
+    /** pi thinking level the request ran with. */
+    thinkingLevel?: string
     usage?: Usage
     stopReason?: 'pending' | 'stop' | 'length' | 'toolUse' | 'error' | 'aborted' | 'deferred'
     errorMessage?: string

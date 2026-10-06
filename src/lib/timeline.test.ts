@@ -1,7 +1,7 @@
 import type { AgentMessage } from '@shared/pi'
 import type { TimelineMessage } from './timeline'
 import { describe, expect, it } from 'vitest'
-import { buildTurns, groupSteps } from './timeline'
+import { blockTimeKey, buildTurns, groupSteps } from './timeline'
 import { readableError } from './utils'
 
 let n = 0
@@ -53,6 +53,42 @@ describe('buildTurns', () => {
         )
         expect(turns.map(t => t.user?.text ?? t.steps[0]?.kind)).toEqual(['a', 'note', 'next'])
         expect(turns[2].user?.pending).toBe(true)
+    })
+})
+
+describe('timing and usage', () => {
+    const usage = (input: number, output: number, cacheRead: number, cost: number) => ({ input, output, cacheRead, cacheWrite: 0, totalTokens: input + output + cacheRead, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: cost } })
+
+    it('estimates block and tool timings from message start / end times', () => {
+        const [turn] = buildTurns([
+            m(user('go', 1000)),
+            // 4 s message: thinking (300 chars) then a tool call whose arguments serialize to 100 chars.
+            { ...m({ role: 'assistant', content: [{ type: 'thinking', thinking: 'x'.repeat(300) }, call('c1', 'bash', { command: 'y'.repeat(86) })], stopReason: 'toolUse', timestamp: 2000 }), endedAt: 6000 },
+            m({ role: 'toolResult', toolCallId: 'c1', toolName: 'bash', content: [], isError: false, timestamp: 8500 }),
+            { ...m({ role: 'assistant', content: [{ type: 'text', text: 'ok' }], stopReason: 'stop', timestamp: 8501 }), endedAt: 9000 },
+        ])
+        const [thinking, tool] = turn.steps
+        expect(thinking).toMatchObject({ kind: 'thinking', ms: 3000, endedAt: 5000 })
+        expect(tool).toMatchObject({ kind: 'tool', startedAt: 6000, ms: 2500, endedAt: 8500 })
+        // The turn ends when its last message was written, not when it started.
+        expect(turn.endedAt).toBe(9000)
+    })
+
+    it('prefers block times recorded while streaming', () => {
+        const [turn] = buildTurns([
+            m(user('go', 1000)),
+            { ...m({ role: 'assistant', content: [{ type: 'thinking', thinking: 'abc' }, { type: 'text', text: 'abc' }], stopReason: 'stop', timestamp: 2000 }), endedAt: 6000 },
+        ], { blockTimes: new Map([[blockTimeKey(2000, 0), { start: 2500, end: 3200 }]]) })
+        expect(turn.steps[0]).toMatchObject({ kind: 'thinking', ms: 700, endedAt: 3200 })
+    })
+
+    it('sums usage, models and thinking levels over a turn', () => {
+        const [turn] = buildTurns([
+            m(user('go')),
+            m({ role: 'assistant', provider: 'anthropic', model: 'opus', thinkingLevel: 'high', usage: usage(100, 10, 900, 0.5), content: [call('c', 'ls', {})], stopReason: 'toolUse', timestamp: 2 }),
+            m({ role: 'assistant', provider: 'anthropic', model: 'opus', thinkingLevel: 'high', usage: usage(50, 20, 950, 0.25), content: [{ type: 'text', text: 'x' }], stopReason: 'stop', timestamp: 3 }),
+        ])
+        expect(turn.usage).toMatchObject({ requests: 2, input: 150, output: 30, cacheRead: 1850, cost: 0.75, models: ['anthropic/opus'], thinkingLevels: ['high'] })
     })
 })
 

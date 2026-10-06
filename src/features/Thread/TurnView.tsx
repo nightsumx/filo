@@ -34,8 +34,9 @@ function CopyAction({ text }: { text: string }) {
 
 // User prompt: a right-aligned chat bubble; the copy action sits to its left on hover.
 function UserBubble({ user }: { user: UserPrompt }) {
+    const t = useT()
     return (
-        <div className="group flex flex-col items-end gap-1.5 pl-[15%]">
+        <div className="group flex flex-col items-end gap-1.5 pl-[15%]" title={user.timestamp ? t.dateTime(user.timestamp) : undefined}>
             {user.images.length > 0 && (
                 <div className="flex flex-wrap justify-end gap-2">
                     {user.images.map((img, i) => (
@@ -88,10 +89,15 @@ function FoldRow({ row }: { row: Extract<TranscriptRow, { kind: 'fold' }> }) {
             ),
         })
     }
+    const tools = parts.length > 0
+    if (s.thinking)
+        parts.push({ key: 'thought', text: s.thinkingMs !== undefined ? t.foldThoughtFor(t.elapsed(s.thinkingMs)) : t.foldThought })
     if (s.failed)
         parts.push({ key: 'failed', text: t.foldFailed(s.failed), className: 'text-red-500' })
     if (!parts.length)
         parts.push({ key: 'thought', text: t.foldThought })
+    // Wall time of the folded process, from the prompt to its last step (thinking alone already says it).
+    const span = tools && s.endedAt !== undefined && row.turn.startedAt ? s.endedAt - row.turn.startedAt : undefined
     return (
         <button
             type="button"
@@ -113,6 +119,7 @@ function FoldRow({ row }: { row: Extract<TranscriptRow, { kind: 'fold' }> }) {
                             </span>
                         </Fragment>
                     ))}
+                    {span !== undefined && span > 0 && <span className="tabular-nums text-gray-400">{` · ${t.elapsed(span)}`}</span>}
                 </span>
             </span>
         </button>
@@ -136,6 +143,47 @@ function estimateTokens(steps: Step[]): number {
 
 function formatTokens(n: number): string {
     return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n)
+}
+
+const formatCost = (n: number) => (n >= 0.01 ? `$${n.toFixed(2)}` : `$${n.toFixed(4)}`)
+
+/** "6 requests · ↑ 52.1k ↓ 3.2k · 89% cached · $0.12 · claude-opus-5-5 (high)" for a turn's footer. */
+function UsageParts({ usage }: { usage: NonNullable<Turn['usage']> }) {
+    const t = useT()
+    if (!usage.requests)
+        return null
+    const input = usage.input + usage.cacheRead + usage.cacheWrite
+    const cachedPct = input ? Math.round((usage.cacheRead / input) * 100) : 0
+    const parts: { key: string, node: React.ReactNode, title?: string }[] = [
+        { key: 'requests', node: t.requests(usage.requests) },
+        {
+            key: 'tokens',
+            node: `↑ ${formatTokens(input)} ↓ ${formatTokens(usage.output)}${usage.reasoning ? ` (${t.reasoningTokens(formatTokens(usage.reasoning))})` : ''}`,
+            title: `${t.tokensIn}: ${input.toLocaleString()} (input ${usage.input.toLocaleString()}, cache read ${usage.cacheRead.toLocaleString()}, cache write ${usage.cacheWrite.toLocaleString()})\n${t.tokensOut}: ${usage.output.toLocaleString()}`,
+        },
+    ]
+    if (cachedPct)
+        parts.push({ key: 'cache', node: t.cached(cachedPct) })
+    if (usage.cost > 0)
+        parts.push({ key: 'cost', node: formatCost(usage.cost) })
+    if (usage.models.length) {
+        const levels = usage.thinkingLevels.filter(l => l !== 'off')
+        parts.push({
+            key: 'model',
+            node: `${usage.models.map(m => m.split('/').pop()).join(', ')}${levels.length ? ` (${levels.join(', ')})` : ''}`,
+            title: usage.models.join('\n'),
+        })
+    }
+    return (
+        <>
+            {parts.map(p => (
+                <span key={p.key} title={p.title} className="whitespace-nowrap">
+                    <span className="text-gray-400">· </span>
+                    {p.node}
+                </span>
+            ))}
+        </>
+    )
 }
 
 /** Live "✶ Churning… (12s · ↓ 1.2k tokens)" line, cc-tui's working indicator. */
@@ -163,7 +211,7 @@ const RunningLine = observer(({ thread, turn }: { thread: Thread, turn: Turn }) 
             <div className="flex h-6 min-w-0 items-center gap-1.5 text-[13px]">
                 <span className="shrink-0 text-[#e8956b]">{`${label}…`}</span>
                 <span className="truncate text-gray-500 tabular-nums">
-                    {`(${elapsed}${tokens ? ` · ↓ ${formatTokens(tokens)} tokens` : ''})`}
+                    {`(${elapsed}${tokens ? ` · ↓ ${formatTokens(tokens)} tokens` : ''}${turn.usage?.cost ? ` · ${formatCost(turn.usage.cost)}` : ''})`}
                     {thread.retry?.errorMessage && ` ${thread.retry.errorMessage}`}
                 </span>
             </div>
@@ -207,10 +255,11 @@ export const TranscriptRowView = memo(({ row, thread, top }: { row: TranscriptRo
             return (
                 <div className={cn(pad, 'group/turn')}>
                     <Gutter mark="✻" markClassName="text-gray-400">
-                        <div className="flex h-6 items-center gap-2 text-[12.5px] text-gray-500">
-                            <span>{ms > 1000 ? t.workedFor(verbFor(t, turn.key)[1], t.duration(ms), t.clock(turn.endedAt)) : t.doneAt(t.clock(turn.endedAt))}</span>
+                        <div className="flex min-h-6 flex-wrap items-center gap-x-1 text-[12.5px] leading-6 text-gray-500 tabular-nums">
+                            <span title={t.dateTime(turn.endedAt)}>{ms > 1000 ? t.workedFor(verbFor(t, turn.key)[1], t.duration(ms), t.clock(turn.endedAt)) : t.doneAt(t.clock(turn.endedAt))}</span>
+                            {turn.usage && <UsageParts usage={turn.usage} />}
                             {row.finalText && (
-                                <span className="opacity-0 transition-opacity group-hover/turn:opacity-100">
+                                <span className="flex h-6 items-center opacity-0 transition-opacity group-hover/turn:opacity-100">
                                     <CopyAction text={row.finalText} />
                                 </span>
                             )}

@@ -40,4 +40,10 @@ describe('turnStats', () => {
         ])
         expect(s).toMatchObject({ commands: 2, reads: 1, searches: 1, edited: 2, added: 4, removed: 1, other: 1, failed: 1 })
     })
+
+    it('sums thinking time and finds when the last step finished', () => {
+        const thinking = (key: string, ms: number, endedAt: number): Step => ({ kind: 'thinking', key, text: 't', streaming: false, redacted: false, ms, endedAt })
+        const s = turnStats([thinking('0', 1200, 3000), { ...tool('1', 'bash'), endedAt: 9000 } as Step, thinking('2', 800, 9800)])
+        expect(s).toMatchObject({ thinking: true, thinkingMs: 2000, endedAt: 9800 })
+    })
 })

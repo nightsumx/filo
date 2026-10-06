@@ -104,7 +104,7 @@ export function parseSession(text: string, filePath: string): SessionSnapshot {
     for (const entry of branch) {
         const message = toMessage(entry)
         if (message)
-            items.push({ entryId: entry.id, message })
+            items.push({ entryId: entry.id, message, endedAt: Date.parse(entry.timestamp) || undefined })
     }
     return { path: filePath, id: header?.id ?? '', cwd: header?.cwd ?? '', name, items }
 }
