@@ -1,4 +1,4 @@
-import type { ApprovalMode, CapabilityId } from '@shared/capabilities'
+import type { ApprovalMode, CapabilityId, Presence } from '@shared/capabilities'
 import type { LangPref } from '@shared/i18n'
 import type { AppState, GlobalCompactionPatch, GlobalPrefs, OpenProject, PiEnvResult, ProjectActivity, ProjectTransfer, RepoEdits, ReviewView, SearchResult, SessionSummary, StateSave, ThemePref, TranscriptLang, WindowReport } from '@shared/ipc'
 import { APPROVAL_MODES, DEFAULT_CAPABILITIES, normalizeCapabilities } from '@shared/capabilities'
@@ -114,6 +114,8 @@ class AppStore implements ThreadHost {
     reveal: { key: string, entryId: string, n: number } | null = null
     /** Per project: the sessions that edited each uncommitted file (this app's threads and terminal pi alike). */
     edits = observable.map<string, RepoEdits['files']>()
+    /** Terminal pi processes (pi-cc-tui's presence extension). */
+    presence: Presence[] = []
 
     private agentThreads = new Map<string, Thread>()
     /** Pending edit-log refreshes per project (debounced; one request in flight at a time). */
@@ -295,6 +297,8 @@ class AppStore implements ThreadHost {
         api().onOpenProjects(projects => runInAction(() => (this.openProjects = projects)))
         api().onSelectProject(cwd => runInAction(() => this.windowProjects.includes(cwd) && this.showProject(cwd)))
         api().onRevealSession((session, entryId) => void this.revealHere(session, entryId))
+        api().onPresence(list => this.setPresence(list))
+        void api().getPresence().then(list => this.setPresence(list))
         api().onExportProjects(this.exportProjects)
         api().onImportProjects(this.importProjects)
         // A thread starts waiting for the user: notify once. The Dock badge counts every window's.
@@ -376,6 +380,29 @@ class AppStore implements ThreadHost {
             for (const [agentId, event] of batch)
                 this.agentThreads.get(agentId)?.handleEvent(event)
         })
+    }
+
+    /** By session file: what the terminal pi on it is doing. */
+    get terminalSessions(): Map<string, Presence> {
+        return new Map(this.presence.filter(p => p.session).map(p => [p.session!, p]))
+    }
+
+    /**
+     * A terminal pi changed state: a run that ended or began wrote its session file (titles, times)
+     * and maybe files in the repo, so both lists refresh.
+     */
+    setPresence(list: Presence[]) {
+        const before = new Map(this.presence.map(p => [p.pid, p]))
+        runInAction(() => (this.presence = list))
+        const changed = list.filter(p => before.get(p.pid)?.state !== p.state || before.get(p.pid)?.session !== p.session)
+        const gone = [...before.values()].filter(p => !list.some(q => q.pid === p.pid))
+        if (!changed.length && !gone.length)
+            return
+        void this.refreshSessions()
+        for (const cwd of new Set([...changed, ...gone].map(p => p.cwd))) {
+            if (this.windowProjects.includes(cwd))
+                this.refreshEdits(cwd)
+        }
     }
 
     async refreshSessions() {

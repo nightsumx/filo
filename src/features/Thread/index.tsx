@@ -2,7 +2,7 @@ import type { Thread } from '@/store/thread'
 import { TRANSCRIPT_TEXT, TranscriptTextContext } from '@/lib/transcriptText'
 import { cn, relativeTime, shortPath } from '@/lib/utils'
 import { appStore } from '@/store/app'
-import { Loader2 } from 'lucide-react'
+import { Loader2, SquareTerminal } from 'lucide-react'
 import { observer } from 'mobx-react-lite'
 import { useEffect } from 'react'
 import appIcon from '@/assets/logo.png'
@@ -63,6 +63,29 @@ const Hero = observer(({ thread }: { thread: Thread }) => {
     )
 })
 
+/**
+ * The same session is open in a terminal pi too. Both processes append to the file, each from its own
+ * view of it, so the turns land as separate branches: worth knowing before sending from here.
+ */
+const TerminalNotice = observer(({ thread }: { thread: Thread }) => {
+    const terminal = thread.sessionPath ? appStore.terminalSessions.get(thread.sessionPath) : undefined
+    if (!terminal)
+        return null
+    const text = terminal.state === 'idle'
+        ? tr('这个会话也在终端里打开着（pi 进程 ', 'This session is also open in a terminal (pi process ')
+        : tr('这个会话正在终端里运行（pi 进程 ', 'This session is running in a terminal (pi process ')
+    return (
+        <div role="status" className="mx-auto flex w-full max-w-5xl items-center gap-1.5 px-5 pb-1 text-[12px] text-amber-600 dark:text-amber-400">
+            <SquareTerminal size={13} className="shrink-0" />
+            <span className="min-w-0 truncate">
+                {text}
+                {terminal.pid}
+                {tr('），两边同时发送会让对话分叉。', '); sending from both sides splits the conversation.')}
+            </span>
+        </div>
+    )
+})
+
 /** One tab's content. Several render side by side in split layout. */
 export const ThreadPane = observer(({ thread, focused }: { thread: Thread, focused: boolean }) => {
     // A pane on screen gets a live pi process and counts as read.
@@ -94,6 +117,7 @@ export const ThreadPane = observer(({ thread, focused }: { thread: Thread, focus
                     </TranscriptTextContext>
                 </div>
             )}
+            <TerminalNotice thread={thread} />
             <Composer thread={thread} />
         </section>
     )

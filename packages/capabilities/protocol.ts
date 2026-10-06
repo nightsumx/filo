@@ -50,6 +50,27 @@ export const ENV = {
     approvalMode: 'PI_KIT_APPROVAL_MODE',
 } as const
 
+// ---------------------------------------------------------------- presence
+
+/**
+ * pi-cc-tui's presence extension writes one file per terminal pi, `<agent dir>/PRESENCE_DIR/<pid>.json`,
+ * so the desktop app can show which terminal sessions are working. Removed on exit; the app also
+ * drops files whose pid is gone (a killed pi leaves its file behind).
+ */
+export const PRESENCE_DIR = 'pi-kit-presence'
+
+export type PresenceState = 'idle' | 'running' | 'waiting'
+
+export interface Presence {
+    pid: number
+    cwd: string
+    /** Session file (may not exist yet: pi writes it on the first reply). */
+    session?: string
+    state: PresenceState
+    /** When the state began (ms). */
+    since: number
+}
+
 /** `ctx.ui.setStatus` keys carrying mode state; hidden from the status list. */
 export const GUI_STATUS = {
     /** Current ApprovalMode. */

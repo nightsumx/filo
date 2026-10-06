@@ -32,6 +32,7 @@
       "./extensions/cc-input.ts",
       "./extensions/cc-modes.ts",
       "./extensions/cc-header.ts",
+      "./extensions/cc-presence.ts",
       "./extensions/capabilities/todo.ts",
       "./extensions/capabilities/ask.ts",
       "./extensions/capabilities/approval.ts",

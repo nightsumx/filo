@@ -5,7 +5,7 @@ import type { SessionSummary } from '@shared/ipc'
 import type { Project } from '@/store/app'
 import type { Thread } from '@/store/thread'
 import { ConflictMark } from '@/components/ConflictMark'
-import { ActivityBadge, PiGlyph, StatusDot } from '@/components/StatusIcons'
+import { ActivityBadge, PiGlyph, StatusDot, TerminalStatus } from '@/components/StatusIcons'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { formatElapsed } from '@/lib/threadActivity'
 import { cn, relativeTime, shortPath } from '@/lib/utils'
@@ -90,7 +90,11 @@ const ThreadRow = observer(({ thread, session, selected }: { thread?: Thread, se
     const activity = thread?.activity
     const busy = !!activity && activity.phase !== 'idle'
     const running = !!thread?.running
-    const now = useNow(running)
+    // A terminal pi on this session: unless one of this window's threads is driving it too.
+    const path = thread?.sessionPath ?? session?.path
+    const terminal = path && !thread?.agentId ? appStore.terminalSessions.get(path) : undefined
+    const terminalBusy = !!terminal && terminal.state !== 'idle'
+    const now = useNow(running || terminalBusy)
     return (
         <div
             role="treeitem"
@@ -98,7 +102,7 @@ const ThreadRow = observer(({ thread, session, selected }: { thread?: Thread, se
             aria-selected={selected}
             tabIndex={-1}
             data-tree-row
-            title={busy ? `${title}\n${activity!.text}` : title}
+            title={busy ? `${title}\n${activity!.text}` : terminal ? `${title}\n${tr('终端中的 pi', 'pi in a terminal')}` : title}
             onClick={open}
             onKeyDown={(e) => {
                 if (e.key === 'Enter')
@@ -111,12 +115,14 @@ const ThreadRow = observer(({ thread, session, selected }: { thread?: Thread, se
             className={cn(rowBase, 'pl-[30px]', busy && 'h-auto flex-col items-stretch gap-0 pb-1', selected ? rowSelected : 'hover:bg-ide-hover')}
         >
             <div className="flex h-6 min-w-0 flex-1 items-center gap-1.5">
-                {thread ? <StatusDot thread={thread} /> : <PiGlyph dim />}
+                {terminal ? <TerminalStatus presence={terminal} /> : thread ? <StatusDot thread={thread} /> : <PiGlyph dim />}
                 <span className={cn('min-w-0 flex-1 truncate', thread ? 'text-gray-900' : 'text-gray-700')}>{title}</span>
                 <ConflictMark cwd={thread?.cwd ?? session!.cwd} session={thread?.sessionPath ?? session?.path} />
                 {running
                     ? <span className="shrink-0 text-[11px] tabular-nums text-gray-500" title={tr('已运行', 'Running for')}>{formatElapsed(now - thread!.runStartedAt)}</span>
-                    : updated != null && <span className="shrink-0 text-[11px] tabular-nums text-gray-400">{relativeTime(updated)}</span>}
+                    : terminalBusy
+                        ? <span className="shrink-0 text-[11px] tabular-nums text-gray-500" title={terminal!.state === 'waiting' ? tr('在终端等待你', 'Waiting in the terminal') : tr('终端运行中', 'Running in the terminal')}>{formatElapsed(now - terminal!.since)}</span>
+                        : updated != null && <span className="shrink-0 text-[11px] tabular-nums text-gray-400">{relativeTime(updated)}</span>}
             </div>
             {busy && <ActivityLine thread={thread!} now={now} />}
         </div>

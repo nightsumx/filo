@@ -1,4 +1,4 @@
-import type { ApprovalMode, CapabilityId } from './capabilities'
+import type { ApprovalMode, CapabilityId, Presence } from './capabilities'
 import type { LangPref } from './i18n'
 import type { AgentMessage, PiEvent, RpcResponse } from './pi'
 
@@ -241,6 +241,9 @@ export interface PiBridge {
     trashSession: (path: string) => Promise<void>
     /** Full-text search of prompts and replies in every session; every word must appear. */
     searchSessions: (query: string) => Promise<SearchResult[]>
+    /** Terminal pi sessions (pi-cc-tui's presence extension), and their changes. */
+    getPresence: () => Promise<Presence[]>
+    onPresence: (listener: (list: Presence[]) => void) => () => void
 
     loadState: () => Promise<AppState>
     saveState: (save: StateSave) => Promise<void>
@@ -338,6 +341,7 @@ export const IPC = {
     readSession: 'sessions:read',
     trashSession: 'sessions:trash',
     searchSessions: 'sessions:search',
+    presence: 'sessions:presence',
     loadState: 'state:load',
     saveState: 'state:save',
     pickFolder: 'dialog:pick-folder',

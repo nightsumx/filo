@@ -2,7 +2,8 @@ import type { ProjectActivity } from '@/store/app'
 import type { Thread } from '@/store/thread'
 import { tr } from '@/lib/i18n'
 import { cn } from '@/lib/utils'
-import { Loader2 } from 'lucide-react'
+import type { Presence } from '@shared/capabilities'
+import { Loader2, SquareTerminal } from 'lucide-react'
 import { observer } from 'mobx-react-lite'
 
 /** Per-thread status used by tabs and the project tree: waiting > running > error > unread > idle π. */
@@ -17,6 +18,19 @@ export const StatusDot = observer(({ thread, dim }: { thread: Thread, dim?: bool
         return <span className="mx-[3px] h-2 w-2 shrink-0 rounded-full bg-ide-accent" aria-label={tr('有新回复', 'New reply')} />
     return <PiGlyph dim={dim} />
 })
+
+/**
+ * A pi running in a terminal on this session (pi-cc-tui's presence extension): amber while it waits
+ * for an answer there, a spinner while it works, a terminal glyph while idle.
+ */
+export function TerminalStatus({ presence }: { presence: Presence }) {
+    const where = tr('终端中的 pi', 'pi in a terminal')
+    if (presence.state === 'waiting')
+        return <span className="mx-[3px] h-2 w-2 shrink-0 rounded-full bg-amber-500" role="img" aria-label={`${where}: ${tr('等待处理', 'needs you')}`} />
+    if (presence.state === 'running')
+        return <span className="h-3.5 w-3.5 shrink-0 animate-spin rounded-full border-[1.5px] border-gray-300 border-t-gray-500" role="img" aria-label={`${where}: ${tr('运行中', 'running')}`} />
+    return <SquareTerminal size={14} strokeWidth={1.6} className="shrink-0 text-gray-500" role="img" aria-label={`${where}: ${tr('空闲', 'idle')}`} />
+}
 
 export function PiGlyph({ dim }: { dim?: boolean }) {
     return <span aria-hidden className={cn('w-3.5 shrink-0 text-center font-serif text-[14px] italic leading-none select-none', dim ? 'text-gray-400' : 'text-gray-500')}>π</span>

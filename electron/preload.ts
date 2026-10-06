@@ -28,6 +28,8 @@ const bridge: PiBridge = {
     readSession: path => ipcRenderer.invoke(IPC.readSession, path),
     trashSession: path => ipcRenderer.invoke(IPC.trashSession, path),
     searchSessions: query => ipcRenderer.invoke(IPC.searchSessions, query),
+    getPresence: () => ipcRenderer.invoke(IPC.presence),
+    onPresence: listener => listen(IPC.presence, listener),
 
     loadState: () => ipcRenderer.invoke(IPC.loadState),
     saveState: state => ipcRenderer.invoke(IPC.saveState, state),

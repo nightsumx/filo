@@ -6,6 +6,7 @@ import path from 'node:path'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
 import { Worker } from 'node:worker_threads'
+import { PresenceWatcher, presenceDir } from './presence'
 import { DEFAULT_THEME, IPC, THEME_PREFS } from '@shared/ipc'
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, Notification, shell } from 'electron'
 import { AgentManager } from './agents'
@@ -37,6 +38,9 @@ const agents = new AgentManager({
 }, extensionsDir)
 
 const windows = new Windows({ store, create: createWindow, stopAgent: id => agents.stop(id) })
+
+/** Terminal pi sessions; every window gets the list when it changes. */
+const presence = new PresenceWatcher(presenceDir(), list => windows.broadcast(null, IPC.presence, list))
 
 /** Session search runs in a worker thread (searchWorker.ts), started on first use. */
 const search = (() => {
@@ -183,6 +187,7 @@ function registerIpc() {
     ipcMain.handle(IPC.resolveEnv, () => resolvePiEnv())
     ipcMain.handle(IPC.listSessions, () => listSessions())
     ipcMain.handle(IPC.readSession, (_e, file: string) => readSession(file))
+    ipcMain.handle(IPC.presence, () => presence.current)
     ipcMain.handle(IPC.searchSessions, (_e, query: unknown) => search.search(typeof query === 'string' ? query.slice(0, 500) : ''))
     ipcMain.handle(IPC.trashSession, async (_e, file: string) => {
         await assertInSessionsDir(file)
@@ -372,6 +377,7 @@ app.whenReady().then(async () => {
     windows.restore(savedWindows(state))
     // Warm up env resolution so the first thread starts faster.
     void resolvePiEnv()
+    void presence.start()
     app.on('activate', () => {
         if (!windows.count)
             windows.restore([])
@@ -384,6 +390,7 @@ app.on('before-quit', (event) => {
         return
     quitting = true
     event.preventDefault()
+    presence.stop()
     void Promise.all([windows.prepareQuit(), agents.stopAll()]).finally(() => app.quit())
 })
 
