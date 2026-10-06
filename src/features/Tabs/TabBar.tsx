@@ -5,9 +5,10 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
 import { cn, relativeTime } from '@/lib/utils'
 import { appStore } from '@/store/app'
 import { Check, ChevronDown, MoreHorizontal, Plus, X } from 'lucide-react'
+import { runInAction } from 'mobx'
 import { observer } from 'mobx-react-lite'
 import { useEffect, useRef, useState } from 'react'
-import { closeTabWithConfirm, ThreadActions } from './ThreadActions'
+import { closeTabWithConfirm, renaming, ThreadActions } from './ThreadActions'
 
 const iconBtn = 'flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-gray-500 hover:bg-black/[0.06] hover:text-gray-800 outline-none data-[state=open]:bg-black/[0.08]'
 
@@ -16,10 +17,52 @@ export { closeTabWithConfirm }
 const contextParts = { Item: ContextMenuItem, Separator: ContextMenuSeparator }
 const dropdownParts = { Item: DropdownMenuItem, Separator: DropdownMenuSeparator }
 
+/** In-place title editor: same text, no chrome. Enter / blur saves, Esc cancels. */
+function TitleEditor({ thread }: { thread: Thread }) {
+    const ref = useRef<HTMLInputElement>(null)
+    const done = useRef(false)
+    useEffect(() => {
+        // The menu that started the rename hands focus back to its trigger as it closes; take it after.
+        const id = requestAnimationFrame(() => ref.current?.select())
+        return () => cancelAnimationFrame(id)
+    }, [])
+    const finish = async (save: boolean) => {
+        if (done.current)
+            return
+        done.current = true
+        const name = ref.current?.value.trim() ?? ''
+        runInAction(() => (renaming.key = null))
+        if (save && name && name !== thread.title) {
+            await thread.rename(name)
+            void appStore.refreshSessions()
+        }
+    }
+    return (
+        <input
+            ref={ref}
+            defaultValue={thread.title}
+            aria-label="线程名称"
+            spellCheck={false}
+            onBlur={() => void finish(true)}
+            onKeyDown={(e) => {
+                e.stopPropagation()
+                if (e.key === 'Enter' && !e.nativeEvent.isComposing)
+                    void finish(true)
+                else if (e.key === 'Escape')
+                    void finish(false)
+            }}
+            onClick={e => e.stopPropagation()}
+            onMouseDown={e => e.stopPropagation()}
+            className="min-w-0 flex-1 bg-transparent p-0 text-inherit outline-none selection:bg-ide-accent/25"
+        />
+    )
+}
+
 const Tab = observer(({ thread, index, visible }: { thread: Thread, index: number, visible: boolean }) => {
     const active = appStore.activeKey === thread.key
     const ref = useRef<HTMLDivElement>(null)
     const [dropSide, setDropSide] = useState<'left' | 'right' | null>(null)
+    const editing = renaming.key === thread.key
 
     useEffect(() => {
         if (active)
@@ -35,7 +78,7 @@ const Tab = observer(({ thread, index, visible }: { thread: Thread, index: numbe
             tabIndex={0}
             aria-selected={active}
             title={thread.title}
-            draggable
+            draggable={!editing}
             onDragStart={e => e.dataTransfer.setData('application/x-pi-tab', thread.key)}
             onDragOver={(e) => {
                 if (!e.dataTransfer.types.includes('application/x-pi-tab'))
@@ -73,7 +116,7 @@ const Tab = observer(({ thread, index, visible }: { thread: Thread, index: numbe
                 // width equally (basis-0 + flex-1) and only scroll once they hit min-w.
                 'group relative flex h-[26px] min-w-[120px] flex-1 basis-0 items-center gap-1.5 rounded-md pl-2 pr-1 text-[13px] cursor-default outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ide-accent/50',
                 active
-                    ? 'bg-ide-tab text-gray-900 shadow-[0_1px_2px_rgb(0_0_0/0.06)] dark:shadow-[0_0_0_1px_rgb(var(--gray-200))]'
+                    ? 'bg-ide-tab text-gray-900 shadow-[var(--ide-tab-shadow)]'
                     : visible
                         ? 'bg-black/[0.04] text-gray-800 hover:bg-black/[0.06]'
                         : 'text-gray-600 hover:bg-black/[0.05] hover:text-gray-900',
@@ -81,9 +124,13 @@ const Tab = observer(({ thread, index, visible }: { thread: Thread, index: numbe
         >
             {dropSide && <span className={cn('absolute top-0.5 bottom-0.5 w-0.5 rounded bg-ide-accent', dropSide === 'left' ? '-left-[3px]' : '-right-[3px]')} />}
             <StatusDot thread={thread} />
-            <span className="min-w-0 flex-1 truncate">
-                {thread.isEmpty && !thread.persisted ? '新线程' : thread.title}
-            </span>
+            {editing
+                ? <TitleEditor thread={thread} />
+                : (
+                        <span className="min-w-0 flex-1 truncate">
+                            {thread.isEmpty && !thread.persisted ? '新线程' : thread.title}
+                        </span>
+                    )}
             <button
                 type="button"
                 aria-label={`关闭 ${thread.title}`}
@@ -98,7 +145,7 @@ const Tab = observer(({ thread, index, visible }: { thread: Thread, index: numbe
             </button>
         </div>
             </ContextMenuTrigger>
-            <ContextMenuContent className="w-48">
+            <ContextMenuContent className="w-48" onCloseAutoFocus={e => renaming.key && e.preventDefault()}>
                 <ThreadActions thread={thread} parts={contextParts} />
             </ContextMenuContent>
         </ContextMenu>
@@ -115,7 +162,7 @@ const ActiveThreadMenu = observer(() => {
             <DropdownMenuTrigger className={iconBtn} aria-label="线程操作" title="线程操作（也可右键标签）">
                 <MoreHorizontal size={15} />
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-48">
+            <DropdownMenuContent align="end" className="w-48" onCloseAutoFocus={e => renaming.key && e.preventDefault()}>
                 <ThreadActions thread={thread} parts={dropdownParts} />
             </DropdownMenuContent>
         </DropdownMenu>
@@ -158,7 +205,7 @@ const HistoryMenu = observer(() => {
 export const TabBar = observer(() => {
     const visible = new Set(appStore.visibleTabs.map(t => t.key))
     return (
-        <div className="flex h-[36px] shrink-0 items-center gap-1 bg-ide-panel px-1.5 dark:border-b dark:border-ide-line">
+        <div className="flex h-[36px] shrink-0 items-center gap-1 bg-ide-panel px-1.5">
             <div role="tablist" aria-label="线程标签" className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto px-px py-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                 {appStore.tabs.map((thread, i) => (
                     <Tab key={thread.key} thread={thread} index={i} visible={visible.has(thread.key) && appStore.tabs.length > 1} />

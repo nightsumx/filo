@@ -2,15 +2,18 @@
 // menu and the tab bar's ⋯ menu, so the item components are passed in.
 import type { Thread } from '@/store/thread'
 import { confirm } from '@/lib/confirm'
-import { promptText } from '@/lib/promptText'
 import { appStore } from '@/store/app'
 import { Archive, FolderOpen, Pencil, Trash2, X, XCircle } from 'lucide-react'
+import { observable, runInAction } from 'mobx'
 import { observer } from 'mobx-react-lite'
 
 interface MenuParts {
     Item: React.ComponentType<{ onSelect?: () => void, disabled?: boolean, className?: string, children: React.ReactNode }>
     Separator: React.ComponentType
 }
+
+/** Tab currently showing its inline title editor (set by the 重命名 action, read by the tab). */
+export const renaming = observable({ key: null as string | null })
 
 export async function closeTabWithConfirm(thread: Thread) {
     if (thread.running) {
@@ -40,13 +43,7 @@ export const ThreadActions = observer(({ thread, parts: { Item, Separator } }: {
         <>
             {!thread.isEmpty && (
                 <>
-                    <Item onSelect={async () => {
-                        const name = await promptText({ title: '重命名线程', initial: thread.title })
-                        if (name != null)
-                            await thread.rename(name.trim())
-                        void appStore.refreshSessions()
-                    }}
-                    >
+                    <Item onSelect={() => runInAction(() => (renaming.key = thread.key))}>
                         <Pencil size={14} />
                         重命名
                     </Item>
