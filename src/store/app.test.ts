@@ -85,7 +85,7 @@ describe('capabilities per project', () => {
     })
 
     it('defaults to the standard preset and returns plain, cloneable arrays', () => {
-        expect(appStore.capabilitiesOf('/p')).toEqual(['todo', 'ask'])
+        expect(appStore.capabilitiesOf('/p')).toEqual(['todo', 'ask', 'approval', 'plan'])
         appStore.setCapabilities('/p', ['ask', 'bogus' as any, 'todo'])
         const ids = appStore.capabilitiesOf('/p')
         expect(ids).toEqual(['todo', 'ask'])
@@ -93,7 +93,7 @@ describe('capabilities per project', () => {
         expect(() => structuredClone(ids)).not.toThrow()
         appStore.setCapabilities('/p', [])
         expect(appStore.capabilitiesOf('/p')).toEqual([])
-        expect(appStore.capabilitiesOf('/other')).toEqual(['todo', 'ask'])
+        expect(appStore.capabilitiesOf('/other')).toEqual(['todo', 'ask', 'approval', 'plan'])
     })
 })
 

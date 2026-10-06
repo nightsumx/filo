@@ -29,7 +29,7 @@ class PiAgent {
     private exited = false
 
     constructor(env: PiEnv, options: AgentStartOptions, extensionsDir: string, callbacks: AgentCallbacks) {
-        const args = ['--mode', 'rpc', ...capabilityArgs(options.capabilities, extensionsDir)]
+        const args = ['--mode', 'rpc', ...capabilityArgs(options.capabilities, extensionsDir, { approvalMode: options.approvalMode })]
         if (options.sessionPath)
             args.push('--session', options.sessionPath)
         const command = piCommand(env, args)

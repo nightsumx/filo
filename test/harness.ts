@@ -1,6 +1,6 @@
 // End-to-end harness for capability extensions: a scripted OpenAI-compatible model plus a real
 // `pi --mode rpc` started through the app's AgentManager. No real provider, no tokens spent.
-import type { CapabilityId } from '@shared/capabilities'
+import type { ApprovalMode, CapabilityId } from '@shared/capabilities'
 import type { PiEnv } from '@shared/ipc'
 import type { PiEvent, RpcResponse } from '@shared/pi'
 import type { AddressInfo } from 'node:net'
@@ -109,6 +109,8 @@ export interface PiSession {
     cwd: string
     events: PiEvent[]
     request: <T = any>(command: Record<string, unknown>) => Promise<RpcResponse<T>>
+    /** Writes a record without waiting for a response (extension_ui_response). */
+    send: (record: Record<string, unknown>) => void
     /** Resolves with the first event (already seen or future) matching the predicate. */
     waitFor: (match: (event: PiEvent) => boolean, timeoutMs?: number) => Promise<PiEvent>
     /** Sends a prompt and waits for agent_settled. */
@@ -120,7 +122,7 @@ export interface PiSession {
  * Starts pi in a throwaway agent dir whose only model is the mock, so user settings, extensions
  * and credentials are never read.
  */
-export async function startPi(env: PiEnv, llm: MockLlm, capabilities: CapabilityId[]): Promise<PiSession> {
+export async function startPi(env: PiEnv, llm: MockLlm, capabilities: CapabilityId[], options: { approvalMode?: ApprovalMode } = {}): Promise<PiSession> {
     const root = await mkdtemp(path.join(os.tmpdir(), 'pi-gui-test-'))
     const agentDir = path.join(root, 'agent')
     const cwd = path.join(root, 'project')
@@ -152,7 +154,7 @@ export async function startPi(env: PiEnv, llm: MockLlm, capabilities: Capability
     // piSpawnEnv copies process.env at spawn time.
     const previous = process.env.PI_CODING_AGENT_DIR
     process.env.PI_CODING_AGENT_DIR = agentDir
-    const id = manager.start(env, { cwd, capabilities })
+    const id = manager.start(env, { cwd, capabilities, ...options })
     if (previous === undefined)
         delete process.env.PI_CODING_AGENT_DIR
     else
@@ -176,6 +178,7 @@ export async function startPi(env: PiEnv, llm: MockLlm, capabilities: Capability
         cwd,
         events,
         request: command => manager.request(id, command),
+        send: record => manager.send(id, record),
         waitFor,
         async run(message) {
             const before = events.length

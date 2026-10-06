@@ -1,4 +1,4 @@
-import type { CapabilityId } from './capabilities'
+import type { ApprovalMode, CapabilityId } from './capabilities'
 import type { AgentMessage, PiEvent, RpcResponse } from './pi'
 
 export interface PiEnv {
@@ -70,6 +70,8 @@ export interface AppState {
     transcriptLang?: TranscriptLang
     /** Capabilities per project cwd; projects not listed use DEFAULT_CAPABILITIES. */
     capabilities?: Record<string, CapabilityId[]>
+    /** Approval mode new threads start in, per project cwd (the last one chosen there). */
+    approvalModes?: Record<string, ApprovalMode>
 }
 
 /** Global compaction settings as the Settings page shows them (pi defaults filled in). */
@@ -104,6 +106,8 @@ export interface AgentStartOptions {
     sessionPath?: string
     /** Capability extensions to load with `-e`. */
     capabilities?: CapabilityId[]
+    /** Approval mode for a session that has not chosen one yet. */
+    approvalMode?: ApprovalMode
 }
 
 export interface AgentExitInfo {
