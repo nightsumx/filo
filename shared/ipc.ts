@@ -70,6 +70,19 @@ export interface AppState {
     capabilities?: Record<string, CapabilityId[]>
 }
 
+/** Global compaction settings as the Settings page shows them (pi defaults filled in). */
+export interface GlobalCompaction {
+    enabled: boolean
+    reserveTokens: number
+    keepRecentTokens: number
+    /** compaction.modelOverrides has entries: some models use their own numbers. */
+    modelOverrides: boolean
+    /** The given project's .pi/settings.json sets compaction fields of its own. */
+    projectOverride: boolean
+}
+
+export type GlobalCompactionPatch = Partial<Pick<GlobalCompaction, 'enabled' | 'reserveTokens' | 'keepRecentTokens'>>
+
 /** pi's effective auto-compaction settings for a project + model. */
 export interface CompactionInfo {
     enabled: boolean
@@ -81,6 +94,8 @@ export const TRANSCRIPT_LANGS: readonly TranscriptLang[] = ['en', 'zh']
 
 export type ThemePref = 'system' | 'light' | 'dark'
 export const THEME_PREFS: readonly ThemePref[] = ['system', 'light', 'dark']
+/** Used until the user picks an appearance in Settings. */
+export const DEFAULT_THEME: ThemePref = 'dark'
 
 export interface AgentStartOptions {
     cwd: string
@@ -114,6 +129,9 @@ export interface PiBridge {
     onAgentExit: (listener: (agentId: string, info: AgentExitInfo) => void) => () => void
     /** Resolved compaction settings; modelKey is "provider/id". */
     compactionInfo: (cwd: string, modelKey?: string) => Promise<CompactionInfo>
+    /** compaction.* in pi's global settings.json; cwd only reports whether that project overrides it. */
+    globalCompaction: (cwd?: string) => Promise<GlobalCompaction>
+    setGlobalCompaction: (patch: GlobalCompactionPatch) => Promise<void>
     /** App menu → 设置… (⌘,). */
     onOpenSettings: (listener: () => void) => () => void
 
@@ -128,6 +146,21 @@ export interface PiBridge {
     /** Sets nativeTheme.themeSource, which drives prefers-color-scheme and the window chrome. */
     setTheme: (theme: ThemePref) => Promise<void>
     openExternal: (url: string) => Promise<void>
+
+    /** System notification; clicking it focuses the window and reports `key` back. */
+    notify: (notice: AppNotice) => Promise<void>
+    onNotificationClick: (listener: (key: string) => void) => () => void
+    /** Dock badge: threads waiting for the user (0 clears it). */
+    setBadge: (count: number) => Promise<void>
+}
+
+export interface AppNotice {
+    title: string
+    body: string
+    /** Thread key reported back on click. */
+    key: string
+    /** Waiting for the user: also bounce the Dock icon once. */
+    urgent?: boolean
 }
 
 export const IPC = {
@@ -146,6 +179,8 @@ export const IPC = {
     agentExit: 'agent:exit',
     openSettings: 'menu:settings',
     compactionInfo: 'pi:compaction-info',
+    globalCompaction: 'pi:global-compaction',
+    setGlobalCompaction: 'pi:set-global-compaction',
     gitStatus: 'git:status',
     gitBranches: 'git:branches',
     gitFileDiff: 'git:file-diff',
@@ -153,4 +188,7 @@ export const IPC = {
     missingFolders: 'fs:missing-folders',
     setTheme: 'theme:set',
     openExternal: 'shell:open-external',
+    notify: 'app:notify',
+    notificationClick: 'app:notification-click',
+    setBadge: 'app:set-badge',
 } as const

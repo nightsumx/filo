@@ -4,11 +4,11 @@ import { mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
-import { IPC, THEME_PREFS } from '@shared/ipc'
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, shell } from 'electron'
+import { DEFAULT_THEME, IPC, THEME_PREFS } from '@shared/ipc'
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, Notification, shell } from 'electron'
 import { AgentManager } from './agents'
 import { gitBranch, gitFileDiff, gitStatus } from './git'
-import { compactionInfo } from './piSettings'
+import { compactionInfo, globalCompaction, setGlobalCompaction } from './piSettings'
 import { resolvePiEnv } from './pi-env'
 import { assertInSessionsDir, listSessions, readSession } from './sessions'
 
@@ -31,6 +31,33 @@ const agents = new AgentManager({
     onExit: (agentId, info) => win?.webContents.send(IPC.agentExit, agentId, info),
 }, extensionsDir)
 
+/** Shown notifications, kept referenced so their click handlers survive garbage collection. */
+const notices = new Set<Notification>()
+
+function showNotice(notice: unknown) {
+    const n = notice as Record<string, unknown> | null
+    if (!n || typeof n.title !== 'string' || typeof n.body !== 'string' || typeof n.key !== 'string' || !Notification.isSupported())
+        return
+    const key = n.key.slice(0, 1000)
+    const shown = new Notification({ title: n.title.slice(0, 200), body: n.body.slice(0, 500) })
+    notices.add(shown)
+    const drop = () => notices.delete(shown)
+    shown.on('click', () => {
+        drop()
+        if (win) {
+            if (win.isMinimized())
+                win.restore()
+            win.show()
+            win.focus()
+            win.webContents.send(IPC.notificationClick, key)
+        }
+    })
+    shown.on('close', drop)
+    shown.show()
+    if (n.urgent === true && process.platform === 'darwin')
+        app.dock?.bounce('informational')
+}
+
 function isSafeExternalUrl(url: string) {
     try {
         return ['http:', 'https:', 'mailto:'].includes(new URL(url).protocol)
@@ -45,7 +72,7 @@ function isSafeExternalUrl(url: string) {
 const windowBackground = () => (nativeTheme.shouldUseDarkColors ? '#26282c' : '#e9eaee')
 
 function applyTheme(theme: unknown) {
-    nativeTheme.themeSource = THEME_PREFS.includes(theme as ThemePref) ? (theme as ThemePref) : 'system'
+    nativeTheme.themeSource = THEME_PREFS.includes(theme as ThemePref) ? (theme as ThemePref) : DEFAULT_THEME
 }
 
 function createWindow() {
@@ -146,6 +173,8 @@ function registerIpc() {
 
     ipcMain.handle(IPC.compactionInfo, (_e, cwd: unknown, modelKey: unknown) =>
         compactionInfo(typeof cwd === 'string' ? cwd : '', typeof modelKey === 'string' ? modelKey : undefined))
+    ipcMain.handle(IPC.globalCompaction, (_e, cwd: unknown) => globalCompaction(typeof cwd === 'string' ? cwd : undefined))
+    ipcMain.handle(IPC.setGlobalCompaction, (_e, patch: unknown) => setGlobalCompaction(patch))
     ipcMain.handle(IPC.gitStatus, (_e, cwd: string) => gitStatus(cwd))
     ipcMain.handle(IPC.gitBranches, async (_e, cwds: unknown) => {
         const list = Array.isArray(cwds) ? cwds.filter((c): c is string => typeof c === 'string' && path.isAbsolute(c)).slice(0, 200) : []
@@ -163,6 +192,10 @@ function registerIpc() {
         const error = await shell.openPath(folder)
         if (error)
             throw new Error(error)
+    })
+    ipcMain.handle(IPC.notify, (_e, notice: unknown) => showNotice(notice))
+    ipcMain.handle(IPC.setBadge, (_e, count: unknown) => {
+        app.setBadgeCount(Number.isInteger(count) && (count as number) > 0 ? Math.min(count as number, 999) : 0)
     })
     ipcMain.handle(IPC.openExternal, async (_e, url: string) => {
         if (isSafeExternalUrl(url))

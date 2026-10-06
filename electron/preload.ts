@@ -34,6 +34,8 @@ const bridge: PiBridge = {
     },
 
     compactionInfo: (cwd, modelKey) => ipcRenderer.invoke(IPC.compactionInfo, cwd, modelKey),
+    globalCompaction: cwd => ipcRenderer.invoke(IPC.globalCompaction, cwd),
+    setGlobalCompaction: patch => ipcRenderer.invoke(IPC.setGlobalCompaction, patch),
     gitStatus: cwd => ipcRenderer.invoke(IPC.gitStatus, cwd),
     gitBranches: cwds => ipcRenderer.invoke(IPC.gitBranches, cwds),
     gitFileDiff: (cwd, path, status) => ipcRenderer.invoke(IPC.gitFileDiff, cwd, path, status),
@@ -42,6 +44,14 @@ const bridge: PiBridge = {
     missingFolders: paths => ipcRenderer.invoke(IPC.missingFolders, paths),
     setTheme: theme => ipcRenderer.invoke(IPC.setTheme, theme),
     openExternal: url => ipcRenderer.invoke(IPC.openExternal, url),
+
+    notify: notice => ipcRenderer.invoke(IPC.notify, notice),
+    onNotificationClick: (listener) => {
+        const handler = (_e: unknown, key: string) => listener(key)
+        ipcRenderer.on(IPC.notificationClick, handler)
+        return () => ipcRenderer.off(IPC.notificationClick, handler)
+    },
+    setBadge: count => ipcRenderer.invoke(IPC.setBadge, count),
 }
 
 contextBridge.exposeInMainWorld('pi', bridge)

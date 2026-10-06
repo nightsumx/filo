@@ -22,9 +22,10 @@ export interface MockRequest {
     toolResults: string[]
 }
 
+/** thinking streams as reasoning_content before the reply, like llama.cpp / DeepSeek endpoints. */
 export type MockReply =
-    | { text: string }
-    | { toolCalls: { name: string, arguments: Record<string, unknown> }[] }
+    | { text: string, thinking?: string }
+    | { toolCalls: { name: string, arguments: Record<string, unknown> }[], thinking?: string, text?: string }
 
 export interface MockLlm {
     baseUrl: string
@@ -63,7 +64,11 @@ export async function startMockLlm(reply: (request: MockRequest, index: number) 
                 choices: [{ index: 0, delta, finish_reason: finish }],
             })}\n\n`)
             res.writeHead(200, { 'content-type': 'text/event-stream' })
+            if (answer.thinking)
+                chunk({ role: 'assistant', reasoning_content: answer.thinking })
             if ('toolCalls' in answer) {
+                if (answer.text)
+                    chunk({ role: 'assistant', content: answer.text })
                 chunk({
                     role: 'assistant',
                     tool_calls: answer.toolCalls.map((c, index) => ({
@@ -99,6 +104,9 @@ export async function findPi(): Promise<PiEnv | null> {
 }
 
 export interface PiSession {
+    /** Throwaway agent dir (sessions are written under it) and project dir; removed by stop(). */
+    agentDir: string
+    cwd: string
     events: PiEvent[]
     request: <T = any>(command: Record<string, unknown>) => Promise<RpcResponse<T>>
     /** Resolves with the first event (already seen or future) matching the predicate. */
@@ -164,6 +172,8 @@ export async function startPi(env: PiEnv, llm: MockLlm, capabilities: Capability
     }
 
     return {
+        agentDir,
+        cwd,
         events,
         request: command => manager.request(id, command),
         waitFor,

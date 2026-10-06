@@ -1,13 +1,14 @@
 // Compaction settings as pi resolves them (core/settings-manager.js getCompactionSettings):
 // global ~/.pi/agent/settings.json deep-merged with <cwd>/.pi/settings.json, then
 // compaction.modelOverrides["provider/id"] over compaction.*, then pi's defaults.
-import type { CompactionInfo } from '@shared/ipc'
-import { readFile } from 'node:fs/promises'
+import type { CompactionInfo, GlobalCompaction, GlobalCompactionPatch } from '@shared/ipc'
+import { mkdir, readFile, rename, rmdir, stat, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import process from 'node:process'
 
-const DEFAULT_RESERVE_TOKENS = 16384
+export const DEFAULT_RESERVE_TOKENS = 16384
+export const DEFAULT_KEEP_RECENT_TOKENS = 20000
 
 async function readJson(file: string): Promise<Record<string, any>> {
     try {
@@ -41,11 +42,132 @@ export function resolveCompaction(settings: Record<string, any>, modelKey?: stri
     }
 }
 
+const agentDir = () => process.env.PI_CODING_AGENT_DIR || path.join(os.homedir(), '.pi', 'agent')
+const globalSettingsPath = () => path.join(agentDir(), 'settings.json')
+
 export async function compactionInfo(cwd: string, modelKey?: string): Promise<CompactionInfo> {
-    const agentDir = process.env.PI_CODING_AGENT_DIR || path.join(os.homedir(), '.pi', 'agent')
     const [global, project] = await Promise.all([
-        readJson(path.join(agentDir, 'settings.json')),
+        readJson(globalSettingsPath()),
         path.isAbsolute(cwd) ? readJson(path.join(cwd, '.pi', 'settings.json')) : Promise.resolve({}),
     ])
     return resolveCompaction(merge(global, project), modelKey)
+}
+
+// ---------------------------------------------------------------- global compaction (Settings page)
+
+/** The global compaction fields the Settings page edits, with pi's defaults filled in. */
+export function readGlobalCompaction(global: Record<string, any>, project: Record<string, any>): GlobalCompaction {
+    const c = isObject(global.compaction) ? global.compaction : {}
+    const p = isObject(project.compaction) ? project.compaction : {}
+    return {
+        enabled: c.enabled !== false,
+        reserveTokens: tokenSetting(c.reserveTokens) ?? DEFAULT_RESERVE_TOKENS,
+        keepRecentTokens: tokenSetting(c.keepRecentTokens) ?? DEFAULT_KEEP_RECENT_TOKENS,
+        modelOverrides: isObject(c.modelOverrides) && Object.keys(c.modelOverrides).length > 0,
+        projectOverride: ['enabled', 'reserveTokens', 'keepRecentTokens'].some(k => k in p),
+    }
+}
+
+/**
+ * Applies a patch to the `compaction` object of a settings file. Values equal to pi's defaults are
+ * removed rather than written, so the file only records real choices. Everything else is kept.
+ */
+export function patchCompaction(settings: Record<string, any>, patch: GlobalCompactionPatch): Record<string, any> {
+    const compaction: Record<string, any> = isObject(settings.compaction) ? { ...settings.compaction } : {}
+    const set = (key: string, value: unknown, fallback: unknown) => {
+        if (value === undefined)
+            return
+        if (value === fallback)
+            delete compaction[key]
+        else
+            compaction[key] = value
+    }
+    set('enabled', patch.enabled, true)
+    set('reserveTokens', patch.reserveTokens, DEFAULT_RESERVE_TOKENS)
+    set('keepRecentTokens', patch.keepRecentTokens, DEFAULT_KEEP_RECENT_TOKENS)
+    const next = { ...settings }
+    if (Object.keys(compaction).length)
+        next.compaction = compaction
+    else
+        delete next.compaction
+    return next
+}
+
+const LOCK_STALE_MS = 10_000
+
+/**
+ * The lock pi takes around settings writes (proper-lockfile: a `<file>.lock` directory, stale after
+ * 10s), so a write here never interleaves with pi's own read-merge-write.
+ */
+async function withSettingsLock<T>(file: string, fn: () => Promise<T>): Promise<T> {
+    const lock = `${file}.lock`
+    await mkdir(path.dirname(file), { recursive: true })
+    for (let attempt = 0; ; attempt++) {
+        try {
+            await mkdir(lock)
+            break
+        }
+        catch (error: any) {
+            if (error?.code !== 'EEXIST' || attempt >= 100)
+                throw new Error('pi 的 settings.json 正被占用，稍后再试')
+            const age = await stat(lock).then(s => Date.now() - s.mtimeMs, () => 0)
+            if (age > LOCK_STALE_MS)
+                await rmdir(lock).catch(() => {})
+            else
+                await new Promise(r => setTimeout(r, 20))
+        }
+    }
+    try {
+        return await fn()
+    }
+    finally {
+        await rmdir(lock).catch(() => {})
+    }
+}
+
+const TOKEN_LIMIT = 10_000_000
+
+function validPatch(patch: unknown): GlobalCompactionPatch {
+    const p = isObject(patch) ? patch : {}
+    const tokens = (v: unknown) => (typeof v === 'number' && Number.isSafeInteger(v) && v >= 0 && v <= TOKEN_LIMIT ? v : undefined)
+    return {
+        enabled: typeof p.enabled === 'boolean' ? p.enabled : undefined,
+        reserveTokens: tokens(p.reserveTokens),
+        keepRecentTokens: tokens(p.keepRecentTokens),
+    }
+}
+
+export async function globalCompaction(cwd?: string): Promise<GlobalCompaction> {
+    const [global, project] = await Promise.all([
+        readJson(globalSettingsPath()),
+        cwd && path.isAbsolute(cwd) ? readJson(path.join(cwd, '.pi', 'settings.json')) : Promise.resolve({}),
+    ])
+    return readGlobalCompaction(global, project)
+}
+
+/** Writes the patch into ~/.pi/agent/settings.json, leaving every other setting untouched. */
+export async function setGlobalCompaction(patch: unknown): Promise<void> {
+    const file = globalSettingsPath()
+    const valid = validPatch(patch)
+    await withSettingsLock(file, async () => {
+        let current: Record<string, any> = {}
+        const text = await readFile(file, 'utf8').catch((error: any) => {
+            if (error?.code === 'ENOENT')
+                return ''
+            throw error
+        })
+        if (text.trim()) {
+            try {
+                current = JSON.parse(text.replace(/^\uFEFF/, ''))
+            }
+            catch {
+                throw new Error('settings.json 不是有效的 JSON，没有修改')
+            }
+            if (!isObject(current))
+                throw new Error('settings.json 不是一个对象，没有修改')
+        }
+        const tmp = `${file}.${process.pid}.tmp`
+        await writeFile(tmp, `${JSON.stringify(patchCompaction(current, valid), null, 2)}\n`, 'utf8')
+        await rename(tmp, file)
+    })
 }

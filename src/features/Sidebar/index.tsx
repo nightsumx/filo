@@ -5,6 +5,7 @@ import type { Project } from '@/store/app'
 import type { Thread } from '@/store/thread'
 import { ActivityBadge, PiGlyph, StatusDot } from '@/components/StatusIcons'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import { formatElapsed } from '@/lib/threadActivity'
 import { cn, relativeTime, shortPath } from '@/lib/utils'
 import { appStore } from '@/store/app'
 import { ChevronRight, ChevronsDownUp, EyeOff, FolderOpen, FolderPlus, Minus, MoreHorizontal, Plus } from 'lucide-react'
@@ -35,6 +36,44 @@ function sessionTitle(session: SessionSummary): string {
     return appStore.threads.get(session.path)?.title ?? session.name ?? session.firstPrompt?.split('\n')[0] ?? '新线程'
 }
 
+/** A run with no pi event for this long gets a "no output" hint. */
+const STALL_MS = 60_000
+
+/** Re-renders every second while `active`, for elapsed times. */
+function useNow(active: boolean): number {
+    const [now, setNow] = useState(Date.now)
+    useEffect(() => {
+        if (!active)
+            return
+        setNow(Date.now())
+        const timer = setInterval(() => setNow(Date.now()), 1000)
+        return () => clearInterval(timer)
+    }, [active])
+    return now
+}
+
+const PHASE_TEXT = {
+    waiting: 'text-amber-600 dark:text-amber-400',
+    running: 'text-gray-500',
+    error: 'text-red-500',
+    idle: '',
+} as const
+
+/** Second line of a busy thread: what it is doing (or waiting on / failed with) and todo progress. */
+const ActivityLine = observer(({ thread, now }: { thread: Thread, now: number }) => {
+    const { phase, text, progress } = thread.activity
+    const stalled = phase === 'running' && thread.lastEventAt > 0 && now - thread.lastEventAt > STALL_MS
+    return (
+        <div className="flex h-[18px] min-w-0 items-center gap-1.5 pl-5 text-[12px] leading-none">
+            <span className={cn('min-w-0 flex-1 truncate', PHASE_TEXT[phase])}>
+                {text}
+                {stalled && <span className="text-amber-600 dark:text-amber-400">{` · ${Math.floor((now - thread.lastEventAt) / 60_000)} 分钟无输出`}</span>}
+            </span>
+            {progress && <span className="shrink-0 tabular-nums text-gray-400" title="任务清单进度">{`${progress.done}/${progress.total}`}</span>}
+        </div>
+    )
+})
+
 const ThreadRow = observer(({ thread, session, selected }: { thread?: Thread, session?: SessionSummary, selected: boolean }) => {
     const open = () => {
         if (thread && appStore.tabsOf(thread.cwd).includes(thread))
@@ -44,6 +83,10 @@ const ThreadRow = observer(({ thread, session, selected }: { thread?: Thread, se
     }
     const title = thread ? (thread.isEmpty && !thread.persisted ? '新线程' : thread.title) : sessionTitle(session!)
     const updated = session?.updatedAt
+    const activity = thread?.activity
+    const busy = !!activity && activity.phase !== 'idle'
+    const running = !!thread?.running
+    const now = useNow(running)
     return (
         <div
             role="treeitem"
@@ -51,7 +94,7 @@ const ThreadRow = observer(({ thread, session, selected }: { thread?: Thread, se
             aria-selected={selected}
             tabIndex={-1}
             data-tree-row
-            title={title}
+            title={busy ? `${title}\n${activity!.text}` : title}
             onClick={open}
             onKeyDown={(e) => {
                 if (e.key === 'Enter')
@@ -61,11 +104,16 @@ const ThreadRow = observer(({ thread, session, selected }: { thread?: Thread, se
                     moveFocus(e.currentTarget, e.key === 'ArrowDown' ? 1 : -1)
                 }
             }}
-            className={cn(rowBase, 'pl-[30px]', selected ? rowSelected : 'hover:bg-ide-hover')}
+            className={cn(rowBase, 'pl-[30px]', busy && 'h-auto flex-col items-stretch gap-0 pb-1', selected ? rowSelected : 'hover:bg-ide-hover')}
         >
-            {thread ? <StatusDot thread={thread} /> : <PiGlyph dim />}
-            <span className={cn('min-w-0 flex-1 truncate', thread ? 'text-gray-900' : 'text-gray-700')}>{title}</span>
-            {updated != null && <span className="shrink-0 text-[11px] tabular-nums text-gray-400">{relativeTime(updated)}</span>}
+            <div className="flex h-6 min-w-0 flex-1 items-center gap-1.5">
+                {thread ? <StatusDot thread={thread} /> : <PiGlyph dim />}
+                <span className={cn('min-w-0 flex-1 truncate', thread ? 'text-gray-900' : 'text-gray-700')}>{title}</span>
+                {running
+                    ? <span className="shrink-0 text-[11px] tabular-nums text-gray-500" title="已运行">{formatElapsed(now - thread!.runStartedAt)}</span>
+                    : updated != null && <span className="shrink-0 text-[11px] tabular-nums text-gray-400">{relativeTime(updated)}</span>}
+            </div>
+            {busy && <ActivityLine thread={thread!} now={now} />}
         </div>
     )
 })

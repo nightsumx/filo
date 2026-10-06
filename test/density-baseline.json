@@ -1,0 +1,30 @@
+{
+    "viewport": {
+        "width": 985,
+        "height": 588
+    },
+    "height": 918,
+    "ink": 376,
+    "lines": 23,
+    "turns": 5,
+    "turnHeight": 184,
+    "turnsPerScreen": 3.2,
+    "byKind": {
+        "user": {
+            "rows": 5,
+            "height": 278
+        },
+        "fold": {
+            "rows": 4,
+            "height": 144
+        },
+        "item": {
+            "rows": 5,
+            "height": 288
+        },
+        "footer": {
+            "rows": 5,
+            "height": 180
+        }
+    }
+}

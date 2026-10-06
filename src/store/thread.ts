@@ -12,8 +12,10 @@ import type {
     SlashCommand,
     ThinkingLevel,
 } from '@shared/pi'
+import type { ThreadActivity } from '@/lib/threadActivity'
 import type { Step, TimelineMessage, ToolExecState, ToolResultView } from '@/lib/timeline'
 import { parsePartialJson } from '@/lib/partialJson'
+import { threadActivity } from '@/lib/threadActivity'
 import { buildTurns, contentText } from '@/lib/timeline'
 import { GUI_COMMAND_PREFIX } from '@shared/capabilities'
 import { readableError } from '@/lib/utils'
@@ -39,6 +41,8 @@ export interface ThreadHost {
     rekey: (thread: Thread, oldKey: string) => void
     onSettled: (thread: Thread) => void
     capabilitiesOf: (cwd: string) => CapabilityId[]
+    /** Bumps when pi's own settings.json changes from the app; pi reads it only at startup. */
+    piSettingsEpoch: number
 }
 
 function toolView(result: any): ToolResultView | undefined {
@@ -91,14 +95,16 @@ export class Thread {
     /** Bumps whenever files may have changed (tool writes, run end) so the review pane refetches. */
     changeTick = 0
     lastUsed = Date.now()
+    /** Last pi event; not observable (it changes per token). Read on a timer to spot stalled runs. */
+    lastEventAt = 0
 
     private liveCounter = 0
     private partialArgs = new Map<number, string>()
     private startPromise: Promise<string> | null = null
     private stopping = false
-    /** Capability set the running process was started with (comma-joined ids). */
-    private loadedCapabilities = ''
-    /** Capabilities changed mid-run; restart once the run settles. */
+    /** Capability set + settings epoch the running process was started with. */
+    private loadedConfig = ''
+    /** Config changed mid-run; restart once the run settles. */
     private restartPending = false
 
     constructor(private host: ThreadHost, init: { key: string, cwd: string, sessionPath?: string, name?: string, firstPrompt?: string }) {
@@ -108,12 +114,13 @@ export class Thread {
         this.name = init.name
         this.firstPrompt = init.firstPrompt
         this.persisted = !!init.sessionPath
-        makeAutoObservable<this, 'liveCounter' | 'partialArgs' | 'startPromise' | 'stopping' | 'loadedCapabilities' | 'restartPending' | 'host'>(this, {
+        makeAutoObservable<this, 'liveCounter' | 'partialArgs' | 'startPromise' | 'stopping' | 'loadedConfig' | 'restartPending' | 'host'>(this, {
+            lastEventAt: false,
             liveCounter: false,
             partialArgs: false,
             startPromise: false,
             stopping: false,
-            loadedCapabilities: false,
+            loadedConfig: false,
             restartPending: false,
             host: false,
         }, { autoBind: true })
@@ -163,14 +170,36 @@ export class Thread {
 
     /** pi is blocked on the user: an extension dialog or an unanswered ask. */
     get waitingForUser(): boolean {
-        if (this.uiRequests.length)
-            return true
+        return this.waitingFor !== undefined
+    }
+
+    /** The question or dialog title pi is blocked on, or undefined when it is not waiting. */
+    get waitingFor(): string | undefined {
+        const request = this.uiRequests[0]
+        if (request)
+            return request.title || request.message || ''
         for (const state of this.tools.values()) {
             const details = state.partial?.details
             if (state.running && details?.kind === 'ask' && details.status === 'pending')
-                return true
+                return details.questions?.[0]?.question ?? ''
         }
-        return false
+        return undefined
+    }
+
+    /** One-line status for the project tree: what it is doing, waiting on, or failed with. */
+    get activity(): ThreadActivity {
+        const turns = this.turns
+        return threadActivity({
+            running: this.running,
+            starting: this.agentStatus === 'starting',
+            compacting: this.compacting,
+            retry: this.retry,
+            waitingFor: this.waitingFor,
+            agentError: this.agentError,
+            steps: [...(turns[turns.length - 1]?.steps ?? []), ...this.streamingSteps],
+            todo: this.todo,
+            cwd: this.cwd,
+        })
     }
 
     // ---------------------------------------------------------------- loading
@@ -215,7 +244,7 @@ export class Thread {
         // A path pi never wrote (thread left empty) cannot be resumed; start fresh instead.
         const resumable = this.persisted ? this.sessionPath : undefined
         const capabilities = this.host.capabilitiesOf(this.cwd)
-        this.loadedCapabilities = capabilities.join(',')
+        this.loadedConfig = this.configKey()
         this.restartPending = false
         const agentId = await api().agentStart({ cwd: this.cwd, sessionPath: resumable, capabilities })
         runInAction(() => {
@@ -243,12 +272,16 @@ export class Thread {
         await api().agentStop(id)
     }
 
+    private configKey(): string {
+        return `${this.host.capabilitiesOf(this.cwd).join(',')}#${this.host.piSettingsEpoch}`
+    }
+
     /**
-     * Extensions load at startup, so a changed capability set needs a new process. It resumes the
-     * same session file; mid-run changes wait for the run to settle.
+     * Extensions and pi's settings load at startup, so a changed capability set or settings file
+     * needs a new process. It resumes the same session file; mid-run changes wait for the run to settle.
      */
-    async applyCapabilities() {
-        if (!this.agentId || this.host.capabilitiesOf(this.cwd).join(',') === this.loadedCapabilities) {
+    async applyConfig() {
+        if (!this.agentId || this.configKey() === this.loadedConfig) {
             this.restartPending = false
             return
         }
@@ -475,12 +508,14 @@ export class Thread {
     }
 
     handleEvent(event: PiEvent) {
+        this.lastEventAt = Date.now()
         switch (event.type) {
             case 'agent_start':
                 if (!this.running) {
                     this.running = true
                     this.runStartedAt = Date.now()
                 }
+                this.agentError = ''
                 this.retry = null
                 break
             case 'message_start':
@@ -670,7 +705,7 @@ export class Thread {
         await this.refreshStats()
         this.host.onSettled(this)
         if (this.restartPending)
-            await this.applyCapabilities()
+            await this.applyConfig()
     }
 
     handleExit(info: AgentExitInfo) {

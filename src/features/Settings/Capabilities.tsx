@@ -2,18 +2,18 @@
 // shortcut for a set of switches; any other combination shows no preset selected.
 import type { CapabilityId } from '@shared/capabilities'
 import { CAPABILITIES, PRESETS } from '@shared/capabilities'
-import { Comment, Segmented, SettingGroup, SettingRow, Switch } from '@/components/ui/form'
+import { Comment, Segmented, SettingRow, SettingsPage, Switch } from '@/components/ui/form'
 import { basename } from '@/lib/utils'
 import { appStore } from '@/store/app'
 import { observer } from 'mobx-react-lite'
 
-export const CapabilitiesGroup = observer(() => {
+export const CapabilitiesPage = observer(() => {
     const cwd = appStore.activeProject
     if (!cwd) {
         return (
-            <SettingGroup title="能力">
-                <Comment className="py-3">先在左侧选择一个项目。能力按项目设置。</Comment>
-            </SettingGroup>
+            <SettingsPage title="能力">
+                <Comment className="py-3">先在主窗口的侧边栏选择一个项目。能力按项目设置。</Comment>
+            </SettingsPage>
         )
     }
 
@@ -23,7 +23,7 @@ export const CapabilitiesGroup = observer(() => {
     const extra = CAPABILITIES.filter(c => enabled.includes(c.id)).reduce((sum, c) => sum + c.contextTokens, 0)
 
     return (
-        <SettingGroup title={`能力 · ${basename(cwd)}`} aside={extra ? `每次请求 +${extra} tokens` : '不增加上下文'}>
+        <SettingsPage title={`能力 · ${basename(cwd)}`} aside={extra ? `每次请求 +${extra} tokens` : '不增加上下文'}>
             <SettingRow
                 title="预设"
                 description={preset?.hint ?? '自定义组合。'}
@@ -61,6 +61,6 @@ export const CapabilitiesGroup = observer(() => {
                 />
             ))}
             <Comment className="pt-3">只作用于这个项目。改动后，打开的线程会在空闲时重启 pi，会话保留；下一次请求的提示词缓存会失效。</Comment>
-        </SettingGroup>
+        </SettingsPage>
     )
 })

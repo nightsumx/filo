@@ -5,9 +5,10 @@ import { ActionBtn } from '@/components/ActionBtn'
 import { useT, verbFor } from '@/lib/transcriptText'
 import { cn } from '@/lib/utils'
 import copyText from 'copy-to-clipboard'
-import { Check, Copy } from 'lucide-react'
+import { Check, ChevronRight, Copy } from 'lucide-react'
 import { observer } from 'mobx-react-lite'
-import { memo, useEffect, useState } from 'react'
+import { turnStats } from '@/lib/turnSummary'
+import { createContext, Fragment, memo, useContext, useEffect, useMemo, useState } from 'react'
 import { ExtensionRequest } from './ExtensionRequest'
 import { StepView } from './StepView'
 import { Gutter, ToolGroup } from './ToolRow'
@@ -31,27 +32,90 @@ function CopyAction({ text }: { text: string }) {
     )
 }
 
-// User prompt: a full-width block, like the highlighted prompt line in a JetBrains terminal / AI chat.
+// User prompt: a right-aligned chat bubble; the copy action sits to its left on hover.
 function UserBubble({ user }: { user: UserPrompt }) {
     return (
-        <div className="group relative flex flex-col gap-2 rounded-md bg-ide-block px-3 py-2">
+        <div className="group flex flex-col items-end gap-1.5 pl-[15%]">
             {user.images.length > 0 && (
-                <div className="flex flex-wrap gap-2">
+                <div className="flex flex-wrap justify-end gap-2">
                     {user.images.map((img, i) => (
-                        <img key={i} src={`data:${img.mimeType};base64,${img.data}`} alt="attached image" className="h-20 rounded-md border border-gray-200 object-cover" />
+                        <img key={i} src={`data:${img.mimeType};base64,${img.data}`} alt="attached image" className="h-20 rounded-lg border border-gray-200 object-cover" />
                     ))}
                 </div>
             )}
             {user.text && (
-                <div className={cn('flex gap-2 text-[length:var(--app-font-size)] leading-relaxed', user.pending && 'opacity-60')}>
-                    <span aria-hidden className="shrink-0 select-none font-mono font-semibold text-ide-accent">❯</span>
-                    <span className="min-w-0 flex-1 whitespace-pre-wrap break-words font-medium text-gray-900 select-text">{user.text}</span>
+                <div className="flex max-w-full items-start gap-1">
+                    <div className="shrink-0 pt-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+                        <CopyAction text={user.text} />
+                    </div>
+                    <div className={cn('min-w-0 rounded-xl bg-ide-prompt px-3 py-1.5 text-[length:var(--app-font-size)] leading-relaxed text-gray-900', user.pending && 'opacity-60')}>
+                        <span className="whitespace-pre-wrap break-words select-text">{user.text}</span>
+                    </div>
                 </div>
             )}
-            <div className="absolute right-1 top-1 opacity-0 transition-opacity group-hover:opacity-100">
-                <CopyAction text={user.text} />
-            </div>
         </div>
+    )
+}
+
+/** Toggles a finished turn's fold; MessageList owns the open set because it changes the row list. */
+export const TurnFoldContext = createContext<(turnKey: string) => void>(() => {})
+
+/** Codex-style fold over a finished turn's process: "› Ran 3 commands, edited 2 files +12 -3". */
+function FoldRow({ row }: { row: Extract<TranscriptRow, { kind: 'fold' }> }) {
+    const t = useT()
+    const toggle = useContext(TurnFoldContext)
+    const s = useMemo(() => turnStats(row.steps), [row.steps])
+    const parts: { key: string, text: string, extra?: React.ReactNode, className?: string }[] = []
+    if (s.commands)
+        parts.push({ key: 'commands', text: t.foldCommands(s.commands) })
+    if (s.reads)
+        parts.push({ key: 'reads', text: t.foldReads(s.reads) })
+    if (s.searches)
+        parts.push({ key: 'searches', text: t.foldSearches(s.searches) })
+    if (s.other)
+        parts.push({ key: 'other', text: t.foldOther(s.other) })
+    if (s.edited) {
+        parts.push({
+            key: 'edited',
+            text: t.foldEdited(s.edited),
+            extra: (s.added > 0 || s.removed > 0) && (
+                <span className="font-mono text-[12px]">
+                    {' '}
+                    <span className="text-emerald-600">{`+${s.added}`}</span>
+                    {' '}
+                    <span className="text-red-500">{`-${s.removed}`}</span>
+                </span>
+            ),
+        })
+    }
+    if (s.failed)
+        parts.push({ key: 'failed', text: t.foldFailed(s.failed), className: 'text-red-500' })
+    if (!parts.length)
+        parts.push({ key: 'thought', text: t.foldThought })
+    return (
+        <button
+            type="button"
+            onClick={() => toggle(row.turn.key)}
+            aria-expanded={row.open}
+            className="group/fold flex w-full min-w-0 gap-2 text-left"
+        >
+            <span aria-hidden className="flex h-6 w-3.5 shrink-0 items-center justify-center text-gray-400 group-hover/fold:text-gray-800">
+                <ChevronRight size={12} strokeWidth={2.25} className={cn('transition-transform duration-150', row.open && 'rotate-90')} />
+            </span>
+            <span className="flex h-6 min-w-0 items-center text-[12.5px] text-gray-500 group-hover/fold:text-gray-800">
+                <span className="truncate">
+                    {parts.map((p, i) => (
+                        <Fragment key={p.key}>
+                            {i > 0 && t.foldSep}
+                            <span className={p.className}>
+                                {i === 0 ? t.foldCase(p.text) : p.text}
+                                {p.extra}
+                            </span>
+                        </Fragment>
+                    ))}
+                </span>
+            </span>
+        </button>
     )
 }
 
@@ -121,6 +185,8 @@ export const TranscriptRowView = memo(({ row, thread, top }: { row: TranscriptRo
     switch (row.kind) {
         case 'user':
             return <div className={pad}><UserBubble user={row.user} /></div>
+        case 'fold':
+            return <div className={pad}><FoldRow row={row} /></div>
         case 'item':
             return (
                 <div className={pad}>

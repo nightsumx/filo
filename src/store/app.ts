@@ -1,15 +1,26 @@
 import type { CapabilityId } from '@shared/capabilities'
-import type { AppState, PiEnvResult, SessionSummary, ThemePref, TranscriptLang } from '@shared/ipc'
+import type { AppState, GlobalCompactionPatch, PiEnvResult, SessionSummary, ThemePref, TranscriptLang } from '@shared/ipc'
 import { DEFAULT_CAPABILITIES, normalizeCapabilities } from '@shared/capabilities'
-import { THEME_PREFS, TRANSCRIPT_LANGS } from '@shared/ipc'
+import { DEFAULT_THEME, THEME_PREFS, TRANSCRIPT_LANGS } from '@shared/ipc'
 import type { PiEvent } from '@shared/pi'
 import type { ThreadHost } from './thread'
 import { basename, uid } from '@/lib/utils'
-import { makeAutoObservable, observable, runInAction } from 'mobx'
+import { makeAutoObservable, observable, reaction, runInAction } from 'mobx'
 import { toast } from 'sonner'
 import { Thread } from './thread'
 
 const api = () => window.pi
+
+/** First line of the final answer of a thread's last turn, for the "done" notification. */
+function lastAnswer(thread: Thread): string {
+    const steps = thread.turns[thread.turns.length - 1]?.steps ?? []
+    for (let i = steps.length - 1; i >= 0; i--) {
+        const step = steps[i]
+        if (step.kind === 'text' && step.text.trim())
+            return step.text.trim().split('\n')[0].replace(/[*_`#>]/g, '').slice(0, 200)
+    }
+    return ''
+}
 
 /**
  * No cap on pi processes. One that has sat idle off screen this long is stopped; the next message
@@ -20,6 +31,8 @@ const IDLE_SWEEP_MS = 60_000
 /** Auto split: a pane needs this much width, and at most this many panes are shown. */
 export const MIN_PANE_WIDTH = 520
 export const MAX_PANES = 3
+
+export type SettingsPageId = 'appearance' | 'capabilities' | 'compaction'
 
 export interface Project {
     cwd: string
@@ -52,12 +65,16 @@ class AppStore implements ThreadHost {
     activeProject: string | null = null
     layout: 'split' | 'single' = 'split'
     /** Appearance preference; the resolved scheme lives in lib/theme. */
-    themePref: ThemePref = 'system'
+    themePref: ThemePref = DEFAULT_THEME
     /** Conversation wording; English matches pi's TUI. */
     transcriptLang: TranscriptLang = 'en'
     /** Capabilities chosen per project; absent means DEFAULT_CAPABILITIES. */
     capabilitiesByProject: Record<string, CapabilityId[]> = {}
     settingsOpen = false
+    /** Page shown in Settings; kept while the app runs so reopening returns to it. */
+    settingsPage: SettingsPageId = 'appearance'
+    /** See ThreadHost.piSettingsEpoch. */
+    piSettingsEpoch = 0
     /** How many panes fit side by side; measured by the pane container. */
     paneCapacity = 1
     /** Bumped to move keyboard focus into a thread's composer. */
@@ -180,9 +197,27 @@ class AppStore implements ThreadHost {
             this.flushEvents()
             const thread = this.agentThreads.get(agentId)
             this.agentThreads.delete(agentId)
-            if (thread?.agentId === agentId)
+            if (thread?.agentId === agentId) {
                 runInAction(() => thread.handleExit(info))
+                if (thread.agentStatus === 'exited')
+                    this.notify(thread, '出错', thread.activity.text)
+            }
         })
+        api().onNotificationClick(key => runInAction(() => this.focus(key, true)))
+        // A thread starts waiting for the user: notify once, and keep the Dock badge at the count.
+        let waiting = new Set<string>()
+        reaction(
+            () => [...this.threads.values()].filter(t => t.waitingForUser).map(t => t.key),
+            (keys) => {
+                for (const key of keys) {
+                    const thread = this.threads.get(key)
+                    if (thread && !waiting.has(key))
+                        this.notify(thread, '等你回答', thread.waitingFor || '需要你的确认', true)
+                }
+                waiting = new Set(keys)
+                void api().setBadge(keys.length)
+            },
+        )
         window.addEventListener('focus', () => void this.refreshSessions())
         setInterval(this.stopIdleAgents, IDLE_SWEEP_MS)
 
@@ -247,7 +282,7 @@ class AppStore implements ThreadHost {
         this.projectOrder = state.projects ?? []
         this.hiddenProjects = state.hiddenProjects ?? []
         this.layout = state.layout === 'single' ? 'single' : 'split'
-        this.themePref = THEME_PREFS.includes(state.theme as ThemePref) ? state.theme! : 'system'
+        this.themePref = THEME_PREFS.includes(state.theme as ThemePref) ? state.theme! : DEFAULT_THEME
         this.transcriptLang = TRANSCRIPT_LANGS.includes(state.transcriptLang as TranscriptLang) ? state.transcriptLang! : 'en'
         this.activeProject = state.activeProject ?? null
         this.capabilitiesByProject = Object.fromEntries(Object.entries(state.capabilities ?? {}).map(([cwd, ids]) => [cwd, normalizeCapabilities(ids)]))
@@ -349,8 +384,20 @@ class AppStore implements ThreadHost {
         this.persist()
     }
 
+    /** System notification for a thread, only while the window is in the background. */
+    private notify(thread: Thread, what: string, body: string, urgent = false) {
+        if (document.hasFocus())
+            return
+        void api().notify({ title: `${thread.title} · ${what}`, body: body || thread.title, key: thread.key, urgent })
+    }
+
     onSettled(thread: Thread) {
         thread.lastUsed = Date.now()
+        const activity = thread.activity
+        if (activity.phase === 'error')
+            this.notify(thread, '出错', activity.text)
+        else
+            this.notify(thread, '已完成', lastAnswer(thread))
         if (!this.isVisible(thread)) {
             thread.unread = true
             toast.success(`「${thread.title}」已完成`, {
@@ -508,11 +555,28 @@ class AppStore implements ThreadHost {
         this.capabilitiesByProject[cwd] = normalizeCapabilities(ids)
         this.persist()
         for (const thread of this.tabsOf(cwd))
-            void thread.applyCapabilities()
+            void thread.applyConfig()
+    }
+
+    /**
+     * Writes compaction.* into pi's global settings.json. Every pi process reads it only at startup,
+     * so live threads restart once idle (resuming their session), like a capability change.
+     */
+    async setGlobalCompaction(patch: GlobalCompactionPatch) {
+        await api().setGlobalCompaction(patch)
+        runInAction(() => {
+            this.piSettingsEpoch++
+        })
+        for (const thread of this.threads.values())
+            void thread.applyConfig()
     }
 
     setSettingsOpen(open: boolean) {
         this.settingsOpen = open
+    }
+
+    setSettingsPage(page: SettingsPageId) {
+        this.settingsPage = page
     }
 
     toggleLayout() {

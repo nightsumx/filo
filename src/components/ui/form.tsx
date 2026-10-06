@@ -96,12 +96,12 @@ export function SettingRow({ title, description, control, children }: { title: R
     )
 }
 
-/** A titled group of setting rows separated by hairlines. */
-export function SettingGroup({ title, aside, children }: { title: string, aside?: React.ReactNode, children: React.ReactNode }) {
+/** One settings page: its title (with an optional note on the right) over hairline-separated rows. */
+export function SettingsPage({ title, aside, children }: { title: string, aside?: React.ReactNode, children: React.ReactNode }) {
     return (
-        <section className="flex flex-col">
-            <div className="flex items-baseline gap-2 pb-1">
-                <h3 className="text-[12px] font-medium text-[var(--jb-comment)]">{title}</h3>
+        <section className="flex flex-col" aria-label={title}>
+            <div className="flex h-12 shrink-0 items-center gap-2 pr-7">
+                <h2 className="text-[14px] font-semibold text-gray-900">{title}</h2>
                 {aside && <span className="ml-auto text-[12px] tabular-nums text-[var(--jb-comment)]">{aside}</span>}
             </div>
             <div className="flex flex-col divide-y divide-[var(--jb-separator)]">{children}</div>

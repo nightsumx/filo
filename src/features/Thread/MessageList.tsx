@@ -3,18 +3,19 @@ import type { Thread } from '@/store/thread'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { ArrowDown } from 'lucide-react'
 import { observer } from 'mobx-react-lite'
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { transcriptRows } from '@/lib/transcriptRows'
 import { TRANSCRIPT_TEXT, TranscriptTextContext } from '@/lib/transcriptText'
 import { appStore } from '@/store/app'
 import { ThreadContext } from './ThreadContext'
 import { CwdContext } from './ToolRow'
-import { TranscriptRowView } from './TurnView'
+import { TranscriptRowView, TurnFoldContext } from './TurnView'
 import { ViewStateContext } from './viewState'
 
 const STICK_THRESHOLD = 80
 const PAD_TOP = 4
 const PAD_BOTTOM = 24
+const NO_TURNS: ReadonlySet<string> = new Set()
 
 /** First-paint height guess per row; real heights are measured once a row renders. */
 function estimateRow(row: TranscriptRow): number {
@@ -22,6 +23,7 @@ function estimateRow(row: TranscriptRow): number {
         case 'user':
             return 56 + Math.min(400, Math.floor(row.user.text.length / 100) * 20)
         case 'live':
+        case 'fold':
         case 'footer':
             return 36
         case 'item': {
@@ -48,7 +50,20 @@ export const MessageList = observer(({ thread }: { thread: Thread }) => {
     const stick = useRef(true)
     const [showJump, setShowJump] = useState(false)
     const turns = thread.turns
-    const rows = useMemo(() => transcriptRows(turns), [turns])
+    // Finished turns the user unfolded, per thread.
+    const [unfolded, setUnfolded] = useState(() => ({ thread, keys: new Set<string>() as ReadonlySet<string> }))
+    const openTurns = unfolded.thread === thread ? unfolded.keys : NO_TURNS
+    const rows = useMemo(() => transcriptRows(turns, openTurns), [turns, openTurns])
+    const toggleFold = useCallback((key: string) => {
+        // Unfolding grows the list; don't let bottom-pinning scroll the clicked row away.
+        stick.current = false
+        setUnfolded((prev) => {
+            const keys = new Set(prev.thread === thread ? prev.keys : [])
+            if (!keys.delete(key))
+                keys.add(key)
+            return { thread, keys }
+        })
+    }, [thread])
     // Expanded / show-all toggles survive rows scrolling out of view (and back).
     const viewState = useMemo(() => new Map<string, unknown>(), [thread])
 
@@ -105,25 +120,28 @@ export const MessageList = observer(({ thread }: { thread: Thread }) => {
 
     return (
         <div className="relative flex-1 min-h-0">
-            <div ref={scrollRef} className="absolute inset-0 overflow-y-auto scrollbar-trigger [overflow-anchor:none]">
+            <div ref={scrollRef} data-transcript className="absolute inset-0 overflow-y-auto scrollbar-trigger [overflow-anchor:none]">
                 <div className="mx-auto w-full max-w-5xl px-5">
                     <TranscriptTextContext value={TRANSCRIPT_TEXT[appStore.transcriptLang]}>
                         <CwdContext value={thread.cwd}>
                             <ThreadContext value={thread}>
                                 <ViewStateContext value={viewState}>
-                                    <div ref={listRef} className="relative w-full" style={{ height: virtualizer.getTotalSize() }}>
-                                        {items.map(item => (
-                                            <div
-                                                key={item.key}
-                                                ref={virtualizer.measureElement}
-                                                data-index={item.index}
-                                                className="absolute left-0 top-0 w-full"
-                                                style={{ transform: `translateY(${item.start}px)` }}
-                                            >
-                                                <TranscriptRowView row={rows[item.index]} thread={thread} top={item.index === 0} />
-                                            </div>
-                                        ))}
-                                    </div>
+                                    <TurnFoldContext value={toggleFold}>
+                                        <div ref={listRef} className="relative w-full" style={{ height: virtualizer.getTotalSize() }}>
+                                            {items.map(item => (
+                                                <div
+                                                    key={item.key}
+                                                    ref={virtualizer.measureElement}
+                                                    data-index={item.index}
+                                                    data-row-kind={rows[item.index].kind}
+                                                    className="absolute left-0 top-0 w-full"
+                                                    style={{ transform: `translateY(${item.start}px)` }}
+                                                >
+                                                    <TranscriptRowView row={rows[item.index]} thread={thread} top={item.index === 0} />
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </TurnFoldContext>
                                 </ViewStateContext>
                             </ThreadContext>
                         </CwdContext>

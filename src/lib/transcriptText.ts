@@ -59,6 +59,17 @@ const en = {
     askWaiting: 'Waiting for your answer',
     askAnswered: 'Answered',
     askCancelled: 'Dismissed',
+    /** Parts of a folded turn's summary line, joined with foldSep. */
+    foldCommands: (n: number) => `ran ${n} ${n === 1 ? 'command' : 'commands'}`,
+    foldReads: (n: number) => `read ${n} ${n === 1 ? 'file' : 'files'}`,
+    foldSearches: (n: number) => `${n} ${n === 1 ? 'search' : 'searches'}`,
+    foldEdited: (n: number) => `edited ${n} ${n === 1 ? 'file' : 'files'}`,
+    foldOther: (n: number) => `${n} other ${n === 1 ? 'tool' : 'tools'}`,
+    foldFailed: (n: number) => `${n} failed`,
+    foldThought: 'thought',
+    foldSep: ', ',
+    /** Sentence-case the first part in English. */
+    foldCase: (s: string) => s.charAt(0).toUpperCase() + s.slice(1),
 }
 
 export type TranscriptText = typeof en
@@ -112,6 +123,15 @@ const zh: TranscriptText = {
     askWaiting: '等待你回答',
     askAnswered: '已回答',
     askCancelled: '已跳过',
+    foldCommands: n => `运行了 ${n} 个命令`,
+    foldReads: n => `查看了 ${n} 个文件`,
+    foldSearches: n => `搜索 ${n} 次`,
+    foldEdited: n => `编辑了 ${n} 个文件`,
+    foldOther: n => `调用了 ${n} 个工具`,
+    foldFailed: n => `${n} 个失败`,
+    foldThought: '已思考',
+    foldSep: '，',
+    foldCase: s => s,
 }
 
 export const TRANSCRIPT_TEXT: Record<TranscriptLang, TranscriptText> = { en, zh }

@@ -3,6 +3,7 @@
 import type { CompactionInfo } from '@shared/ipc'
 import type { Thread } from '@/store/thread'
 import { basename } from '@/lib/utils'
+import { appStore } from '@/store/app'
 import { observer } from 'mobx-react-lite'
 import { useEffect, useState } from 'react'
 
@@ -49,12 +50,13 @@ function tally(thread: Thread, now: number) {
     return { cost, add, del, recentOut, lastReply }
 }
 
-/** pi's resolved auto-compaction settings for this project and model (re-read when usage changes). */
+/** pi's resolved auto-compaction settings for this project and model (re-read when usage or settings change). */
 function useCompaction(thread: Thread): CompactionInfo | null {
     const model = thread.state?.model
     const modelKey = model ? `${model.provider}/${model.id}` : undefined
     const [info, setInfo] = useState<CompactionInfo | null>(null)
     const tokens = thread.stats?.contextUsage?.tokens
+    const epoch = appStore.piSettingsEpoch
     useEffect(() => {
         let cancelled = false
         window.pi.compactionInfo(thread.cwd, modelKey)
@@ -63,7 +65,7 @@ function useCompaction(thread: Thread): CompactionInfo | null {
         return () => {
             cancelled = true
         }
-    }, [thread.cwd, modelKey, tokens])
+    }, [thread.cwd, modelKey, tokens, epoch])
     return info
 }
 

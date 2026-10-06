@@ -14,6 +14,7 @@
         "build": "tsc -b && vite build",
         "typecheck": "tsc -b",
         "test": "vitest run",
+        "density": "bun --tsconfig-override=tsconfig.node.json test/density.ts",
         "preview": "vite preview"
     },
     "dependencies": {

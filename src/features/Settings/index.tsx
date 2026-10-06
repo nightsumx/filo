@@ -1,11 +1,16 @@
-// Settings dialog (⌘,): a single flat page. Changes apply immediately, so there is no button bar.
+// Settings dialog (⌘,): pages listed on the left. Changes apply immediately, so there is no button bar.
 import type { ThemePref, TranscriptLang } from '@shared/ipc'
+import type { LucideIcon } from 'lucide-react'
+import type { SettingsPageId } from '@/store/app'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
-import { Segmented, SettingGroup, SettingRow } from '@/components/ui/form'
+import { Segmented, SettingRow, SettingsPage } from '@/components/ui/form'
 import { TRANSCRIPT_TEXT } from '@/lib/transcriptText'
+import { cn } from '@/lib/utils'
 import { appStore } from '@/store/app'
+import { Archive, Palette, Puzzle } from 'lucide-react'
 import { observer } from 'mobx-react-lite'
-import { CapabilitiesGroup } from './Capabilities'
+import { CapabilitiesPage } from './Capabilities'
+import { CompactionPage } from './Compaction'
 
 /** A few transcript lines in the chosen wording, so the effect is visible before closing. */
 function TranscriptPreview({ lang }: { lang: TranscriptLang }) {
@@ -57,8 +62,8 @@ const LANG_HINTS: Record<TranscriptLang, string> = {
     zh: '工具结果、diff、运行状态等提示改为中文。',
 }
 
-const GeneralGroup = observer(() => (
-    <SettingGroup title="外观">
+const AppearancePage = observer(() => (
+    <SettingsPage title="外观">
         <SettingRow
             title="主题"
             control={({ labelId }) => <Segmented labelledBy={labelId} value={appStore.themePref} options={THEME_OPTIONS} onChange={v => appStore.setTheme(v)} />}
@@ -72,28 +77,69 @@ const GeneralGroup = observer(() => (
                 <TranscriptPreview lang={appStore.transcriptLang} />
             </div>
         </SettingRow>
-    </SettingGroup>
+    </SettingsPage>
 ))
 
-/** Settings dialog (⌘,): one scrolling page of groups, every choice visible, changes apply at once. */
-export const SettingsDialog = observer(() => (
-    <Dialog open={appStore.settingsOpen} onOpenChange={open => appStore.setSettingsOpen(open)}>
-        <DialogContent
-            className="max-h-[min(680px,88vh)] max-w-[560px] gap-0 overflow-hidden p-0"
-            // Focus the dialog itself rather than the first control, so no focus ring shows on open.
-            onOpenAutoFocus={(e) => {
-                e.preventDefault()
-                ;(e.currentTarget as HTMLElement).focus()
-            }}
-        >
-            <div className="flex h-12 shrink-0 items-center px-6">
-                <DialogTitle className="text-[14px]">设置</DialogTitle>
-            </div>
-            <DialogDescription className="sr-only">外观、对话显示和能力设置，改动立即生效。</DialogDescription>
-            <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-6 pb-5">
-                <GeneralGroup />
-                <CapabilitiesGroup />
-            </div>
-        </DialogContent>
-    </Dialog>
-))
+const PAGES: { id: SettingsPageId, label: string, icon: LucideIcon, page: React.FC }[] = [
+    { id: 'appearance', label: '外观', icon: Palette, page: AppearancePage },
+    { id: 'capabilities', label: '能力', icon: Puzzle, page: CapabilitiesPage },
+    { id: 'compaction', label: '上下文压缩', icon: Archive, page: CompactionPage },
+]
+
+/** Page list on the left, like the tree in JetBrains Settings; Up/Down move between pages. */
+const PageList = observer(() => {
+    const current = appStore.settingsPage
+    return (
+        <nav aria-label="设置分类" className="group/nav flex w-[180px] shrink-0 flex-col gap-px bg-[var(--jb-dialog-side)] px-2 pb-3 pt-12">
+            {PAGES.map(({ id, label, icon: Icon }, i) => (
+                <button
+                    key={id}
+                    type="button"
+                    aria-current={id === current ? 'page' : undefined}
+                    tabIndex={id === current ? 0 : -1}
+                    onClick={() => appStore.setSettingsPage(id)}
+                    onKeyDown={(e) => {
+                        if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp')
+                            return
+                        e.preventDefault()
+                        const next = PAGES[(i + (e.key === 'ArrowDown' ? 1 : PAGES.length - 1)) % PAGES.length]
+                        appStore.setSettingsPage(next.id)
+                        ;(e.currentTarget.parentElement?.children[PAGES.indexOf(next)] as HTMLElement | undefined)?.focus()
+                    }}
+                    className={cn(
+                        'flex h-7 items-center gap-2 rounded-md px-2 text-left text-[13px] text-gray-900 outline-none',
+                        // Blue while the list has focus, gray otherwise, as in the project tree.
+                        id === current ? 'bg-ide-sel-muted group-focus-within/nav:bg-ide-sel' : 'hover:bg-ide-hover',
+                    )}
+                >
+                    <Icon size={14} className="shrink-0 text-gray-500" />
+                    {label}
+                </button>
+            ))}
+        </nav>
+    )
+})
+
+/** Settings dialog (⌘,): page list on the left, the selected page on the right; changes apply at once. */
+export const SettingsDialog = observer(() => {
+    const Page = PAGES.find(p => p.id === appStore.settingsPage)?.page ?? AppearancePage
+    return (
+        <Dialog open={appStore.settingsOpen} onOpenChange={open => appStore.setSettingsOpen(open)}>
+            <DialogContent
+                className="h-[min(620px,88vh)] max-w-[780px] flex-row gap-0 overflow-hidden p-0"
+                // Focus the dialog itself rather than the first control, so no focus ring shows on open.
+                onOpenAutoFocus={(e) => {
+                    e.preventDefault()
+                    ;(e.currentTarget as HTMLElement).focus()
+                }}
+            >
+                <DialogTitle className="absolute left-4 top-0 flex h-12 items-center text-[14px]">设置</DialogTitle>
+                <DialogDescription className="sr-only">外观、能力和上下文压缩设置，改动立即生效。</DialogDescription>
+                <PageList />
+                <div className="min-w-0 flex-1 overflow-y-auto px-6 pb-5 scrollbar-trigger">
+                    <Page />
+                </div>
+            </DialogContent>
+        </Dialog>
+    )
+})

@@ -4,12 +4,14 @@ import { cn } from '@/lib/utils'
 import { Loader2 } from 'lucide-react'
 import { observer } from 'mobx-react-lite'
 
-/** Per-thread status used by tabs and the project tree: waiting > running > unread > idle π. */
+/** Per-thread status used by tabs and the project tree: waiting > running > error > unread > idle π. */
 export const StatusDot = observer(({ thread, dim }: { thread: Thread, dim?: boolean }) => {
     if (thread.waitingForUser)
         return <span className="mx-[3px] h-2 w-2 shrink-0 rounded-full bg-amber-500" aria-label="等待处理" />
     if (thread.running)
         return <span className="h-3.5 w-3.5 shrink-0 animate-spin rounded-full border-[1.5px] border-gray-300 border-t-ide-accent" aria-label="运行中" />
+    if (thread.activity.phase === 'error')
+        return <span className="mx-[3px] h-2 w-2 shrink-0 rounded-full bg-red-500" aria-label="出错" />
     if (thread.unread)
         return <span className="mx-[3px] h-2 w-2 shrink-0 rounded-full bg-ide-accent" aria-label="有新回复" />
     return <PiGlyph dim={dim} />
