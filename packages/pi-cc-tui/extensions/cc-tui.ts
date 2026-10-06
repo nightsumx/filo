@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { AssistantMessageComponent, CONFIG_DIR_NAME, getAgentDir, UserMessageComponent, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Editor, Loader, Markdown, Text } from "@earendil-works/pi-tui";
+import type { TodoDetails } from "pi-capabilities/protocol";
 import { COLOR, key, MODE_KEY, shared } from "./lib/shared.ts";
 
 const fg = (code: number, s: string) => `\x1b[38;5;${code}m${s}\x1b[39m`;
@@ -132,13 +133,13 @@ export default function (pi: ExtensionAPI) {
 		const count = tokens >= 1000 ? `${(tokens / 1000).toFixed(1)}k` : `${tokens}`;
 		const meta = [duration(Date.now() - start), tokens ? `↓ ${count} tokens` : "", thinking ? "thinking" : "", `${key("app.interrupt")} to interrupt`];
 		// The current todo's activeForm replaces the random verb, like Claude Code.
-		const todos = shared.todos.some((t) => t.status !== "completed") ? shared.todos : [];
+		const todos = shared.todos.some((t) => t.status !== "done") ? shared.todos : [];
 		const label = todos.find((t) => t.status === "in_progress")?.activeForm ?? verb[0];
 		const below = todos.length
 			? todos.map((t, i) => {
 					const lead = fg(COLOR.muted, i ? "     " : "  ⎿  ");
-					if (t.status === "completed") return lead + fg(COLOR.muted, `☒ \x1b[9m${t.content}\x1b[29m`);
-					return lead + (t.status === "in_progress" ? `\x1b[1m☐ ${t.content}\x1b[22m` : `☐ ${t.content}`);
+					if (t.status === "done") return lead + fg(COLOR.muted, `☒ \x1b[9m${t.text}\x1b[29m`);
+					return lead + (t.status === "in_progress" ? `\x1b[1m☐ ${t.text}\x1b[22m` : `☐ ${t.text}`);
 				})
 			: [fg(COLOR.muted, `  ⎿  Tip: ${tip()}`)];
 		ui?.setWorkingMessage([`${fg(COLOR.shimmer, `${label}…`)} ${fg(COLOR.muted, `(${meta.filter(Boolean).join(" · ")})`)}`, ...below].join("\n"));
@@ -154,6 +155,34 @@ export default function (pi: ExtensionAPI) {
 		// Default to the dark claude-code theme unless the user already chose one.
 		if (!hasThemeSetting(ctx.cwd)) ctx.ui.setTheme("claude-code");
 		ctx.ui.setWorkingIndicator({ frames: [...FRAMES, ...FRAMES.slice(1, -1).reverse()].map((f) => fg(174, f)), intervalMs: 120 });
+	});
+
+	// The todo capability's list: the latest result on the branch, then every new call.
+	const restoreTodos = (ctx: any) => {
+		shared.todos = [];
+		for (const entry of ctx.sessionManager.getBranch()) {
+			if (entry.type !== "message" || entry.message.role !== "toolResult" || entry.message.toolName !== "todo") continue;
+			const items = (entry.message.details as TodoDetails | undefined)?.items;
+			if (Array.isArray(items)) shared.todos = items;
+		}
+	};
+	pi.on("session_start", (_e, ctx) => restoreTodos(ctx));
+	pi.on("session_tree", (_e, ctx) => restoreTodos(ctx));
+	pi.registerCommand("todos", {
+		description: "Show the current todo list",
+		handler: async (_args, ctx) => {
+			const todos = shared.todos;
+			if (!todos.length) return ctx.ui.notify("No todos yet", "info");
+			const done = todos.filter((t) => t.status === "done").length;
+			ctx.ui.notify(`${done}/${todos.length} done\n${todos.map((t) => `${t.status === "done" ? "☒" : "☐"} ${t.text}`).join("\n")}`, "info");
+		},
+	});
+	pi.on("tool_execution_end", (e) => {
+		const items = e.toolName === "todo" && !e.isError ? (e.result?.details as TodoDetails | undefined)?.items : undefined;
+		if (Array.isArray(items)) {
+			shared.todos = items;
+			show();
+		}
 	});
 
 	pi.on("agent_start", (_e, ctx) => {

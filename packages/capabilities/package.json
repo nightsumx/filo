@@ -1,0 +1,25 @@
+{
+    "name": "pi-capabilities",
+    "version": "0.1.0",
+    "private": true,
+    "description": "Todo list, questions, approvals, plan mode and subagents for pi, shared by the Pi desktop app and pi-cc-tui",
+    "keywords": ["pi-package", "pi-extension"],
+    "license": "MIT",
+    "author": "sum",
+    "type": "module",
+    "exports": {
+        "./protocol": "./protocol.ts",
+        "./extensions/*": "./extensions/*",
+        "./tui/*": "./tui/*",
+        "./lib/*": "./lib/*"
+    },
+    "pi": {
+        "extensions": ["./extensions/*.ts"]
+    },
+    "peerDependencies": {
+        "@earendil-works/pi-coding-agent": "*",
+        "@earendil-works/pi-tui": "*",
+        "typebox": "*"
+    },
+    "files": ["extensions", "tui", "lib", "protocol.ts"]
+}

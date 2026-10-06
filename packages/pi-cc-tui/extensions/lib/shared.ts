@@ -1,19 +1,16 @@
 import { keyText } from "@earendil-works/pi-coding-agent";
+import type { TodoItem } from "pi-capabilities/protocol";
 
 // State shared between this package's extensions.
 // pi may load each extension file as its own module graph, so the store lives on globalThis.
 
 export type PermissionMode = "default" | "acceptEdits" | "plan" | "bypassPermissions";
 
-export interface Todo {
-	content: string;
-	status: "pending" | "in_progress" | "completed";
-	activeForm: string;
-}
-
 export interface Shared {
+	/** Claude Code's name for the combined approval / plan state, shown under the input. */
 	mode: PermissionMode;
-	todos: Todo[];
+	/** The todo capability's latest list. */
+	todos: TodoItem[];
 	showShortcuts: boolean;
 	/** Until this time (ms), the second status row reads "Press ctrl+c again to exit". */
 	exitHintUntil: number;
@@ -34,9 +31,6 @@ export const shared: Shared = ((globalThis as any)[KEY] ??= {
 export const key = (id: string) => keyText(id as any).replace(/\bescape\b/g, "esc");
 /** The permission-mode shortcut, spelled the way pi spells alt on this platform. */
 export const MODE_KEY = process.platform === "darwin" ? "option+m" : "alt+m";
-
-export const REJECTED =
-	"The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). STOP what you are doing and wait for the user to tell you how to proceed.";
 
 export const fg = (code: number, s: string) => `\x1b[38;5;${code}m${s}\x1b[39m`;
 

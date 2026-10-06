@@ -54,18 +54,26 @@ pi install npm:pi-cc-tui
 
 **退出**：第一次按 ctrl+c，状态栏第二行显示 `Press ctrl+c again to exit`；800ms 内再按一次退出（pi 原本是 500ms，没有提示）。
 
-**权限模式**：option+m（非 macOS 是 alt+m）切换 Claude Code 的几种模式；shift+tab 仍归 pi 切换思考强度。`/permissions` 直接选，`--permission-mode <mode>` 设启动模式。
+**权限模式**：option+m（非 macOS 是 alt+m）切换 Claude Code 的几种模式；shift+tab 仍归 pi 切换思考强度。`/permissions` 直接选，`--gui-approval ask|edits|auto` 设启动时的审批模式（默认 `auto`）。
 
 | 模式 | 改文件（`edit`、`write`） | 跑命令（`bash`、`powershell`） |
 |---|---|---|
 | `bypassPermissions`（默认，即 pi 原本的行为） | 直接执行 | 直接执行 |
 | `default` | 询问 | 询问 |
 | `acceptEdits` | 直接执行 | 询问 |
-| `plan` | 拦下，并提示模型先出方案 | 询问 |
+| `plan` | 只开放只读工具，直到你批准方案 | 只允许只读命令 |
 
-询问框是 Claude Code 的圆角框：↑/↓ 加回车，或直接按 1–3；esc 等于 No。选项：Yes；"Yes, allow all edits during this session"（切到 `acceptEdits`）或 "don't ask again for this command"；No，会结束本回合。print 和 JSON 模式从不询问。
+询问框是 Claude Code 的圆角框：↑/↓ 加回车，或直接按 1–3；esc 等于 No。选项：Yes；"Yes, allow all edits during this session"（切到 `acceptEdits`）或 "don't ask again for … this session"；No，会结束本回合。print 和 JSON 模式从不询问。
 
-**Todo**：`TodoWrite` 工具，参数和 Claude Code 一样（`content`、`status`、`activeForm`），显示成 `⏺ Update Todos`，下面是 `☐` / 加粗 `☐` / 划线 `☒`。列表跟随会话分支。`/todos` 打印当前列表。
+**Plan 模式**：模型用只读工具调研，然后调用 `propose_plan`。方案显示在 `Ready to code?` 框里：批准并自动接受修改、批准但继续逐个询问、或者写一句要改什么让它继续规划。
+
+**提问**：`ask` 工具，一次一题显示在框里：按 1–9 或 ↑/↓ 选择，允许多选时空格切换，也可以选 "Type something" 自己填。回答以 `⏺ User answered pi's questions:` 留在对话里。
+
+**Todo**：`todo` 工具（`text`、`status`，可选 `activeForm`），显示成 `⏺ Update Todos`，下面是 `☐` / 加粗 `☐` / 划线 `☒`。列表跟随会话分支。
+
+**子代理**：`subagent` 工具在单独的 pi 里跑一个任务，显示成 Claude Code 的 Task：运行中列出最近的工具调用，结束后是 `⎿  Done (3 tool uses · 12.4k tokens · 41s)`；ctrl+o 展开它的回复。它的审批请求会弹到你的会话里，并标上它的名字。
+
+审批、Plan 模式、提问、Todo 和子代理来自 `pi-capabilities`，和 Pi 桌面版用的是同一套扩展，打包在本插件里。在桌面版里这些会自动关闭，由桌面版自己加载。
 
 **压缩进度**：`/compact` 和自动压缩时显示 `· Compacting conversation… (1m 37s · ↓ 2.1k tokens · esc to cancel)`，下面一行 `▰▰▰▱▱▱ 60%` 进度条。仍然走 pi 默认的摘要逻辑；摘要最终长度事先未知，进度按已流出的 token 估算，逐渐逼近 99%，不是精确完成度。
 
@@ -94,11 +102,11 @@ pi install npm:pi-cc-tui
   "enableWorkingMessage": false,
   "enableAgentSummary": false,
   "showStartupHeader": false,
-  "excludeRenderers": ["TodoWrite"]
+  "excludeRenderers": ["todo", "ask", "propose_plan", "subagent"]
 }
 ```
 
-`showStartupHeader` 避免它的启动页和欢迎框抢位置。`excludeRenderers` 让 `TodoWrite` 自己画勾选列表，否则 pi-cc-extensions 会把它当普通工具调用显示。
+`showStartupHeader` 避免它的启动页和欢迎框抢位置。`excludeRenderers` 让这些工具自己画，否则 pi-cc-extensions 会把它们当普通工具调用显示。多个工具同时运行时，它仍会合并成一行 `Multiple Tools`。
 
 pi 认不出的终端（比如 JetBrains）会把链接显示成 `文字 (url)`。在 `~/.pi/agent/settings.json` 里打开超链接：
 

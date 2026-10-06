@@ -1,19 +1,19 @@
-// Capabilities are pi extensions shipped with the app (extensions/<entry>) and loaded per project
-// with `-e`. They talk to the GUI through two channels only:
-//   down: tool results and `onUpdate` carry `details` typed below (stored in the session file);
-//   up:   the GUI runs hidden extension commands (`/gui-…`), which pi executes even mid-run.
-// Mode state (approval mode, plan on/off) comes down as `ctx.ui.setStatus` under GUI_STATUS keys.
-// Extensions import these types with `import type` only, so they stay loadable without this file.
+// Capabilities are pi extensions from the pi-capabilities workspace package, loaded per project with
+// `-e`. This file is the app's catalog of them (labels, presets); the wire protocol they speak lives
+// in the package and is re-exported here.
+import type { SubagentDetails as SubagentDetailsOf } from 'pi-capabilities/protocol'
 import type { Localized } from './i18n'
 import type { AgentMessage, AssistantMessage } from './pi'
+import type { CapabilityId } from 'pi-capabilities/protocol'
 
-export type CapabilityId = 'todo' | 'ask' | 'approval' | 'plan' | 'subagent'
+export * from 'pi-capabilities/protocol'
+export type SubagentDetails = SubagentDetailsOf<AgentMessage, AssistantMessage>
 
 export interface Capability {
     id: CapabilityId
     label: Localized
     description: Localized
-    /** Extension file relative to the extensions directory. */
+    /** Extension file relative to the package's extensions directory. */
     entry: string
     /** Tools the extension registers; their calls get dedicated views in the transcript. */
     tools: string[]
@@ -88,149 +88,3 @@ export function normalizeCapabilities(value: unknown): CapabilityId[] {
 /** Tool name → capability, for transcript rendering. */
 export const CAPABILITY_TOOLS: ReadonlyMap<string, CapabilityId> = new Map(CAPABILITIES.flatMap(c => c.tools.map(t => [t, c.id] as const)))
 
-/** Hidden commands are filtered out of the slash menu. */
-export const GUI_COMMAND_PREFIX = 'gui-'
-
-export interface GuiCommands {
-    /** `/gui-ask-answer <toolCallId> <AskResponse JSON>` */
-    askAnswer: 'gui-ask-answer'
-    /** `/gui-approval <ApprovalMode>` */
-    approval: 'gui-approval'
-    /** `/gui-plan on|off` */
-    plan: 'gui-plan'
-    /** `/gui-plan-decide <toolCallId> <PlanDecision JSON>` */
-    planDecide: 'gui-plan-decide'
-    /** `/gui-subagent-steer <toolCallId> <message>` */
-    subagentSteer: 'gui-subagent-steer'
-    /** `/gui-subagent-cancel <toolCallId>` */
-    subagentCancel: 'gui-subagent-cancel'
-}
-
-/** `ctx.ui.setStatus` keys carrying mode state; hidden from the status list. */
-export const GUI_STATUS = {
-    /** Current ApprovalMode. */
-    approval: 'gui-approval',
-    /** `on` while plan mode is on; cleared otherwise. */
-    plan: 'gui-plan',
-} as const
-
-// ---------------------------------------------------------------- todo
-
-export type TodoStatus = 'pending' | 'in_progress' | 'done'
-
-export interface TodoItem {
-    text: string
-    status: TodoStatus
-}
-
-/** Every todo call replaces the whole list, so the latest result on the branch is the state. */
-export interface TodoDetails {
-    kind: 'todo'
-    items: TodoItem[]
-}
-
-// ---------------------------------------------------------------- ask
-
-export interface AskQuestion {
-    id: string
-    question: string
-    /** Choices; the user can always type their own answer instead. */
-    options: string[]
-    multiple?: boolean
-}
-
-export interface AskAnswer {
-    selected: string[]
-    /** Free-text answer, used alone or alongside choices. */
-    text?: string
-}
-
-/** What the GUI sends back through `/gui-ask-answer`. */
-export type AskResponse =
-    | { answers: Record<string, AskAnswer> }
-    | { cancelled: true }
-
-export type AskDetails =
-    | { kind: 'ask', status: 'pending', questions: AskQuestion[] }
-    | { kind: 'ask', status: 'answered', questions: AskQuestion[], answers: Record<string, AskAnswer> }
-    | { kind: 'ask', status: 'cancelled', questions: AskQuestion[] }
-
-// ---------------------------------------------------------------- approval
-
-/**
- * ask: every call that can change something; edits: file edits inside the project go through, the
- * rest asks; auto: nothing asks (pi's own behaviour).
- */
-export type ApprovalMode = 'ask' | 'edits' | 'auto'
-
-export const APPROVAL_MODES: readonly ApprovalMode[] = ['ask', 'edits', 'auto']
-
-/**
- * An approval is an extension `select` dialog whose title is this prefix plus ApprovalRequest JSON,
- * and whose options are ApprovalChoice values. The GUI renders it as an approval prompt.
- */
-export const APPROVAL_TITLE_PREFIX = 'gui-approval '
-
-export interface ApprovalRequest {
-    toolCallId: string
-    tool: string
-    /** The command, path or arguments, one line. */
-    summary: string
-    /** What "always" allows in this thread: a bash program name, or the tool name. */
-    scope: string
-    /** Set when a subagent's call is forwarded: the subagent's title. */
-    agent?: string
-}
-
-export type ApprovalChoice = 'allow' | 'always' | 'deny'
-
-// ---------------------------------------------------------------- plan
-
-/** What the GUI sends back through `/gui-plan-decide`. */
-export type PlanDecision =
-    | { approve: true }
-    | { feedback: string }
-    | { cancelled: true }
-
-export type PlanDetails =
-    | { kind: 'plan', status: 'pending' | 'approved' | 'cancelled', plan: string }
-    | { kind: 'plan', status: 'revised', plan: string, feedback: string }
-
-// ---------------------------------------------------------------- subagent
-
-export interface SubagentUsage {
-    input: number
-    output: number
-    cacheRead: number
-    cacheWrite: number
-    cost: number
-}
-
-/** A child tool call still running, keyed by its tool call id. */
-export interface SubagentToolState {
-    startedAt: number
-    /** Latest partial result (`onUpdate`), e.g. bash output so far. */
-    partial?: { content: { type: string, text?: string }[], details?: unknown }
-}
-
-/**
- * The subagent's whole run, streamed on every change. `messages` is the child transcript with tool
- * results clipped, so the GUI renders it with the same components as the parent.
- */
-export interface SubagentDetails {
-    kind: 'subagent'
-    status: 'running' | 'done' | 'failed' | 'cancelled'
-    title: string
-    task: string
-    /** provider/model the child runs. */
-    model?: string
-    messages: AgentMessage[]
-    streaming?: AssistantMessage
-    tools: Record<string, SubagentToolState>
-    /** Steering messages sent but not yet delivered to the child. */
-    steering: string[]
-    usage: SubagentUsage
-    startedAt: number
-    endedAt?: number
-    error?: string
-}

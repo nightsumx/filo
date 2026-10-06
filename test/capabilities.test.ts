@@ -119,8 +119,8 @@ describe.runIf(process.env.PI_GUI_SKIP_E2E !== '1')('capability extensions (real
         if (!env)
             return skip('pi not installed')
         const { pi } = await setup(['approval'], script(
-            { toolCalls: [{ name: 'bash', arguments: { command: 'echo one' } }] },
-            { toolCalls: [{ name: 'bash', arguments: { command: 'echo two' } }] },
+            { toolCalls: [{ name: 'bash', arguments: { command: 'touch one' } }] },
+            { toolCalls: [{ name: 'bash', arguments: { command: 'touch two' } }] },
         ), { approvalMode: 'ask' })
         await pi.request({ type: 'prompt', message: 'go' })
         const prompt: any = await pi.waitFor(approvalPrompt)
@@ -152,7 +152,7 @@ describe.runIf(process.env.PI_GUI_SKIP_E2E !== '1')('capability extensions (real
         if (!env)
             return skip('pi not installed')
         // A bash call for every new user message, then plain text.
-        const { pi } = await setup(['approval'], r => r.messages.at(-1)?.role === 'user' ? { toolCalls: [{ name: 'bash', arguments: { command: 'echo hi' } }] } : { text: 'done' }, { approvalMode: 'ask' })
+        const { pi } = await setup(['approval'], r => r.messages.at(-1)?.role === 'user' ? { toolCalls: [{ name: 'bash', arguments: { command: 'touch hi' } }] } : { text: 'done' }, { approvalMode: 'ask' })
         await pi.request({ type: 'prompt', message: 'one' })
         await pi.waitFor(approvalPrompt)
         await pi.request({ type: 'abort' })
@@ -323,11 +323,11 @@ describe.runIf(process.env.PI_GUI_SKIP_E2E !== '1')('capability extensions (real
     it('subagent: the child\'s approvals are forwarded with its title', async ({ skip }) => {
         if (!env)
             return skip('pi not installed')
-        const { pi } = await setup(['approval', 'subagent'], delegate([{ toolCalls: [{ name: 'bash', arguments: { command: 'echo approved' } }] }]), { approvalMode: 'ask' })
+        const { pi } = await setup(['approval', 'subagent'], delegate([{ toolCalls: [{ name: 'bash', arguments: { command: 'touch approved' } }] }]), { approvalMode: 'ask' })
         await pi.request({ type: 'prompt', message: 'go' })
         // Launching the subagent itself needs no approval; the child's bash does.
         const prompt: any = await pi.waitFor(approvalPrompt, 20_000)
-        expect(approvalOf(prompt)).toMatchObject({ tool: 'bash', summary: 'echo approved', agent: 'Look around' })
+        expect(approvalOf(prompt)).toMatchObject({ tool: 'bash', summary: 'touch approved', agent: 'Look around' })
         pi.send({ type: 'extension_ui_response', id: prompt.id, value: 'allow' })
         const end: any = await pi.waitFor(toolEnd('subagent'), 20_000)
         const details = end.result.details as SubagentDetails

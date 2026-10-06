@@ -3,10 +3,18 @@
 // (and a subagent can forward its child's prompts unchanged). The mode is per session:
 //   /gui-approval ask|edits|auto      switch mode (the GUI's mode picker)
 //   --gui-approval <mode>             mode for sessions that never chose one
-// The current mode goes down as status `gui-approval`; "always" choices last for the session.
+//   pi.events gui-approval:set <mode>  switch mode from another extension (pi-cc-tui's mode key)
+//   --gui-approval <mode>             mode for sessions that never chose one (or PI_KIT_APPROVAL_MODE)
+// The current mode goes down as status `gui-approval` and event `gui-approval:mode`; "always"
+// choices last for the session. In the terminal the prompt is Claude Code's permission dialog, and
+// No ends the turn so the user can say what to do instead.
 import type { ExtensionAPI, ExtensionContext, ToolCallEvent } from '@earendil-works/pi-coding-agent'
-import type { ApprovalChoice, ApprovalMode, ApprovalRequest, GuiCommands } from '../shared/capabilities'
+import type { ApprovalChoice, ApprovalMode, ApprovalRequest, GuiCommands } from '../protocol'
 import path from 'node:path'
+import process from 'node:process'
+import { isReadOnlyCommand } from '../lib/readonly'
+import { promptApproval } from '../tui/approval'
+import { serialized } from '../tui/dialog'
 
 const COMMAND: GuiCommands['approval'] = 'gui-approval'
 const STATUS = 'gui-approval'
@@ -14,6 +22,9 @@ const ENTRY = 'gui-approval'
 const TITLE_PREFIX = 'gui-approval '
 const MODES: ApprovalMode[] = ['ask', 'edits', 'auto']
 const DEFAULT_MODE: ApprovalMode = 'auto'
+const SET_EVENT = 'gui-approval:set'
+const MODE_EVENT = 'gui-approval:mode'
+const ENV_MODE = 'PI_KIT_APPROVAL_MODE'
 
 /** Built-in tools that only read; pi does not annotate its own tools. */
 const READ_ONLY = new Set(['read', 'grep', 'find', 'ls'])
@@ -66,11 +77,13 @@ export default function (pi: ExtensionAPI) {
     pi.registerFlag(COMMAND, { type: 'string', description: 'Approval mode for new sessions: ask, edits or auto' })
 
     const state: State = { mode: DEFAULT_MODE, always: [] }
+    let current: ExtensionContext | undefined
 
-    // Status for the GUI; the event for other extensions (subagent starts its child in the same mode).
+    // Status for the GUI; the event for other extensions (subagent starts its child in the same mode,
+    // pi-cc-tui shows it under the input).
     const publish = (ctx: ExtensionContext) => {
         ctx.ui.setStatus(STATUS, state.mode)
-        pi.events.emit('gui-approval:mode', state.mode)
+        pi.events.emit(MODE_EVENT, state.mode)
     }
     const persist = () => pi.appendEntry<State>(ENTRY, { mode: state.mode, always: [...state.always] })
 
@@ -84,6 +97,9 @@ export default function (pi: ExtensionAPI) {
             return false
         if (hints && hints.destructiveHint === false && hints.openWorldHint === false)
             return false
+        // Like Claude Code, commands that only read (ls, git status, rg …) run without asking.
+        if (event.toolName === 'bash' && isReadOnlyCommand(String((event.input as any).command ?? '')))
+            return false
         if (state.mode === 'edits' && FILE_TOOLS.has(event.toolName) && typeof (event.input as any).path === 'string' && inside(cwd, (event.input as any).path))
             return false
         const scope = scopeOf(event)
@@ -94,10 +110,22 @@ export default function (pi: ExtensionAPI) {
         const saved = ctx.sessionManager.getBranch()
             .filter((e: any) => e.type === 'custom' && e.customType === ENTRY)
             .pop() as { data?: Partial<State> } | undefined
-        const flag = pi.getFlag(COMMAND)
+        current = ctx
+        const flag = pi.getFlag(COMMAND) ?? process.env[ENV_MODE]
         state.mode = isMode(saved?.data?.mode) ? saved.data.mode : isMode(flag) ? flag : DEFAULT_MODE
         state.always = Array.isArray(saved?.data?.always) ? saved.data.always.filter(s => typeof s === 'string') : []
         publish(ctx)
+    })
+
+    const setMode = (mode: ApprovalMode, ctx: ExtensionContext) => {
+        state.mode = mode
+        persist()
+        publish(ctx)
+    }
+
+    pi.events.on(SET_EVENT, (mode) => {
+        if (isMode(mode) && current)
+            setMode(mode, current)
     })
 
     pi.on('tool_call', async (event, ctx) => {
@@ -105,6 +133,8 @@ export default function (pi: ExtensionAPI) {
             return undefined
         if (!ctx.hasUI)
             return { block: true, reason: `${event.toolName} needs the user's approval, and no UI is available.` }
+        if (ctx.mode === 'tui')
+            return serialized(() => askInTerminal(event, ctx))
 
         const scope = scopeOf(event)
         const request: ApprovalRequest = {
@@ -114,9 +144,7 @@ export default function (pi: ExtensionAPI) {
             scope: scope.startsWith('bash:') ? scope.slice(5) : scope,
         }
         const options: ApprovalChoice[] = scope ? ['allow', 'always', 'deny'] : ['allow', 'deny']
-        const choice = ctx.mode === 'tui'
-            ? await ctx.ui.select(`Allow ${event.toolName}: ${request.summary}?`, options, { signal: ctx.signal })
-            : await ctx.ui.select(TITLE_PREFIX + JSON.stringify(request), options, { signal: ctx.signal })
+        const choice = await ctx.ui.select(TITLE_PREFIX + JSON.stringify(request), options, { signal: ctx.signal })
 
         if (choice === 'allow')
             return undefined
@@ -130,15 +158,38 @@ export default function (pi: ExtensionAPI) {
         return { block: true, reason: 'The approval prompt was dismissed.' }
     })
 
+    /** Claude Code's flow: the earlier prompt may have changed the mode, so check again first. */
+    async function askInTerminal(event: ToolCallEvent, ctx: ExtensionContext) {
+        if (!needsApproval(event, ctx.cwd))
+            return undefined
+        const scope = scopeOf(event)
+        const request: ApprovalRequest = {
+            toolCallId: event.toolCallId,
+            tool: event.toolName,
+            summary: summarize(event),
+            scope: scope.startsWith('bash:') ? scope.slice(5) : scope,
+        }
+        const choice = await promptApproval(ctx, request, event.input as Record<string, unknown>, scope ? ['allow', 'always', 'deny'] : ['allow', 'deny'])
+        if (choice === 'allow')
+            return undefined
+        if (choice === 'always') {
+            // "Allow all edits" switches to the edits mode, like Claude Code's accept-edits.
+            if (FILE_TOOLS.has(event.toolName) && state.mode === 'ask')
+                return void setMode('edits', ctx)
+            state.always.push(scope)
+            persist()
+            return undefined
+        }
+        return { block: true, reason: `The user declined this ${event.toolName} call. Stop and wait for the user to say how to proceed.`, terminate: true }
+    }
+
     pi.registerCommand(COMMAND, {
         description: 'Internal: set the approval mode',
         handler: async (args, ctx) => {
             const mode = args.trim()
             if (!isMode(mode))
                 return ctx.ui.notify(`未知的确认模式：${mode}`, 'error')
-            state.mode = mode
-            persist()
-            publish(ctx)
+            setMode(mode, ctx)
         },
     })
 }

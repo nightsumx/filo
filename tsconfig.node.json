@@ -22,5 +22,5 @@
             "@shared/*": ["./shared/*"]
         }
     },
-    "include": ["vite.config.ts", "electron", "shared", "extensions", "test"]
+    "include": ["vite.config.ts", "electron", "shared", "packages/capabilities", "test"]
 }

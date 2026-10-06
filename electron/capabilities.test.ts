@@ -21,20 +21,24 @@ describe('capabilityArgs', () => {
 describe('capability catalogue', () => {
     it('every entry file exists and presets only name known capabilities', () => {
         for (const c of CAPABILITIES)
-            expect(existsSync(path.resolve(__dirname, '../extensions', c.entry)), c.entry).toBe(true)
+            expect(existsSync(path.resolve(__dirname, '../packages/capabilities/extensions', c.entry)), c.entry).toBe(true)
         for (const p of PRESETS)
             expect(normalizeCapabilities(p.capabilities)).toEqual([...p.capabilities])
         expect(DEFAULT_CAPABILITIES.length).toBeGreaterThan(0)
     })
 })
 
-describe('extension files', () => {
-    // Packaged builds ship extensions/*.ts alone (Resources/extensions); pi resolves only its own
-    // packages and typebox for them. Anything else must be a type import, which jiti strips.
-    const dir = path.join(import.meta.dirname, '../extensions')
-    it.each(readdirSync(dir).filter(f => f.endsWith('.ts')))('%s imports only what pi provides at runtime', (file) => {
-        const source = readFileSync(path.join(dir, file), 'utf8')
+describe('capability package files', () => {
+    // Packaged builds ship the pi-capabilities package alone (Resources/capabilities); pi resolves only
+    // its own packages and typebox for it. Anything else must be a file inside the package or a type
+    // import, which jiti strips.
+    const root = path.join(import.meta.dirname, '../packages/capabilities')
+    const files = ['extensions', 'tui', 'lib'].flatMap(d => existsSync(path.join(root, d)) ? readdirSync(path.join(root, d)).filter(f => f.endsWith('.ts')).map(f => `${d}/${f}`) : [])
+    it.each(files)('%s imports only what pi provides at runtime', (file) => {
+        const source = readFileSync(path.join(root, file), 'utf8')
         const valueImports = [...source.matchAll(/^import\s+(?!type\s)[^'"]*?from\s+'([^']+)'/gm)].map(m => m[1])
-        expect(valueImports.filter(spec => !spec.startsWith('node:') && spec !== 'typebox' && !spec.startsWith('@earendil-works/'))).toEqual([])
+        const outside = valueImports.filter(spec => spec.startsWith('.') && path.relative(root, path.resolve(root, path.dirname(file), spec)).startsWith('..'))
+        expect(outside).toEqual([])
+        expect(valueImports.filter(spec => !spec.startsWith('.') && !spec.startsWith('node:') && spec !== 'typebox' && !spec.startsWith('@earendil-works/'))).toEqual([])
     })
 })

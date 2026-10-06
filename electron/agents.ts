@@ -3,6 +3,7 @@ import type { PiEvent, RpcResponse } from '@shared/pi'
 import type { ChildProcessWithoutNullStreams } from 'node:child_process'
 import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
+import { ENV } from '@shared/capabilities'
 import { capabilityArgs } from './capabilities'
 import { tr } from './i18n'
 import { JsonlSplitter } from './jsonl'
@@ -36,7 +37,8 @@ class PiAgent {
         const command = piCommand(env, args)
         this.child = spawn(command.file, command.args, {
             cwd: options.cwd,
-            env: piSpawnEnv(env),
+            // The app loads its capabilities with -e; pi-cc-tui, if installed, leaves its copies off.
+            env: { ...piSpawnEnv(env), [ENV.host]: 'gui' },
             stdio: ['pipe', 'pipe', 'pipe'],
         })
 
@@ -113,7 +115,7 @@ class PiAgent {
 export class AgentManager {
     private agents = new Map<string, PiAgent>()
 
-    /** extensionsDir holds the capability extensions (repo `extensions/`, or Resources when packaged). */
+    /** extensionsDir holds the capability extensions (packages/capabilities/extensions, or Resources/capabilities when packaged). */
     constructor(private callbacks: AgentCallbacks, private extensionsDir: string) {}
 
     start(env: PiEnv, options: AgentStartOptions): string {

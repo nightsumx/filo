@@ -14,10 +14,15 @@
   "author": "nightsumx",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/nightsumx/pi-cc-tui.git"
+    "url": "git+https://github.com/nightsumx/pi-kit.git",
+    "directory": "packages/pi-cc-tui"
   },
-  "homepage": "https://github.com/nightsumx/pi-cc-tui#readme",
+  "homepage": "https://github.com/nightsumx/pi-kit/tree/main/packages/pi-cc-tui#readme",
   "type": "module",
+  "scripts": {
+    "prepack": "node scripts/bundle-capabilities.mjs",
+    "postpack": "node scripts/bundle-capabilities.mjs --restore"
+  },
   "pi": {
     "extensions": [
       "./extensions/cc-tui.ts",
@@ -25,9 +30,13 @@
       "./extensions/cc-compaction.ts",
       "./extensions/cc-transcript.ts",
       "./extensions/cc-input.ts",
-      "./extensions/cc-permissions.ts",
-      "./extensions/cc-todo.ts",
-      "./extensions/cc-header.ts"
+      "./extensions/cc-modes.ts",
+      "./extensions/cc-header.ts",
+      "./extensions/capabilities/todo.ts",
+      "./extensions/capabilities/ask.ts",
+      "./extensions/capabilities/approval.ts",
+      "./extensions/capabilities/plan.ts",
+      "./extensions/capabilities/subagent.ts"
     ],
     "themes": [
       "./themes/claude-code.json",
@@ -36,8 +45,15 @@
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*",
-    "@earendil-works/pi-tui": "*"
+    "@earendil-works/pi-tui": "*",
+    "typebox": "*"
   },
+  "dependencies": {
+    "pi-capabilities": "0.1.0"
+  },
+  "bundledDependencies": [
+    "pi-capabilities"
+  ],
   "files": [
     "extensions",
     "themes",

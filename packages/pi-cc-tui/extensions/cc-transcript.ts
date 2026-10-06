@@ -9,8 +9,8 @@ import {
 	truncateTail,
 	type ExtensionAPI,
 } from "@earendil-works/pi-coding-agent";
-import { Loader, Spacer, Text, TruncatedText, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
-import { COLOR, fg, key, REJECTED, shared } from "./lib/shared.ts";
+import { Container, Loader, Spacer, Text, TruncatedText, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
+import { COLOR, fg, key, shared } from "./lib/shared.ts";
 
 const ABORT_TEXTS = new Set(["Operation aborted", "Request was aborted"]);
 
@@ -120,7 +120,7 @@ tool.updateResult = function (result: any, ...rest: unknown[]) {
 	const content = result?.content;
 	const text = result?.isError && content?.length === 1 && content[0].type === "text" ? content[0].text : undefined;
 	if (text && ABORT_TEXTS.has(text)) result = { ...result, content: [{ type: "text", text: "Interrupted by user" }] };
-	else if (text === REJECTED) result = { ...result, content: [{ type: "text", text: "No (tell pi what to do differently)" }] };
+	else if (text && /^The user declined this \S+ call\./.test(text)) result = { ...result, content: [{ type: "text", text: "No (tell pi what to do differently)" }] };
 	return updateResult.call(this, result, ...rest);
 };
 
@@ -154,6 +154,22 @@ mode.handleCtrlC = function () {
 	shared.exitHintUntil = now + DOUBLE_PRESS_MS;
 	this.ui?.requestRender();
 	setTimeout(() => this.ui?.requestRender(), DOUBLE_PRESS_MS + 10).unref?.();
+};
+
+// The capability tools draw their own Claude Code rows (Update Todos, Task, Plan, questions). Renderers
+// that merge neighbouring tool calls into one row (pi-cc-extensions' "Multiple Tools") would hide
+// them, so each gets an empty component on both sides, which ends any group.
+const OWN_ROWS = new Set(["todo", "ask", "propose_plan", "subagent"]);
+const BOUNDARY = Symbol.for("pi-cc-tui.tool-boundary");
+const boundary = () => ({ [BOUNDARY]: true, invalidate() {}, render: () => [] });
+const container = Container.prototype as any;
+const addChild = container.addChild;
+container.addChild = function (component: any) {
+	if (!(component instanceof ToolExecutionComponent) || !OWN_ROWS.has((component as any).toolName)) return addChild.call(this, component);
+	if (!this.children?.at(-1)?.[BOUNDARY]) addChild.call(this, boundary());
+	const result = addChild.call(this, component);
+	addChild.call(this, boundary());
+	return result;
 };
 
 export default function (pi: ExtensionAPI) {

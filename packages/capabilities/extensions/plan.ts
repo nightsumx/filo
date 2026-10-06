@@ -3,18 +3,28 @@
 //   propose_plan (tool, plan mode only)       publishes the plan as pending details and waits
 //   /gui-plan-decide <toolCallId> <json>      approve (plan mode ends, the run carries on with all
 //                                             tools), ask for changes, or dismiss
+//   pi.events gui-plan:set <boolean>          switch from another extension (pi-cc-tui's mode key)
 // While on, the active tools are cut to read-only ones (built-in readers, tools annotated
 // readOnlyHint) plus bash limited to read-only commands. State follows the branch through a custom
-// entry; status `gui-plan` is `on` while it is on.
+// entry; status `gui-plan` is `on` while it is on, and event `gui-plan:mode` carries it. In the
+// terminal the plan shows in the transcript and the decision is Claude Code's "Ready to code?" box.
 import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent'
-import type { GuiCommands, PlanDecision, PlanDetails } from '../shared/capabilities'
+import type { ApprovalMode, GuiCommands, PlanDecision, PlanDetails } from '../protocol'
+import { getMarkdownTheme } from '@earendil-works/pi-coding-agent'
+import { Container, Markdown, Text } from '@earendil-works/pi-tui'
 import { Type } from 'typebox'
+import { isReadOnlyCommand } from '../lib/readonly'
+import { choose, serialized } from '../tui/dialog'
+import { hang, header } from '../tui/render'
 
 const COMMAND: GuiCommands['plan'] = 'gui-plan'
 const DECIDE_COMMAND: GuiCommands['planDecide'] = 'gui-plan-decide'
 const STATUS = 'gui-plan'
 const ENTRY = 'gui-plan'
 const TOOL = 'propose_plan'
+const SET_EVENT = 'gui-plan:set'
+const MODE_EVENT = 'gui-plan:mode'
+const APPROVAL_SET_EVENT = 'gui-approval:set'
 
 const READ_ONLY_BUILTINS = new Set(['read', 'grep', 'find', 'ls'])
 
@@ -23,27 +33,6 @@ const INSTRUCTIONS = `Plan mode is on: explore read-only and design the change b
 - Investigate until you can be specific: the files and functions to change, in order, and how you will verify the result.
 - When the plan is ready, call ${TOOL} with the whole plan in Markdown instead of replying with it. The user approves it or asks for changes.
 - Plan mode lasts until ${TOOL} reports that the user approved. From then on all tools are back: implement the plan.`
-
-// Commands whose every segment is one of these, with no output redirection, may run in plan mode.
-const SAFE = [
-    /^(cat|head|tail|less|more|grep|egrep|rg|ag|find|fd|ls|eza|tree|pwd|echo|printf|wc|sort|uniq|cut|tr|column|diff|file|stat|du|df|which|whereis|type|env|printenv|uname|whoami|id|date|cal|uptime|ps|jq|yq|awk|bat|realpath|dirname|basename|nl|true)\b/,
-    /^sed\s+-n\b/,
-    /^git\s+(status|log|diff|show|branch|remote|blame|grep|shortlog|describe|rev-parse|ls-files|ls-tree|cat-file|config\s+--get)\b/,
-    /^(npm|pnpm|yarn|bun)\s+(list|ls|view|info|why|outdated|audit)\b/,
-    /^(node|python3?|go|cargo|rustc|bun|deno|java)\s+(--version|-v|version)\b/,
-]
-
-export function isReadOnlyCommand(command: string): boolean {
-    // Discarding output is fine; any other redirection or substitution could write.
-    const cleaned = command.replace(/\d?>\s*\/dev\/null/g, '').replace(/2>&1/g, '')
-    if (/[<>`]|\$\(/.test(cleaned) || /\bsed\b[^|;&]*\s-i/.test(cleaned) || /\bfind\b[^|;&]*\s-(delete|exec|execdir|ok)\b/.test(cleaned))
-        return false
-    const segments = cleaned.split(/\|\||&&|[|;\n]/).map(s => s.trim()).filter(Boolean)
-    return segments.length > 0 && segments.every((s) => {
-        const words = s.replace(/^(\w+=\S*\s+)+/, '').replace(/^cd\s+\S+$/, 'true')
-        return SAFE.some(p => p.test(words))
-    })
-}
 
 interface State {
     enabled: boolean
@@ -55,7 +44,12 @@ export default function (pi: ExtensionAPI) {
     const state: State = { enabled: false }
     const waiting = new Map<string, (decision: PlanDecision) => void>()
 
-    const publish = (ctx: ExtensionContext) => ctx.ui.setStatus(STATUS, state.enabled ? 'on' : undefined)
+    let current: ExtensionContext | undefined
+
+    const publish = (ctx: ExtensionContext) => {
+        ctx.ui.setStatus(STATUS, state.enabled ? 'on' : undefined)
+        pi.events.emit(MODE_EVENT, state.enabled)
+    }
     const persist = () => pi.appendEntry<State>(ENTRY, { enabled: state.enabled, before: state.before })
 
     function readOnlyTools(names: string[]): string[] {
@@ -100,18 +94,20 @@ export default function (pi: ExtensionAPI) {
             const pending: PlanDetails = { kind: 'plan', status: 'pending', plan }
             onUpdate?.({ content: [{ type: 'text', text: 'Waiting for the user to review the plan.' }], details: pending })
 
-            const decision = await new Promise<PlanDecision>((resolve) => {
-                const finish = (d: PlanDecision) => {
-                    waiting.delete(toolCallId)
-                    signal?.removeEventListener('abort', onAbort)
-                    resolve(d)
-                }
-                const onAbort = () => finish({ cancelled: true })
-                if (signal?.aborted)
-                    return finish({ cancelled: true })
-                signal?.addEventListener('abort', onAbort, { once: true })
-                waiting.set(toolCallId, finish)
-            })
+            const decision = ctx.mode === 'tui'
+                ? await serialized(() => decideInTerminal(ctx, plan))
+                : await new Promise<PlanDecision>((resolve) => {
+                    const finish = (d: PlanDecision) => {
+                        waiting.delete(toolCallId)
+                        signal?.removeEventListener('abort', onAbort)
+                        resolve(d)
+                    }
+                    const onAbort = () => finish({ cancelled: true })
+                    if (signal?.aborted)
+                        return finish({ cancelled: true })
+                    signal?.addEventListener('abort', onAbort, { once: true })
+                    waiting.set(toolCallId, finish)
+                })
 
             if ('approve' in decision) {
                 set(false, ctx)
@@ -125,9 +121,52 @@ export default function (pi: ExtensionAPI) {
             const details: PlanDetails = { kind: 'plan', status: 'cancelled', plan }
             return { content: [{ type: 'text', text: 'The user dismissed the plan without approving it. Stop and wait for their next message.' }], details, terminate: true }
         },
+
+        renderShell: 'self',
+        // The plan itself is read in the "Ready to code?" box; the transcript keeps the approved one.
+        renderCall(_args, theme, context) {
+            return header(theme, context, 'Plan')
+        },
+        renderResult(result, _options, theme) {
+            const details = result.details as PlanDetails | undefined
+            switch (details?.status) {
+                case 'approved': {
+                    const box = new Container()
+                    box.addChild(hang(theme, [theme.fg('success', 'User approved pi\'s plan:')]))
+                    box.addChild(new Markdown(details.plan, 5, 0, getMarkdownTheme()))
+                    return box
+                }
+                case 'revised':
+                    return hang(theme, [`User asked for changes: ${details.feedback}`])
+                case 'cancelled':
+                    return hang(theme, [theme.fg('dim', 'Plan dismissed')])
+                default:
+                    return new Text('', 0, 0)
+            }
+        },
+    })
+
+    /** Claude Code's choices; approving also picks how edits are approved from here on. */
+    async function decideInTerminal(ctx: ExtensionContext, plan: string): Promise<PlanDecision> {
+        const options = ['Yes, and auto-accept edits', 'Yes, and manually approve edits', 'No, keep planning']
+        const index = await choose(ctx, { title: 'Ready to code?', body: ['Here is pi\'s plan:'], markdown: plan, question: 'Would you like to proceed?', options })
+        if (index === 0 || index === 1) {
+            pi.events.emit(APPROVAL_SET_EVENT, (index === 0 ? 'edits' : 'ask') satisfies ApprovalMode)
+            return { approve: true }
+        }
+        if (index === undefined)
+            return { cancelled: true }
+        const feedback = (await ctx.ui.input('What should change in the plan?', 'Tell pi what to do differently'))?.trim()
+        return feedback ? { feedback } : { cancelled: true }
+    }
+
+    pi.events.on(SET_EVENT, (on) => {
+        if (typeof on === 'boolean' && current)
+            set(on, current)
     })
 
     pi.on('session_start', async (_event, ctx) => {
+        current = ctx
         const saved = ctx.sessionManager.getBranch()
             .filter((e: any) => e.type === 'custom' && e.customType === ENTRY)
             .pop() as { data?: State } | undefined

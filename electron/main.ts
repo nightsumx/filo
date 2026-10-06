@@ -25,8 +25,9 @@ const statePath = () => path.join(app.getPath('userData'), 'state.json')
 
 let win: BrowserWindow | null = null
 
-// pi loads capability extensions from real files, so packaged builds keep them outside the asar.
-const extensionsDir = app.isPackaged ? path.join(process.resourcesPath, 'extensions') : path.join(__dirname, '../../extensions')
+// pi loads capability extensions from real files, so packaged builds keep the pi-capabilities package
+// (extensions plus the helpers they import) outside the asar, as Resources/capabilities.
+const extensionsDir = app.isPackaged ? path.join(process.resourcesPath, 'capabilities', 'extensions') : path.join(__dirname, '../../packages/capabilities/extensions')
 
 const agents = new AgentManager({
     onEvent: (agentId, event) => win?.webContents.send(IPC.agentEvent, agentId, event),

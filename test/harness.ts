@@ -11,7 +11,7 @@ import path from 'node:path'
 import { AgentManager } from '../electron/agents'
 import { resolvePiEnv } from '../electron/pi-env'
 
-export const EXTENSIONS_DIR = path.resolve(__dirname, '../extensions')
+export const EXTENSIONS_DIR = path.resolve(__dirname, '../packages/capabilities/extensions')
 
 /** What one model request looked like, decoded from the chat-completions body. */
 export interface MockRequest {

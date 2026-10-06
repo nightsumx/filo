@@ -52,18 +52,26 @@ Try it once without installing: `pi -e npm:pi-cc-tui`
 
 **Exit** — the first ctrl+c shows `Press ctrl+c again to exit` in the second status row; a second press within 800ms exits (pi's own window is 500ms, with no hint).
 
-**Permission modes** — option+m (alt+m off macOS) cycles Claude Code's modes; pi keeps shift+tab for thinking levels. `/permissions` picks one, `--permission-mode <mode>` sets the starting mode.
+**Permission modes** — option+m (alt+m off macOS) cycles Claude Code's modes; pi keeps shift+tab for thinking levels. `/permissions` picks one, `--gui-approval ask|edits|auto` sets the starting approval mode (`auto` by default).
 
 | Mode | Edits (`edit`, `write`) | Commands (`bash`, `powershell`) |
 |---|---|---|
 | `bypassPermissions` (default, pi's behavior) | run | run |
 | `default` | ask | ask |
 | `acceptEdits` | run | ask |
-| `plan` | blocked, and the model is told to plan first | ask |
+| `plan` | read-only tools only, until you approve a plan | read-only commands only |
 
-The prompt is Claude Code's rounded box: ↑/↓ and enter, or press 1–3 directly; esc means No. It offers Yes, "Yes, allow all edits during this session" (switches to `acceptEdits`) or "don't ask again for this command", and No, which stops the turn. Print and JSON modes never ask.
+The prompt is Claude Code's rounded box: ↑/↓ and enter, or press 1–3 directly; esc means No. It offers Yes, "Yes, allow all edits during this session" (switches to `acceptEdits`) or "don't ask again for … this session", and No, which stops the turn. Print and JSON modes never ask.
 
-**Todos** — a `TodoWrite` tool with Claude Code's schema (`content`, `status`, `activeForm`), drawn as `⏺ Update Todos` with `☐` / bold `☐` / struck-through `☒` under it. The list follows the session branch. `/todos` prints it.
+**Plan mode** — the model researches with read-only tools and calls `propose_plan`. The plan opens in a `Ready to code?` box: approve and auto-accept edits, approve and keep asking, or keep planning with a note on what to change.
+
+**Questions** — an `ask` tool for multiple-choice questions, one at a time in a box: 1–9 or ↑/↓ to pick, space to toggle when several answers are allowed, or "Type something" for your own answer. The answers stay in the transcript as `⏺ User answered pi's questions:`.
+
+**Todos** — a `todo` tool (`text`, `status`, optional `activeForm`), drawn as `⏺ Update Todos` with `☐` / bold `☐` / struck-through `☒` under it. The list follows the session branch.
+
+**Subagents** — a `subagent` tool that runs a task in a separate pi, drawn like Claude Code's Task: the latest tool calls while it works, then `⎿  Done (3 tool uses · 12.4k tokens · 41s)`; ctrl+o shows its reply. Its approval prompts come up in your session, tagged with its name.
+
+Approval, plan mode, questions, todos and subagents come from `pi-capabilities`, the same extensions the Pi desktop app uses, bundled in this package. Inside the desktop app they stay off here, since it loads its own.
 
 **Compaction** — `· Compacting conversation… (1m 37s · ↓ 2.1k tokens · esc to cancel)` with a `▰▰▰▱▱▱ 60%` bar underneath, for both `/compact` and auto-compaction. pi's default summarizer still runs; the bar is an estimate from streamed summary tokens (the final length isn't known up front), so it eases toward 99% instead of tracking exact completion.
 
@@ -92,11 +100,11 @@ The prompt is Claude Code's rounded box: ↑/↓ and enter, or press 1–3 direc
   "enableWorkingMessage": false,
   "enableAgentSummary": false,
   "showStartupHeader": false,
-  "excludeRenderers": ["TodoWrite"]
+  "excludeRenderers": ["todo", "ask", "propose_plan", "subagent"]
 }
 ```
 
-`showStartupHeader` keeps its header from competing with the welcome box. `excludeRenderers` lets `TodoWrite` draw its checkbox list; otherwise pi-cc-extensions shows it as a generic tool call.
+`showStartupHeader` keeps its header from competing with the welcome box. `excludeRenderers` lets those tools draw themselves; otherwise pi-cc-extensions shows them as generic tool calls. When several tool calls run at once it still groups them into one `Multiple Tools` row.
 
 Terminals pi doesn't recognise (JetBrains, for one) get links as `text (url)`. Turn on hyperlinks in `~/.pi/agent/settings.json`:
 

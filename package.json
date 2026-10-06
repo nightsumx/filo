@@ -1,5 +1,5 @@
 {
-    "name": "pi-gui",
+    "name": "pi-kit",
     "productName": "Pi",
     "private": true,
     "version": "0.1.0",
@@ -9,6 +9,7 @@
     "type": "module",
     "main": "dist-electron/main/main.js",
     "trustedDependencies": ["electron"],
+    "workspaces": ["packages/*"],
     "scripts": {
         "dev": "vite",
         "postinstall": "node scripts/dev-app-name.mjs",
@@ -16,7 +17,9 @@
         "typecheck": "tsc -b",
         "test": "vitest run",
         "density": "bun --tsconfig-override=tsconfig.node.json test/density.ts",
-        "preview": "vite preview"
+        "preview": "vite preview",
+        "dist": "bun run build && electron-builder --publish never",
+        "dist:dir": "bun run build && electron-builder --dir --publish never"
     },
     "dependencies": {
         "@fontsource-variable/inter": "5.3.0",
@@ -57,6 +60,8 @@
         "@vitejs/plugin-react": "6.0.2",
         "autoprefixer": "10.4.21",
         "electron": "37.3.0",
+        "electron-builder": "26.15.3",
+        "pi-capabilities": "workspace:*",
         "postcss": "8.5.3",
         "tailwindcss": "3.4.17",
         "tailwindcss-animate": "1.0.7",
@@ -66,5 +71,51 @@
         "vite-plugin-electron": "0.29.1",
         "vite-plugin-electron-renderer": "0.14.6",
         "vitest": "3.1.3"
+    },
+    "build": {
+        "appId": "dev.nightsumx.pi",
+        "productName": "Pi",
+        "directories": {
+            "output": "release",
+            "buildResources": "build"
+        },
+        "files": [
+            "dist/**",
+            "dist-electron/**",
+            "package.json",
+            "!**/node_modules/**"
+        ],
+        "extraResources": [
+            {
+                "from": "packages/capabilities",
+                "to": "capabilities",
+                "filter": [
+                    "package.json",
+                    "protocol.ts",
+                    "extensions/**",
+                    "tui/**",
+                    "lib/**"
+                ]
+            }
+        ],
+        "npmRebuild": false,
+        "mac": {
+            "icon": "build/icon.icns",
+            "category": "public.app-category.developer-tools",
+            "target": [
+                "dmg",
+                "zip"
+            ]
+        },
+        "win": {
+            "target": [
+                "nsis"
+            ]
+        },
+        "linux": {
+            "target": [
+                "AppImage"
+            ]
+        }
     }
 }
