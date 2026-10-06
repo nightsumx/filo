@@ -1,10 +1,13 @@
 import type { GitFileChange, GitFileDiff } from '@shared/ipc'
+import type { ChangeNode } from '@/lib/changeTree'
 import type { Thread } from '@/store/thread'
 import { DiffBlock } from '@/components/toolPrimitives'
+import { buildChangeTree, dirPaths } from '@/lib/changeTree'
 import { cn } from '@/lib/utils'
-import { ChevronRight, ChevronsDownUp, ChevronsUpDown, Columns2, GitBranch, Loader2, RefreshCw, Rows2, X } from 'lucide-react'
+import { appStore } from '@/store/app'
+import { ChevronRight, ChevronsDownUp, ChevronsUpDown, Columns2, Folder, FolderTree, GitBranch, List, Loader2, RefreshCw, Rows2, X } from 'lucide-react'
 import { observer } from 'mobx-react-lite'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useGitStatus } from './useGitStatus'
 import { tr } from '@/lib/i18n'
 
@@ -32,7 +35,25 @@ const LARGE_DIFF_BYTES = 300 * 1024
 /** Highlighting is the slowest part; skip it for big files even after the user opts in. */
 const HIGHLIGHT_MAX_BYTES = 120 * 1024
 
-function FileDiff({ cwd, file, tick, mode, defaultOpen }: { cwd: string, file: GitFileChange, tick: number, mode: 'unified' | 'split', defaultOpen: boolean }) {
+/** Tree rows: chevron column plus this much per level, so a file lines up under its folder's name. */
+const INDENT = 16
+const rowHover = 'hover:bg-[color-mix(in_srgb,var(--ide-panel),rgb(var(--black))_5%)]'
+
+function Totals({ additions, deletions }: { additions: number, deletions: number }) {
+    return (
+        <span className="shrink-0 font-mono text-[12px] tabular-nums">
+            {additions > 0 && <span className="text-emerald-600">{`+${additions}`}</span>}
+            {deletions > 0 && <span className="ml-1 text-red-500">{`−${deletions}`}</span>}
+        </span>
+    )
+}
+
+/**
+ * One changed file: a header row that unfolds its diff. In the list the folder follows the name;
+ * in the tree (`depth` set) the row is indented under its folder instead. The diff always spans the
+ * full panel width, since the panel is narrow.
+ */
+function FileDiff({ cwd, file, tick, mode, defaultOpen, depth }: { cwd: string, file: GitFileChange, tick: number, mode: 'unified' | 'split', defaultOpen: boolean, depth?: number }) {
     const [open, setOpen] = useState(defaultOpen)
     const [diff, setDiff] = useState<GitFileDiff | null>(null)
     const [error, setError] = useState('')
@@ -62,19 +83,17 @@ function FileDiff({ cwd, file, tick, mode, defaultOpen }: { cwd: string, file: G
                 type="button"
                 onClick={() => setOpen(v => !v)}
                 aria-expanded={open}
-                className="sticky top-0 z-[1] flex h-7 w-full items-center gap-1.5 bg-ide-panel px-2 text-left text-[13px] hover:bg-[color-mix(in_srgb,var(--ide-panel),rgb(var(--black))_5%)]"
+                style={depth ? { paddingLeft: 8 + depth * INDENT } : undefined}
+                className={cn('sticky top-0 z-[1] flex h-7 w-full items-center gap-1.5 bg-ide-panel px-2 text-left text-[13px]', rowHover)}
             >
                 <ChevronRight size={14} className={cn('shrink-0 text-gray-500 transition-transform duration-100', open && 'rotate-90')} />
                 <span className={cn('w-3 shrink-0 text-center font-mono text-[12px] font-semibold', badge.className)} title={badge.label}>{badge.letter}</span>
                 {/* JetBrains file-status colours: name tinted by status, directory dimmed after it. */}
                 <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
                     <span className={cn('shrink-0 truncate', badge.nameClass)}>{file.path.slice(slash + 1)}</span>
-                    {slash > 0 && <span className="min-w-0 truncate text-[12px] text-gray-500">{file.path.slice(0, slash)}</span>}
+                    {slash > 0 && depth === undefined && <span className="min-w-0 truncate text-[12px] text-gray-500">{file.path.slice(0, slash)}</span>}
                 </span>
-                <span className="shrink-0 font-mono text-[12px] tabular-nums">
-                    {file.additions > 0 && <span className="text-emerald-600">{`+${file.additions}`}</span>}
-                    {file.deletions > 0 && <span className="ml-1 text-red-500">{`−${file.deletions}`}</span>}
-                </span>
+                <Totals additions={file.additions} deletions={file.deletions} />
             </button>
             {open && (
                 <div className="px-2 pb-2 pt-0.5">
@@ -98,17 +117,75 @@ function FileDiff({ cwd, file, tick, mode, defaultOpen }: { cwd: string, file: G
     )
 }
 
-/** Right-hand review pane: uncommitted changes in the thread's folder, like Codex's diff panel. */
+/** Changed files by folder, like the JetBrains Commit tool window; a file row unfolds its diff in place. */
+function ChangeTree({ nodes, depth, collapsed, onToggle, cwd, tick, mode, generation }: {
+    nodes: ChangeNode[]
+    depth: number
+    collapsed: ReadonlySet<string>
+    onToggle: (path: string) => void
+    cwd: string
+    tick: number
+    mode: 'unified' | 'split'
+    generation: number
+}) {
+    return nodes.map((node) => {
+        if (node.kind === 'file')
+            return <FileDiff key={`${generation}:${node.file.path}`} cwd={cwd} file={node.file} tick={tick} mode={mode} defaultOpen={false} depth={depth} />
+        const open = !collapsed.has(node.path)
+        return (
+            <div key={node.path} role="group">
+                <button
+                    type="button"
+                    onClick={() => onToggle(node.path)}
+                    aria-expanded={open}
+                    title={node.path}
+                    style={{ paddingLeft: 8 + depth * INDENT }}
+                    className={cn('flex h-7 w-full items-center gap-1.5 pr-2 text-left text-[13px]', rowHover)}
+                >
+                    <ChevronRight size={14} className={cn('shrink-0 text-gray-500 transition-transform duration-100', open && 'rotate-90')} />
+                    <Folder size={14} className="shrink-0 text-gray-500" />
+                    <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
+                        <span className="truncate text-gray-800">{node.name}</span>
+                        <span className="shrink-0 text-[12px] text-gray-500">{tr(`${node.count} 个文件`, `${node.count} ${node.count === 1 ? 'file' : 'files'}`)}</span>
+                    </span>
+                    <Totals additions={node.additions} deletions={node.deletions} />
+                </button>
+                {open && <ChangeTree nodes={node.children} depth={depth + 1} collapsed={collapsed} onToggle={onToggle} cwd={cwd} tick={tick} mode={mode} generation={generation} />}
+            </div>
+        )
+    })
+}
+
+const headerBtn = 'flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-gray-500 hover:bg-black/[0.06] hover:text-gray-800'
+
+/** Right-hand review pane: uncommitted changes in the thread's folder, as a folder tree or a flat list. */
 export const ReviewPanel = observer(({ thread, onClose }: { thread: Thread, onClose: () => void }) => {
     const { status, loading, refresh, totals } = useGitStatus(thread.cwd, thread.changeTick)
     const [mode, setMode] = useState<'unified' | 'split'>('unified')
     const files = status?.isRepo ? status.files : []
+    const view = appStore.reviewView
+    const tree = useMemo(() => buildChangeTree(files), [files])
     const autoOpen = totals.add + totals.del <= AUTO_OPEN_LINES
     const [allOpen, setAllOpen] = useState<boolean | null>(null)
     // Expand / collapse all remounts the rows with the new default.
     const [generation, setGeneration] = useState(0)
+    // Tree: folders start expanded, so new ones show up open; this holds the ones the user folded.
+    const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set())
+    const toggleDir = (path: string) => setCollapsed((c) => {
+        const next = new Set(c)
+        if (!next.delete(path))
+            next.add(path)
+        return next
+    })
+    // List: expand / collapse every diff. Tree: every folder (diffs open one by one).
+    const expanded = view === 'tree' ? collapsed.size === 0 : (allOpen ?? autoOpen)
+    const canToggleAll = view === 'tree' ? dirPaths(tree).length > 0 : files.length > 1
     const toggleAll = () => {
-        setAllOpen(!(allOpen ?? autoOpen))
+        if (view === 'tree') {
+            setCollapsed(expanded ? new Set(dirPaths(tree)) : new Set())
+            return
+        }
+        setAllOpen(!expanded)
         setGeneration(g => g + 1)
     }
 
@@ -129,18 +206,27 @@ export const ReviewPanel = observer(({ thread, onClose }: { thread: Thread, onCl
                     </>
                 )}
                 <span className="flex-1" />
-                {files.length > 1 && (
-                    <button type="button" aria-label={(allOpen ?? autoOpen) ? tr('全部收起', 'Collapse all') : tr('全部展开', 'Expand all')} title={(allOpen ?? autoOpen) ? tr('全部收起', 'Collapse all') : tr('全部展开', 'Expand all')} onClick={toggleAll} className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-gray-500 hover:bg-black/[0.06] hover:text-gray-800">
-                        {(allOpen ?? autoOpen) ? <ChevronsDownUp size={14} /> : <ChevronsUpDown size={14} />}
+                <button
+                    type="button"
+                    aria-label={view === 'tree' ? tr('改为列表显示', 'Show as list') : tr('改为文件树显示', 'Show as tree')}
+                    title={view === 'tree' ? tr('改为列表显示', 'Show as list') : tr('改为文件树显示', 'Show as tree')}
+                    onClick={() => appStore.setReviewView(view === 'tree' ? 'list' : 'tree')}
+                    className={headerBtn}
+                >
+                    {view === 'tree' ? <List size={14} /> : <FolderTree size={14} />}
+                </button>
+                {canToggleAll && (
+                    <button type="button" aria-label={expanded ? tr('全部收起', 'Collapse all') : tr('全部展开', 'Expand all')} title={expanded ? tr('全部收起', 'Collapse all') : tr('全部展开', 'Expand all')} onClick={toggleAll} className={headerBtn}>
+                        {expanded ? <ChevronsDownUp size={14} /> : <ChevronsUpDown size={14} />}
                     </button>
                 )}
-                <button type="button" aria-label={mode === 'unified' ? tr('并排显示', 'Side by side') : tr('合并显示', 'Unified')} title={mode === 'unified' ? tr('并排显示', 'Side by side') : tr('合并显示', 'Unified')} onClick={() => setMode(m => (m === 'unified' ? 'split' : 'unified'))} className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-gray-500 hover:bg-black/[0.06] hover:text-gray-800">
+                <button type="button" aria-label={mode === 'unified' ? tr('并排显示', 'Side by side') : tr('合并显示', 'Unified')} title={mode === 'unified' ? tr('并排显示', 'Side by side') : tr('合并显示', 'Unified')} onClick={() => setMode(m => (m === 'unified' ? 'split' : 'unified'))} className={headerBtn}>
                     {mode === 'unified' ? <Columns2 size={14} /> : <Rows2 size={14} />}
                 </button>
-                <button type="button" aria-label={tr('刷新', 'Refresh')} title={tr('刷新', 'Refresh')} onClick={refresh} className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-gray-500 hover:bg-black/[0.06] hover:text-gray-800">
+                <button type="button" aria-label={tr('刷新', 'Refresh')} title={tr('刷新', 'Refresh')} onClick={refresh} className={headerBtn}>
                     {loading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
                 </button>
-                <button type="button" aria-label={tr('关闭改动面板', 'Close changes panel')} onClick={onClose} className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-gray-500 hover:bg-black/[0.06] hover:text-gray-800">
+                <button type="button" aria-label={tr('关闭改动面板', 'Close changes panel')} onClick={onClose} className={headerBtn}>
                     <X size={15} />
                 </button>
             </div>
@@ -151,7 +237,8 @@ export const ReviewPanel = observer(({ thread, onClose }: { thread: Thread, onCl
                 {status?.isRepo && files.length === 0 && (
                     <div className="px-6 py-10 text-center text-[13px] text-gray-500">{tr('没有未提交的改动', 'No uncommitted changes')}</div>
                 )}
-                {files.map(file => (
+                {view === 'tree' && <ChangeTree nodes={tree} depth={0} collapsed={collapsed} onToggle={toggleDir} cwd={thread.cwd} tick={thread.changeTick} mode={mode} generation={generation} />}
+                {view === 'list' && files.map(file => (
                     <FileDiff
                         key={`${generation}:${file.path}`}
                         cwd={thread.cwd}

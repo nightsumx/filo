@@ -67,6 +67,8 @@ export interface GlobalPrefs {
     lang?: LangPref
     /** Wording inside the conversation (tool rows, diffs, status lines). */
     transcriptLang?: TranscriptLang
+    /** Changes panel: files in a folder tree (default) or a flat list. */
+    reviewView?: ReviewView
     /** Capabilities every pi process loads; absent means DEFAULT_CAPABILITIES. Older state has a map per project cwd. */
     capabilities?: CapabilityId[] | Record<string, CapabilityId[]>
     /** Approval mode new threads start in: the last one chosen in any thread. */
@@ -75,7 +77,7 @@ export interface GlobalPrefs {
     compactAt?: number | null
 }
 
-export const GLOBAL_PREF_KEYS = ['projects', 'hiddenProjects', 'layout', 'theme', 'lang', 'transcriptLang', 'capabilities', 'approvalMode', 'compactAt'] as const satisfies readonly (keyof GlobalPrefs)[]
+export const GLOBAL_PREF_KEYS = ['projects', 'hiddenProjects', 'layout', 'theme', 'lang', 'transcriptLang', 'reviewView', 'capabilities', 'approvalMode', 'compactAt'] as const satisfies readonly (keyof GlobalPrefs)[]
 
 /** A project window as saved for the next launch. */
 export interface SavedWindow {
@@ -164,6 +166,9 @@ export interface CompactionInfo {
     enabled: boolean
     reserveTokens: number
 }
+
+export type ReviewView = 'tree' | 'list'
+export const REVIEW_VIEWS: readonly ReviewView[] = ['tree', 'list']
 
 export type TranscriptLang = 'en' | 'zh'
 export const TRANSCRIPT_LANGS: readonly TranscriptLang[] = ['en', 'zh']

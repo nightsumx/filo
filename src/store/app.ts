@@ -1,9 +1,9 @@
 import type { ApprovalMode, CapabilityId } from '@shared/capabilities'
 import type { LangPref } from '@shared/i18n'
-import type { AppState, GlobalCompactionPatch, GlobalPrefs, OpenProject, PiEnvResult, ProjectActivity, ProjectTransfer, SessionSummary, StateSave, ThemePref, TranscriptLang, WindowReport } from '@shared/ipc'
+import type { AppState, GlobalCompactionPatch, GlobalPrefs, OpenProject, PiEnvResult, ProjectActivity, ProjectTransfer, ReviewView, SessionSummary, StateSave, ThemePref, TranscriptLang, WindowReport } from '@shared/ipc'
 import { APPROVAL_MODES, DEFAULT_CAPABILITIES, normalizeCapabilities } from '@shared/capabilities'
 import { LANG_PREFS } from '@shared/i18n'
-import { DEFAULT_THEME, GLOBAL_PREF_KEYS, THEME_PREFS, TRANSCRIPT_LANGS } from '@shared/ipc'
+import { DEFAULT_THEME, GLOBAL_PREF_KEYS, REVIEW_VIEWS, THEME_PREFS, TRANSCRIPT_LANGS } from '@shared/ipc'
 import type { PiEvent, PiModel } from '@shared/pi'
 import type { ThreadHost } from './thread'
 import type { ModelWindow } from '@/lib/compactAt'
@@ -80,6 +80,8 @@ class AppStore implements ThreadHost {
     langPref: LangPref = 'system'
     /** Conversation wording; English matches pi's TUI. */
     transcriptLang: TranscriptLang = 'en'
+    /** Changes panel layout, the same in every window. */
+    reviewView: ReviewView = 'tree'
     /** Capability extensions every pi process loads, the same for all projects. */
     capabilities: CapabilityId[] = [...DEFAULT_CAPABILITIES]
     /** Mode new threads start in, the same for all projects; undefined until one is chosen. */
@@ -390,6 +392,8 @@ class AppStore implements ThreadHost {
         }
         if (has('transcriptLang'))
             this.transcriptLang = TRANSCRIPT_LANGS.includes(prefs.transcriptLang as TranscriptLang) ? prefs.transcriptLang! : 'en'
+        if (has('reviewView'))
+            this.reviewView = REVIEW_VIEWS.includes(prefs.reviewView as ReviewView) ? prefs.reviewView! : 'tree'
         if (has('compactAt'))
             this.compactAt = prefs.compactAt === null || (typeof prefs.compactAt === 'number' && prefs.compactAt > 0) ? prefs.compactAt : undefined
         if (live && Object.hasOwn(prefs, 'capabilities') && Array.isArray(prefs.capabilities)) {
@@ -445,6 +449,7 @@ class AppStore implements ThreadHost {
             theme: this.themePref,
             lang: this.langPref,
             transcriptLang: this.transcriptLang,
+            reviewView: this.reviewView,
             capabilities: this.capabilities,
             approvalMode: this.approvalMode,
             compactAt: this.compactAt,
@@ -723,6 +728,11 @@ class AppStore implements ThreadHost {
         this.langPref = pref
         applyLangPref(pref)
         void api().setLang(pref)
+        this.persist()
+    }
+
+    setReviewView(view: ReviewView) {
+        this.reviewView = view
         this.persist()
     }
 
