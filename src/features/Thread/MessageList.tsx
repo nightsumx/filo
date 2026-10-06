@@ -1,9 +1,9 @@
-import type { TranscriptRow } from '@/lib/transcriptRows'
 import type { Thread } from '@/store/thread'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { ArrowDown } from 'lucide-react'
 import { observer } from 'mobx-react-lite'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { estimateRow } from '@/lib/rowEstimate'
 import { transcriptRows } from '@/lib/transcriptRows'
 import { TRANSCRIPT_TEXT, TranscriptTextContext } from '@/lib/transcriptText'
 import { appStore } from '@/store/app'
@@ -16,28 +16,6 @@ const STICK_THRESHOLD = 80
 const PAD_TOP = 4
 const PAD_BOTTOM = 24
 const NO_TURNS: ReadonlySet<string> = new Set()
-
-/** First-paint height guess per row; real heights are measured once a row renders. */
-function estimateRow(row: TranscriptRow): number {
-    switch (row.kind) {
-        case 'user':
-            return 56 + Math.min(400, Math.floor(row.user.text.length / 100) * 20)
-        case 'live':
-        case 'fold':
-        case 'footer':
-            return 36
-        case 'item': {
-            if (row.item.kind === 'group')
-                return 36
-            const step = row.item.step
-            if (step.kind === 'text' || step.kind === 'thinking')
-                return 40 + Math.min(1600, Math.floor(step.text.length / 110) * 24)
-            if (step.kind === 'tool' && ['edit', 'write', 'apply_patch'].includes(step.call.name))
-                return 320
-            return 36
-        }
-    }
-}
 
 /**
  * Virtualized transcript: only rows near the viewport are mounted, so a session with hundreds of
@@ -71,11 +49,12 @@ export const MessageList = observer(({ thread }: { thread: Thread }) => {
         count: rows.length,
         getScrollElement: () => scrollRef.current,
         getItemKey: i => rows[i].key,
-        estimateSize: i => estimateRow(rows[i]),
+        estimateSize: i => estimateRow(rows[i], scrollRef.current?.clientWidth ?? 0),
         overscan: 6,
         paddingStart: PAD_TOP,
         paddingEnd: PAD_BOTTOM,
-        useFlushSync: false,
+        // Scroll-driven range changes render before the next paint, so newly exposed rows are never blank.
+        useFlushSync: true,
     })
 
     const toBottom = () => {
@@ -128,18 +107,26 @@ export const MessageList = observer(({ thread }: { thread: Thread }) => {
                                 <ViewStateContext value={viewState}>
                                     <TurnFoldContext value={toggleFold}>
                                         <div ref={listRef} className="relative w-full" style={{ height: virtualizer.getTotalSize() }}>
-                                            {items.map(item => (
-                                                <div
-                                                    key={item.key}
-                                                    ref={virtualizer.measureElement}
-                                                    data-index={item.index}
-                                                    data-row-kind={rows[item.index].kind}
-                                                    className="absolute left-0 top-0 w-full"
-                                                    style={{ transform: `translateY(${item.start}px)` }}
-                                                >
-                                                    <TranscriptRowView row={rows[item.index]} thread={thread} top={item.index === 0} />
-                                                </div>
-                                            ))}
+                                            {/*
+                                              * Rows sit in normal flow under one offset wrapper rather than each at its own
+                                              * translateY. When a row turns out taller than its estimate (typically one
+                                              * mounting above the viewport while scrolling up), the rows below move with it in
+                                              * the same layout, and the virtualizer's scrollTop correction lands in that same
+                                              * frame. With per-row transforms the correction was painted a frame before React
+                                              * re-positioned the rows, so content overlapped and jumped: the flicker.
+                                              */}
+                                            <div className="absolute left-0 top-0 w-full" style={{ transform: `translateY(${items[0]?.start ?? 0}px)` }}>
+                                                {items.map(item => (
+                                                    <div
+                                                        key={item.key}
+                                                        ref={virtualizer.measureElement}
+                                                        data-index={item.index}
+                                                        data-row-kind={rows[item.index].kind}
+                                                    >
+                                                        <TranscriptRowView row={rows[item.index]} thread={thread} top={item.index === 0} />
+                                                    </div>
+                                                ))}
+                                            </div>
                                         </div>
                                     </TurnFoldContext>
                                 </ViewStateContext>
