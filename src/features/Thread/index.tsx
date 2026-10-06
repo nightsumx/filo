@@ -1,4 +1,5 @@
 import type { Thread } from '@/store/thread'
+import { TRANSCRIPT_TEXT, TranscriptTextContext } from '@/lib/transcriptText'
 import { cn, relativeTime, shortPath } from '@/lib/utils'
 import { appStore } from '@/store/app'
 import { Loader2 } from 'lucide-react'
@@ -6,7 +7,7 @@ import { observer } from 'mobx-react-lite'
 import { useEffect } from 'react'
 import appIcon from '@/assets/logo.png'
 import { Composer } from '../Composer'
-import { ExtensionDialog } from './ExtensionDialog'
+import { ExtensionRequest } from './ExtensionRequest'
 import { MessageList } from './MessageList'
 
 /** Shortcut hints shown on empty editors, like WebStorm's empty editor area. */
@@ -84,8 +85,15 @@ export const ThreadPane = observer(({ thread, focused }: { thread: Thread, focus
             {!thread.loaded
                 ? <div className="flex flex-1 items-center justify-center"><Loader2 size={18} className="animate-spin text-gray-300" /></div>
                 : thread.isEmpty && !thread.persisted ? <Hero thread={thread} /> : <MessageList thread={thread} />}
+            {/* Requests normally render in the transcript's live row; without a running turn there is none. */}
+            {!(thread.running && thread.turns.length > 0) && thread.uiRequests.length > 0 && (
+                <div className="mx-auto w-full max-w-5xl px-5 pb-3">
+                    <TranscriptTextContext value={TRANSCRIPT_TEXT[appStore.transcriptLang]}>
+                        <ExtensionRequest thread={thread} />
+                    </TranscriptTextContext>
+                </div>
+            )}
             <Composer thread={thread} />
-            <ExtensionDialog thread={thread} />
         </section>
     )
 })

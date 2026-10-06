@@ -8,6 +8,7 @@ import copyText from 'copy-to-clipboard'
 import { Check, Copy } from 'lucide-react'
 import { observer } from 'mobx-react-lite'
 import { memo, useEffect, useState } from 'react'
+import { ExtensionRequest } from './ExtensionRequest'
 import { StepView } from './StepView'
 import { Gutter, ToolGroup } from './ToolRow'
 
@@ -90,9 +91,9 @@ const RunningLine = observer(({ thread, turn }: { thread: Thread, turn: Turn }) 
                 : verbFor(t, turn.key)[0]
     const tokens = estimateTokens(turn.steps) + estimateTokens(thread.streamingSteps)
     const elapsed = t.duration(Date.now() - (thread.runStartedAt || Date.now()))
-    // pi is blocked on the user (ask form, dialog); the waiting step says so, a spinner would not.
+    // pi is blocked on the user: an ask form shows in its step, an extension request takes this slot.
     if (thread.waitingForUser)
-        return null
+        return <ExtensionRequest thread={thread} />
     return (
         <Gutter mark={SPARK_FRAMES[frame % SPARK_FRAMES.length]} markClassName="text-[#d7875f]">
             <div className="flex h-6 min-w-0 items-center gap-1.5 text-[13px]">
