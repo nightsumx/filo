@@ -11,6 +11,8 @@ import { diffFromContent, diffFromEdits, diffFromPatch } from '@/lib/diffModel'
 import { formatToolInput, tuiSummary, tuiTitle } from '@/lib/toolMeta'
 import { useT } from '@/lib/transcriptText'
 import { cn } from '@/lib/utils'
+import { observer } from 'mobx-react-lite'
+import { useThread } from './ThreadContext'
 import { useViewState } from './viewState'
 import { createContext, memo, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 
@@ -87,9 +89,9 @@ function useWidth<T extends HTMLElement>() {
         if (!el)
             return
         setWidth(el.clientWidth)
-        const observer = new ResizeObserver(() => setWidth(el.clientWidth))
-        observer.observe(el)
-        return () => observer.disconnect()
+        const ro = new ResizeObserver(() => setWidth(el.clientWidth))
+        ro.observe(el)
+        return () => ro.disconnect()
     }, [])
     return [ref, width] as const
 }
@@ -178,7 +180,7 @@ function editDiff(call: ToolCall, result?: ToolResultView): DiffModel | null {
 }
 
 /** Re-renders every second while `active`; returns the current time. */
-function useNow(active: boolean): number {
+export function useNow(active: boolean): number {
     const [now, setNow] = useState(Date.now())
     useEffect(() => {
         if (!active)
@@ -199,6 +201,15 @@ function ToolTime({ running, startedAt, ms }: { running: boolean, startedAt?: nu
         return null
     return <span className="tabular-nums text-gray-400">{` · ${running ? t.duration(value) : t.elapsed(value)}`}</span>
 }
+
+/** "Running…", or that the call waits on an approval prompt (shown under the transcript). */
+const PendingLabel = observer(({ toolCallId }: { toolCallId: string }) => {
+    const t = useT()
+    const thread = useThread()
+    if (thread?.approvalFor(toolCallId))
+        return <span className="text-amber-600 dark:text-amber-400">等你确认</span>
+    return <span className="text-gray-500">{t.pending}</span>
+})
 
 /** Live tail of a running command's output, so long builds are not a silent spinner. */
 function LiveTail({ text }: { text: string }) {
@@ -240,7 +251,7 @@ export const ToolRow = memo(({ call, result, running, startedAt, ms }: { call: T
     if (status === 'running') {
         resultLine = (
             <>
-                <span className="text-gray-500">{t.pending}</span>
+                <PendingLabel toolCallId={call.id} />
                 {time}
             </>
         )

@@ -10,7 +10,7 @@ import { observer } from 'mobx-react-lite'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { StatusLine } from '../Thread/StatusLine'
-import { ModelPicker, ThinkingPicker } from './Pickers'
+import { ModelPicker, ModePicker, ThinkingPicker } from './Pickers'
 import { TodoBar } from './TodoBar'
 
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024
@@ -106,7 +106,7 @@ export const Composer = observer(({ thread }: { thread: Thread }) => {
     const queued = [...thread.queue.steering, ...thread.queue.followUp]
     const widgetsAbove = Object.entries(thread.widgets).filter(([, w]) => w.placement === 'aboveEditor')
     const widgetsBelow = Object.entries(thread.widgets).filter(([, w]) => w.placement === 'belowEditor')
-    const statuses = Object.entries(thread.statuses)
+    const statuses = thread.visibleStatuses
 
     const pickCommand = (c: SlashCommand) => {
         thread.draft = `/${c.name} `
@@ -214,7 +214,7 @@ export const Composer = observer(({ thread }: { thread: Thread }) => {
                         value={thread.draft}
                         rows={2}
                         aria-label="给 pi 发消息"
-                        placeholder={thread.running ? '继续输入以引导 pi（Esc 中断）' : '让 pi 做点什么，输入 / 查看命令'}
+                        placeholder={thread.running ? '继续输入以引导 pi（Esc 中断）' : thread.planMode ? '描述要做的事，pi 先写出计划给你审阅' : '让 pi 做点什么，输入 / 查看命令'}
                         onChange={(e) => {
                             thread.draft = e.target.value
                             setSlashDismissed(false)
@@ -252,6 +252,7 @@ export const Composer = observer(({ thread }: { thread: Thread }) => {
                         />
                         <ModelPicker thread={thread} />
                         <ThinkingPicker thread={thread} />
+                        <ModePicker thread={thread} />
                         <span className="flex-1" />
                         {thread.running && !canSend
                             ? (

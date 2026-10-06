@@ -15,6 +15,15 @@ export function formatTokens(tokens: number | undefined | null): string {
     return `${(tokens / 1000000).toFixed(1)}M`
 }
 
+/** Compact counts for transcript footers: "812", "52.1k". */
+export function formatCount(n: number): string {
+    return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n)
+}
+
+export function formatCost(n: number): string {
+    return n >= 0.01 ? `$${n.toFixed(2)}` : `$${n.toFixed(4)}`
+}
+
 export function basename(p: string): string {
     const parts = p.split('/').filter(Boolean)
     return parts[parts.length - 1] || p

@@ -2,6 +2,7 @@
 // guesses keep the scrollbar steady and make the scroll corrections on first measure small.
 // Constants are the rendered sizes at the 13.5px transcript font (line-height 1.65), fitted against
 // real sessions; text is wrapped by an approximate glyph width.
+import type { Step } from './timeline'
 import type { TranscriptRow } from './transcriptRows'
 
 const LINE = 22.3
@@ -89,6 +90,48 @@ function editLines(args: Record<string, any> | undefined): number {
     return n
 }
 
+type ToolStep = Extract<Step, { kind: 'tool' }>
+
+/** Child transcript cap (SubagentStep's max-h-[420px]) and the steer field under it. */
+const SUBAGENT_TRANSCRIPT = 420
+const SUBAGENT_CONTROLS = 38
+
+/**
+ * Finished subagents fold to their row. A running one is open: task line, the child's transcript
+ * (capped, it scrolls) and the steer field.
+ */
+function subagentHeight(step: ToolStep, width: number): number {
+    if (!step.running)
+        return ROW_LINE
+    const details = step.result?.details
+    const inner = width - 14
+    let transcript = 0
+    const messages = [...(details?.messages ?? []), ...(details?.streaming ? [details.streaming] : [])]
+    for (const message of messages) {
+        if (message?.role !== 'assistant')
+            continue
+        for (const block of message.content ?? []) {
+            if (block.type === 'text' && block.text)
+                transcript += 2 + markdownHeight(block.text, inner).height
+            else if (block.type === 'thinking' && block.thinking)
+                transcript += 2 + ROW_LINE + Math.min(THINKING_LINES, markdownHeight(block.thinking, inner).lines) * LINE
+            else if (block.type === 'toolCall')
+                transcript += 2 + ROW_LINE + RESULT_LINE
+        }
+    }
+    const steering = (details?.steering?.length ?? 0) * 20
+    return ROW_LINE + 6 + ROW_LINE + Math.min(SUBAGENT_TRANSCRIPT, transcript) + (details ? SUBAGENT_CONTROLS + steering : 0)
+}
+
+/** A pending ask is a form (question, choices, buttons); an answered one lists question → answer. */
+function askHeight(step: ToolStep): number {
+    const details = step.result?.details
+    const questions: unknown[] = details?.questions ?? (Array.isArray(step.call.arguments?.questions) ? step.call.arguments.questions : [])
+    if (step.running && details?.status === 'pending')
+        return ROW_LINE + 6 + questions.length * 56 + questions.length * 20 + 28 + 8
+    return ROW_LINE + (questions.length ? questions.length * 20 + 4 : 0)
+}
+
 /** `listWidth` is the scroll container's client width. Whole pixels, like measured sizes. */
 export function estimateRow(row: TranscriptRow, listWidth: number): number {
     return Math.round(estimate(row, listWidth))
@@ -123,6 +166,22 @@ function estimate(row: TranscriptRow, listWidth: number): number {
                     return pad + ROW_LINE + (lines > THINKING_LINES ? Math.ceil(THINKING_LINES * LINE) + 2 + SHOW_MORE : height)
                 }
                 case 'tool':
+                    if (step.call.name === 'subagent')
+                        return pad + subagentHeight(step, width)
+                    if (step.call.name === 'ask')
+                        return pad + askHeight(step)
+                    // One summary row; the list opens on click.
+                    if (step.call.name === 'todo')
+                        return pad + ROW_LINE
+                    if (step.call.name === 'propose_plan') {
+                        const details = step.result?.details
+                        const plan = String(details?.plan ?? step.call.arguments?.plan ?? '')
+                        if (details?.status === 'revised')
+                            return pad + ROW_LINE + RESULT_LINE
+                        if (details?.status === 'cancelled')
+                            return pad + ROW_LINE
+                        return pad + ROW_LINE + 20 + markdownHeight(plan, width - 24).height + (step.running ? 44 : 0)
+                    }
                     if (step.call.name === 'edit' && !step.result?.isError)
                         return pad + ROW_LINE + RESULT_LINE + 16 + Math.min(DIFF_ROWS, editLines(step.call.arguments) + 6) * DIFF_ROW
                     return pad + ROW_LINE + RESULT_LINE

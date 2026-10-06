@@ -1,9 +1,10 @@
-import type { CapabilityId } from '@shared/capabilities'
+import type { ApprovalMode, CapabilityId } from '@shared/capabilities'
 import type { AppState, GlobalCompactionPatch, PiEnvResult, SessionSummary, ThemePref, TranscriptLang } from '@shared/ipc'
-import { DEFAULT_CAPABILITIES, normalizeCapabilities } from '@shared/capabilities'
+import { APPROVAL_MODES, DEFAULT_CAPABILITIES, normalizeCapabilities } from '@shared/capabilities'
 import { DEFAULT_THEME, THEME_PREFS, TRANSCRIPT_LANGS } from '@shared/ipc'
 import type { PiEvent } from '@shared/pi'
 import type { ThreadHost } from './thread'
+import { WAITING_LABEL } from '@/lib/threadActivity'
 import { basename, uid } from '@/lib/utils'
 import { makeAutoObservable, observable, reaction, runInAction } from 'mobx'
 import { toast } from 'sonner'
@@ -70,6 +71,7 @@ class AppStore implements ThreadHost {
     transcriptLang: TranscriptLang = 'en'
     /** Capabilities chosen per project; absent means DEFAULT_CAPABILITIES. */
     capabilitiesByProject: Record<string, CapabilityId[]> = {}
+    approvalModeByProject: Record<string, ApprovalMode> = {}
     settingsOpen = false
     /** Page shown in Settings; kept while the app runs so reopening returns to it. */
     settingsPage: SettingsPageId = 'appearance'
@@ -212,7 +214,7 @@ class AppStore implements ThreadHost {
                 for (const key of keys) {
                     const thread = this.threads.get(key)
                     if (thread && !waiting.has(key))
-                        this.notify(thread, '等你回答', thread.waitingFor || '需要你的确认', true)
+                        this.notify(thread, WAITING_LABEL[thread.waitingKind ?? 'question'], thread.waitingFor || '需要你的确认', true)
                 }
                 waiting = new Set(keys)
                 void api().setBadge(keys.length)
@@ -286,6 +288,7 @@ class AppStore implements ThreadHost {
         this.transcriptLang = TRANSCRIPT_LANGS.includes(state.transcriptLang as TranscriptLang) ? state.transcriptLang! : 'en'
         this.activeProject = state.activeProject ?? null
         this.capabilitiesByProject = Object.fromEntries(Object.entries(state.capabilities ?? {}).map(([cwd, ids]) => [cwd, normalizeCapabilities(ids)]))
+        this.approvalModeByProject = Object.fromEntries(Object.entries(state.approvalModes ?? {}).filter(([, mode]) => APPROVAL_MODES.includes(mode)))
         // Thread objects are created lazily per project (restoreTabs); keep the saved order for now.
         this.tabsByProject = { ...state.tabs }
         this.activeTabByProject = { ...state.activeTabs }
@@ -320,6 +323,7 @@ class AppStore implements ThreadHost {
             theme: this.themePref,
             transcriptLang: this.transcriptLang,
             capabilities: this.capabilitiesByProject,
+            approvalModes: this.approvalModeByProject,
         }
         const json = JSON.stringify(state)
         if (json === this.savedState)
@@ -364,6 +368,15 @@ class AppStore implements ThreadHost {
     /** A plain copy: it is sent over IPC, which cannot clone MobX arrays. */
     capabilitiesOf(cwd: string): CapabilityId[] {
         return [...(this.capabilitiesByProject[cwd] ?? DEFAULT_CAPABILITIES)]
+    }
+
+    approvalModeOf(cwd: string): ApprovalMode | undefined {
+        return this.approvalModeByProject[cwd]
+    }
+
+    setApprovalModeOf(cwd: string, mode: ApprovalMode) {
+        this.approvalModeByProject[cwd] = mode
+        this.persist()
     }
 
     registerAgent(agentId: string, thread: Thread) {

@@ -5,6 +5,8 @@ import { cn } from '@/lib/utils'
 import { Archive, GitBranch, Puzzle } from 'lucide-react'
 import { memo } from 'react'
 import { AskStep } from './capabilities/AskStep'
+import { PlanStep } from './capabilities/PlanStep'
+import { SubagentStep } from './capabilities/SubagentStep'
 import { TodoStep } from './capabilities/TodoStep'
 import { ThinkingBlock } from './ThinkingBlock'
 import { Gutter, ToolRow } from './ToolRow'
@@ -85,6 +87,10 @@ export const StepView = memo(({ step }: { step: Step }) => {
                 return <TodoStep call={step.call} result={step.result} running={step.running} />
             if (step.call.name === 'ask')
                 return <AskStep call={step.call} result={step.result} running={step.running} />
+            if (step.call.name === 'propose_plan')
+                return <PlanStep call={step.call} result={step.result} running={step.running} />
+            if (step.call.name === 'subagent')
+                return <SubagentStep call={step.call} result={step.result} running={step.running} />
             return <ToolRow call={step.call} result={step.result} running={step.running} startedAt={step.startedAt} ms={step.ms} />
         case 'bash':
             return <BashExecution id={step.key} message={step.message} />

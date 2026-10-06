@@ -1,10 +1,10 @@
 import type { PiModel, ThinkingLevel } from '@shared/pi'
 import type { KeyboardEvent } from 'react'
-import type { Thread } from '@/store/thread'
+import type { Thread, ThreadMode } from '@/store/thread'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { cn, formatTokens } from '@/lib/utils'
-import { Brain, Check, ChevronDown, Cpu } from 'lucide-react'
+import { Brain, Check, ChevronDown, ClipboardList, Cpu, FilePen, ShieldCheck, Zap } from 'lucide-react'
 import { observer } from 'mobx-react-lite'
 import { useRef, useState } from 'react'
 
@@ -155,5 +155,50 @@ export const ThinkingPicker = observer(({ thread }: { thread: Thread }) => {
                 <EffortSlider levels={levels} value={current} onChange={level => thread.setThinkingLevel(level)} />
             </PopoverContent>
         </Popover>
+    )
+})
+
+const MODES: { mode: ThreadMode, label: string, hint: string, icon: typeof Zap }[] = [
+    { mode: 'ask', label: '每次确认', hint: '改文件、跑命令前都先问你', icon: ShieldCheck },
+    { mode: 'edits', label: '自动编辑', hint: '项目里的文件改动直接做，命令仍先问你', icon: FilePen },
+    { mode: 'auto', label: '全自动', hint: '不再询问', icon: Zap },
+    { mode: 'plan', label: '计划', hint: '只读探索，写出计划等你批准后再动手', icon: ClipboardList },
+]
+
+/**
+ * Approval mode and plan mode in one menu: plan is a stage before any approval matters, so they
+ * read as one "how much may pi do" choice. Entries appear for the capabilities this thread loaded.
+ */
+export const ModePicker = observer(({ thread }: { thread: Thread }) => {
+    const current = thread.mode
+    const hasApproval = thread.approvalMode !== undefined
+    const hasPlan = thread.guiCommands.includes('gui-plan')
+    // Without approval, 全自动 is how plan mode is left.
+    const options = MODES.filter(m => m.mode === 'plan' ? hasPlan : hasApproval || (m.mode === 'auto' && hasPlan))
+    if (!options.length)
+        return null
+    // Plan loaded without approval: outside plan mode pi runs everything, like 全自动.
+    const active = MODES.find(m => m.mode === (current ?? 'auto'))!
+    const Icon = active.icon
+    return (
+        <DropdownMenu>
+            <DropdownMenuTrigger className={cn(pill, current === 'plan' && 'text-ide-accent hover:text-ide-accent')} title={active.hint}>
+                <Icon size={13} />
+                <span>{active.label}</span>
+                <ChevronDown size={12} />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="w-80">
+                {options.map(({ mode, label, hint, icon: ItemIcon }) => (
+                    <DropdownMenuItem key={mode} onSelect={() => void thread.setMode(mode)} className="h-auto items-start py-1.5">
+                        <ItemIcon size={14} className="mt-0.5 shrink-0 text-gray-500" />
+                        <span className="flex min-w-0 flex-1 flex-col">
+                            <span>{label}</span>
+                            <span className="text-[11.5px] text-gray-500">{hint}</span>
+                        </span>
+                        {mode === current && <Check size={14} className="mt-0.5 text-ide-accent" />}
+                    </DropdownMenuItem>
+                ))}
+            </DropdownMenuContent>
+        </DropdownMenu>
     )
 })

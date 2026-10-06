@@ -5,9 +5,10 @@ import { Button } from '@/components/ui/button'
 import { flatFieldClass } from '@/components/ui/form'
 import { useT } from '@/lib/transcriptText'
 import { cn } from '@/lib/utils'
+import { displayPath, tuiTitle } from '@/lib/toolMeta'
 import { observer } from 'mobx-react-lite'
-import { useState } from 'react'
-import { Gutter } from './ToolRow'
+import { useContext, useState } from 'react'
+import { CwdContext, Gutter } from './ToolRow'
 
 type Payload = { value?: string, confirmed?: boolean, cancelled?: boolean }
 
@@ -93,12 +94,57 @@ function RequestForm({ request, onRespond }: { request: UiRequest, onRespond: (p
     )
 }
 
+/**
+ * An approval capability prompt: the call it is about, then allow / always / deny. It sits right
+ * under the waiting tool row (pi runs one approval at a time), so the call itself stays in view.
+ */
+function ApprovalPrompt({ thread, request }: { thread: Thread, request: UiRequest }) {
+    const cwd = useContext(CwdContext)
+    const approval = request.approval!
+    const options = request.options ?? []
+    const isBash = approval.tool === 'bash'
+    const always = !approval.scope ? '' : isBash ? `总是允许 ${approval.scope} 命令` : `总是允许 ${tuiTitle(approval.scope)}`
+    const summary = /^(edit|write|read)$/.test(approval.tool) ? displayPath(approval.summary, cwd) : approval.summary
+    // A main-thread call's row sits right above and already shows a one-line summary; a subagent's
+    // call is inside its card, and long commands are truncated in the row.
+    const canAlways = options.includes('always') && !!always
+    const showSummary = !!approval.agent || summary.includes('\n') || summary.length > 90
+    return (
+        <Gutter mark={<span className="text-amber-500">?</span>}>
+            <div className="flex min-h-6 items-center gap-1.5 text-[12.5px]">
+                <span className="font-mono font-semibold text-gray-900">{tuiTitle(approval.tool)}</span>
+                <span className="shrink-0 text-amber-600 dark:text-amber-400">需要你确认</span>
+                {approval.agent && <span className="min-w-0 truncate text-gray-500">{`· 子 Agent「${approval.agent}」`}</span>}
+            </div>
+            {showSummary && <pre className="mt-0.5 max-h-40 overflow-y-auto rounded-md bg-ide-block px-3 py-1.5 font-mono text-[12px] leading-5 whitespace-pre-wrap break-all text-gray-800 select-text">{summary}</pre>}
+            <div
+                role="group"
+                aria-label={`是否允许 ${tuiTitle(approval.tool)}`}
+                className="mt-2 mb-1 flex flex-wrap items-center gap-2"
+                onKeyDown={(e) => {
+                    if (e.key === 'Escape') {
+                        e.preventDefault()
+                        thread.answerApproval(request, 'deny')
+                    }
+                }}
+            >
+                <Button variant="primary" className="min-w-[72px]" onClick={() => thread.answerApproval(request, 'allow')}>允许</Button>
+                {canAlways && <Button onClick={() => thread.answerApproval(request, 'always')}>{always}</Button>}
+                <Button variant="ghost" onClick={() => thread.answerApproval(request, 'deny')}>拒绝</Button>
+                {canAlways && <span className="ml-auto text-[12px] text-[var(--jb-comment)]">「总是允许」只在这个线程里有效</span>}
+            </div>
+        </Gutter>
+    )
+}
+
 /** The oldest pending extension request of a thread, answered in place. */
 export const ExtensionRequest = observer(({ thread }: { thread: Thread }) => {
     const t = useT()
     const request = thread.uiRequests[0]
     if (!request)
         return null
+    if (request.approval)
+        return <ApprovalPrompt thread={thread} request={request} />
     return (
         <Gutter mark={<span className="text-amber-500">?</span>}>
             <div className="flex min-h-6 items-center gap-1.5 text-[12.5px]">

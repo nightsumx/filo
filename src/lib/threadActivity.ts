@@ -21,6 +21,7 @@ export interface ActivityInput {
     retry: { attempt: number, maxAttempts: number } | null
     /** Question or dialog title pi is blocked on; undefined when not waiting. */
     waitingFor?: string
+    waitingKind?: WaitingKind
     /** Process failure (start error, crash). */
     agentError: string
     /** Steps of the last turn followed by the streaming message's steps. */
@@ -49,6 +50,10 @@ function describeStep(step: Step | undefined, cwd?: string): string {
         // The todo list and patches say enough without their arguments.
         if (name === 'todo' || name === 'apply_patch')
             return VERBS[name]
+        if (name === 'subagent')
+            return `子 Agent · ${String(args?.title ?? '').trim() || '运行中'}`
+        if (name === 'propose_plan')
+            return '写计划'
         const { main } = tuiSummary(name, args, cwd)
         const verb = VERBS[name] ?? tuiTitle(name)
         return main ? `${verb} ${main}` : verb
@@ -57,6 +62,14 @@ function describeStep(step: Step | undefined, cwd?: string): string {
         return '回复中'
     // Thinking, or a finished step while the next model call is in flight.
     return '思考中'
+}
+
+export type WaitingKind = 'question' | 'approval' | 'plan'
+
+export const WAITING_LABEL: Record<WaitingKind, string> = {
+    question: '等你回答',
+    approval: '等你确认',
+    plan: '等你审阅计划',
 }
 
 function firstLine(text: string): string {
@@ -68,8 +81,10 @@ export function threadActivity(input: ActivityInput): ThreadActivity {
     const done = items.filter(i => i.status === 'done').length
     const progress = items.length && done < items.length ? { done, total: items.length } : undefined
 
-    if (input.waitingFor !== undefined)
-        return { phase: 'waiting', text: input.waitingFor ? `等你回答 · ${firstLine(input.waitingFor)}` : '等你回答', progress }
+    if (input.waitingFor !== undefined) {
+        const label = WAITING_LABEL[input.waitingKind ?? 'question']
+        return { phase: 'waiting', text: input.waitingFor ? `${label} · ${firstLine(input.waitingFor)}` : label, progress }
+    }
     if (input.running) {
         let text: string
         if (input.starting)

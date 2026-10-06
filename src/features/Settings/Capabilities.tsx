@@ -46,7 +46,7 @@ export const CapabilitiesPage = observer(() => {
                     title={(
                         <>
                             {c.label}
-                            <span className="ml-2 text-[12px] tabular-nums text-[var(--jb-comment)]">{`${c.contextTokens} tokens`}</span>
+                            <span className="ml-2 text-[12px] tabular-nums text-[var(--jb-comment)]">{c.contextTokens ? `${c.contextTokens} tokens` : '不占上下文'}</span>
                         </>
                     )}
                     description={c.description}

@@ -49,4 +49,15 @@ describe('transcriptRows', () => {
         const rows = transcriptRows([turn('a', [text('a:0', 'x')]), turn('b', [text('b:0', 'y')])])
         expect(new Set(rows.map(r => r.key)).size).toBe(rows.length)
     })
+
+    it('keeps an approved plan above the fold, and skips a fold with nothing else in it', () => {
+        const plan = (key: string, status: string): Step => ({ ...tool(key, 'propose_plan'), result: { content: [], isError: false, details: { kind: 'plan', status } } } as Step)
+        const rows = transcriptRows([
+            turn('a', [plan('a:0', 'approved'), tool('a:1', 'edit'), text('a:2', 'done')]),
+            turn('b', [plan('b:0', 'approved'), text('b:1', 'ok')]),
+            turn('c', [plan('c:0', 'revised'), text('c:1', 'ok')]),
+        ])
+        const keys = rows.map(r => r.kind === 'item' && r.item.kind === 'step' ? r.item.step.key : r.kind)
+        expect(keys).toEqual(['user', 'a:0', 'fold', 'a:2', 'footer', 'user', 'b:0', 'b:1', 'footer', 'user', 'fold', 'c:1', 'footer'])
+    })
 })

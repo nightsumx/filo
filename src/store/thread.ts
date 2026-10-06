@@ -1,4 +1,4 @@
-import type { AskResponse, CapabilityId, GuiCommands, TodoDetails } from '@shared/capabilities'
+import type { ApprovalChoice, ApprovalMode, ApprovalRequest, AskResponse, CapabilityId, GuiCommands, PlanDecision, TodoDetails } from '@shared/capabilities'
 import type { AgentExitInfo } from '@shared/ipc'
 import type {
     AgentMessage,
@@ -17,7 +17,9 @@ import type { BlockTime, Step, TimelineMessage, ToolExecState, ToolResultView } 
 import { parsePartialJson } from '@/lib/partialJson'
 import { threadActivity } from '@/lib/threadActivity'
 import { blockTimeKey, buildTurns, contentText } from '@/lib/timeline'
-import { GUI_COMMAND_PREFIX } from '@shared/capabilities'
+import type { WaitingKind } from '@/lib/threadActivity'
+import { tuiTitle } from '@/lib/toolMeta'
+import { APPROVAL_MODES, APPROVAL_TITLE_PREFIX, GUI_COMMAND_PREFIX, GUI_STATUS } from '@shared/capabilities'
 import { readableError } from '@/lib/utils'
 import { makeAutoObservable, observable, runInAction, toJS } from 'mobx'
 import { toast } from 'sonner'
@@ -34,6 +36,23 @@ export interface UiRequest {
     options?: string[]
     placeholder?: string
     prefill?: string
+    /** Set for the approval capability's prompts (a select whose title carries the request). */
+    approval?: ApprovalRequest
+}
+
+/** What the mode picker shows: plan mode, or the approval mode outside it. */
+export type ThreadMode = ApprovalMode | 'plan'
+
+function parseApproval(title?: string): ApprovalRequest | undefined {
+    if (!title?.startsWith(APPROVAL_TITLE_PREFIX))
+        return undefined
+    try {
+        const request = JSON.parse(title.slice(APPROVAL_TITLE_PREFIX.length))
+        return typeof request?.toolCallId === 'string' ? request : undefined
+    }
+    catch {
+        return undefined
+    }
 }
 
 export interface ThreadHost {
@@ -41,6 +60,9 @@ export interface ThreadHost {
     rekey: (thread: Thread, oldKey: string) => void
     onSettled: (thread: Thread) => void
     capabilitiesOf: (cwd: string) => CapabilityId[]
+    /** Approval mode new sessions of the project start in; updated when a thread switches mode. */
+    approvalModeOf: (cwd: string) => ApprovalMode | undefined
+    setApprovalModeOf: (cwd: string, mode: ApprovalMode) => void
     /** Bumps when pi's own settings.json changes from the app; pi reads it only at startup. */
     piSettingsEpoch: number
 }
@@ -84,6 +106,8 @@ export class Thread {
     models: PiModel[] = []
     thinkingLevels: ThinkingLevel[] = []
     commands: SlashCommand[] = []
+    /** Hidden `/gui-…` commands the process registered: which capabilities it actually loaded. */
+    guiCommands: string[] = []
     stats: SessionStats | null = null
     queue: { steering: string[], followUp: string[] } = { steering: [], followUp: [] }
 
@@ -160,6 +184,25 @@ export class Thread {
         return this.stats?.contextUsage?.percent ?? null
     }
 
+    /** Approval mode the extension reported; undefined when the capability is not loaded. */
+    get approvalMode(): ApprovalMode | undefined {
+        const mode = this.statuses[GUI_STATUS.approval] as ApprovalMode | undefined
+        return mode && APPROVAL_MODES.includes(mode) ? mode : undefined
+    }
+
+    get planMode(): boolean {
+        return this.statuses[GUI_STATUS.plan] === 'on'
+    }
+
+    get mode(): ThreadMode | undefined {
+        return this.planMode ? 'plan' : this.approvalMode
+    }
+
+    /** Extension status entries for display; `gui-` keys carry mode state instead. */
+    get visibleStatuses(): [string, string][] {
+        return Object.entries(this.statuses).filter(([key]) => !key.startsWith(GUI_COMMAND_PREFIX))
+    }
+
     /** Latest todo list on the branch; every todo call carries the full list. */
     get todo(): TodoDetails | null {
         const messages = [...this.items, ...this.live]
@@ -177,14 +220,34 @@ export class Thread {
     }
 
     /** The question or dialog title pi is blocked on, or undefined when it is not waiting. */
+    /** What kind of answer pi waits for, worded in the tree and notifications. */
+    get waitingKind(): WaitingKind | undefined {
+        if (this.waitingFor === undefined)
+            return undefined
+        if (this.uiRequests[0]?.approval)
+            return 'approval'
+        if (!this.uiRequests.length && [...this.tools.values()].some(s => s.running && s.partial?.details?.kind === 'plan'))
+            return 'plan'
+        return 'question'
+    }
+
+    /** The approval prompt pi is blocked on for a tool call, if any. */
+    approvalFor(toolCallId: string): UiRequest | undefined {
+        return this.uiRequests.find(r => r.approval?.toolCallId === toolCallId)
+    }
+
     get waitingFor(): string | undefined {
         const request = this.uiRequests[0]
+        if (request?.approval)
+            return `${tuiTitle(request.approval.tool)} ${request.approval.summary}`
         if (request)
             return request.title || request.message || ''
         for (const state of this.tools.values()) {
             const details = state.partial?.details
             if (state.running && details?.kind === 'ask' && details.status === 'pending')
                 return details.questions?.[0]?.question ?? ''
+            if (state.running && details?.kind === 'plan' && details.status === 'pending')
+                return ''
         }
         return undefined
     }
@@ -198,6 +261,7 @@ export class Thread {
             compacting: this.compacting,
             retry: this.retry,
             waitingFor: this.waitingFor,
+            waitingKind: this.waitingKind,
             agentError: this.agentError,
             steps: [...(turns[turns.length - 1]?.steps ?? []), ...this.streamingSteps],
             todo: this.todo,
@@ -249,7 +313,7 @@ export class Thread {
         const capabilities = this.host.capabilitiesOf(this.cwd)
         this.loadedConfig = this.configKey()
         this.restartPending = false
-        const agentId = await api().agentStart({ cwd: this.cwd, sessionPath: resumable, capabilities })
+        const agentId = await api().agentStart({ cwd: this.cwd, sessionPath: resumable, capabilities, approvalMode: this.host.approvalModeOf(this.cwd) })
         runInAction(() => {
             this.agentId = agentId
             this.stopping = false
@@ -367,8 +431,12 @@ export class Thread {
 
     async refreshCommands() {
         const data = await this.call<{ commands: SlashCommand[] }>({ type: 'get_commands' })
-        if (data)
-            runInAction(() => (this.commands = data.commands.filter(c => !c.name.startsWith(GUI_COMMAND_PREFIX))))
+        if (data) {
+            runInAction(() => {
+                this.commands = data.commands.filter(c => !c.name.startsWith(GUI_COMMAND_PREFIX))
+                this.guiCommands = data.commands.filter(c => c.name.startsWith(GUI_COMMAND_PREFIX)).map(c => c.name)
+            })
+        }
     }
 
     async refreshStats() {
@@ -498,6 +566,58 @@ export class Thread {
         }
     }
 
+    /** Plan mode, or an approval mode (leaving plan mode first). Approval modes become the project default. */
+    async setMode(mode: ThreadMode) {
+        try {
+            if (mode === 'plan') {
+                await this.guiCommand('gui-plan', 'on')
+                return
+            }
+            if (this.planMode)
+                await this.guiCommand('gui-plan', 'off')
+            if (this.approvalMode !== undefined) {
+                await this.guiCommand('gui-approval', mode)
+                this.host.setApprovalModeOf(this.cwd, mode)
+            }
+        }
+        catch (error: any) {
+            toast.error(error.message)
+        }
+    }
+
+    answerApproval(request: UiRequest, choice: ApprovalChoice) {
+        this.respondUi(request, { value: choice })
+    }
+
+    async decidePlan(toolCallId: string, decision: PlanDecision) {
+        try {
+            await this.guiCommand('gui-plan-decide', `${toolCallId} ${JSON.stringify(decision)}`)
+        }
+        catch (error: any) {
+            toast.error(error.message)
+        }
+    }
+
+    async steerSubagent(toolCallId: string, message: string): Promise<boolean> {
+        try {
+            await this.guiCommand('gui-subagent-steer', `${toolCallId} ${message}`)
+            return true
+        }
+        catch (error: any) {
+            toast.error(error.message)
+            return false
+        }
+    }
+
+    async cancelSubagent(toolCallId: string) {
+        try {
+            await this.guiCommand('gui-subagent-cancel', toolCallId)
+        }
+        catch (error: any) {
+            toast.error(error.message)
+        }
+    }
+
     respondUi(request: UiRequest, payload: { value?: string, confirmed?: boolean, cancelled?: boolean }) {
         this.uiRequests = this.uiRequests.filter(r => r.id !== request.id)
         if (this.agentId)
@@ -549,6 +669,8 @@ export class Thread {
                 this.tools.set(event.toolCallId, { startedAt: this.tools.get(event.toolCallId)?.startedAt, endedAt: Date.now(), running: false, result: toolView({ ...event.result, isError: event.isError }) })
                 if (['edit', 'write', 'bash'].includes(event.toolName))
                     this.changeTick++
+                // pi dismissed the approval itself (abort); drop the prompt with it.
+                this.uiRequests = this.uiRequests.filter(r => r.approval?.toolCallId !== event.toolCallId)
                 break
             case 'queue_update':
                 this.queue = { steering: event.steering ?? [], followUp: event.followUp ?? [] }
@@ -665,6 +787,7 @@ export class Thread {
                     options: event.options,
                     placeholder: event.placeholder,
                     prefill: event.prefill,
+                    approval: event.method === 'select' ? parseApproval(event.title) : undefined,
                 }
                 this.uiRequests.push(request)
                 // pi resolves timed-out dialogs itself; drop ours to match.
@@ -711,6 +834,8 @@ export class Thread {
             this.tools.clear()
             this.changeTick++
             this.persisted = true
+            // Approvals belong to tool calls, and none run once settled (a subagent's child included).
+            this.uiRequests = this.uiRequests.filter(r => !r.approval)
         })
         await this.refreshStats()
         this.host.onSettled(this)

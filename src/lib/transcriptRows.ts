@@ -16,6 +16,10 @@ export type TranscriptRow =
     /** "✻ Worked for 3m 12s · done 4:12 PM" closing a finished turn. */
     | { kind: 'footer', key: string, turn: Turn, first: boolean, finalText: string }
 
+function isPinned(step: Step): boolean {
+    return step.kind === 'tool' && step.call.name === 'propose_plan' && step.result?.details?.status === 'approved'
+}
+
 /** `open` holds the keys of finished turns the user unfolded. */
 export function transcriptRows(turns: Turn[], open: ReadonlySet<string> = new Set()): TranscriptRow[] {
     const rows: TranscriptRow[] = []
@@ -30,8 +34,12 @@ export function transcriptRows(turns: Turn[], open: ReadonlySet<string> = new Se
             rows.push({ kind: 'user', key: `${turn.key}:user`, turn, user: turn.user, first: true })
         // Only finished prompt turns fold; a running turn shows its work as it happens.
         const { process, tail } = splitTurn(turn.steps)
-        if (!turn.running && turn.user && process.length) {
+        // An approved plan is what the work was agreed on: it stays above the fold.
+        const pinned = process.filter(isPinned)
+        if (!turn.running && turn.user && process.length > pinned.length) {
             const isOpen = open.has(turn.key)
+            if (!isOpen)
+                pushItems(pinned)
             rows.push({ kind: 'fold', key: `${turn.key}:fold`, turn, steps: process, open: isOpen, first: first() })
             if (isOpen)
                 pushItems(process)

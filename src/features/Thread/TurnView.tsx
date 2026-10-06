@@ -3,7 +3,7 @@ import type { TranscriptRow } from '@/lib/transcriptRows'
 import type { Thread } from '@/store/thread'
 import { ActionBtn } from '@/components/ActionBtn'
 import { useT, verbFor } from '@/lib/transcriptText'
-import { cn } from '@/lib/utils'
+import { cn, formatCost, formatCount } from '@/lib/utils'
 import copyText from 'copy-to-clipboard'
 import { Check, ChevronRight, Copy } from 'lucide-react'
 import { observer } from 'mobx-react-lite'
@@ -141,11 +141,6 @@ function estimateTokens(steps: Step[]): number {
     return Math.round(chars / 4)
 }
 
-function formatTokens(n: number): string {
-    return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n)
-}
-
-const formatCost = (n: number) => (n >= 0.01 ? `$${n.toFixed(2)}` : `$${n.toFixed(4)}`)
 
 /** "6 requests · ↑ 52.1k ↓ 3.2k · 89% cached · $0.12 · claude-opus-5-5 (high)" for a turn's footer. */
 function UsageParts({ usage }: { usage: NonNullable<Turn['usage']> }) {
@@ -158,7 +153,7 @@ function UsageParts({ usage }: { usage: NonNullable<Turn['usage']> }) {
         { key: 'requests', node: t.requests(usage.requests) },
         {
             key: 'tokens',
-            node: `↑ ${formatTokens(input)} ↓ ${formatTokens(usage.output)}${usage.reasoning ? ` (${t.reasoningTokens(formatTokens(usage.reasoning))})` : ''}`,
+            node: `↑ ${formatCount(input)} ↓ ${formatCount(usage.output)}${usage.reasoning ? ` (${t.reasoningTokens(formatCount(usage.reasoning))})` : ''}`,
             title: `${t.tokensIn}: ${input.toLocaleString()} (input ${usage.input.toLocaleString()}, cache read ${usage.cacheRead.toLocaleString()}, cache write ${usage.cacheWrite.toLocaleString()})\n${t.tokensOut}: ${usage.output.toLocaleString()}`,
         },
     ]
@@ -211,7 +206,7 @@ const RunningLine = observer(({ thread, turn }: { thread: Thread, turn: Turn }) 
             <div className="flex h-6 min-w-0 items-center gap-1.5 text-[13px]">
                 <span className="shrink-0 text-[#e8956b]">{`${label}…`}</span>
                 <span className="truncate text-gray-500 tabular-nums">
-                    {`(${elapsed}${tokens ? ` · ↓ ${formatTokens(tokens)} tokens` : ''}${turn.usage?.cost ? ` · ${formatCost(turn.usage.cost)}` : ''})`}
+                    {`(${elapsed}${tokens ? ` · ↓ ${formatCount(tokens)} tokens` : ''}${turn.usage?.cost ? ` · ${formatCost(turn.usage.cost)}` : ''})`}
                     {thread.retry?.errorMessage && ` ${thread.retry.errorMessage}`}
                 </span>
             </div>
