@@ -90,6 +90,9 @@ const RunningLine = observer(({ thread, turn }: { thread: Thread, turn: Turn }) 
                 : verbFor(t, turn.key)[0]
     const tokens = estimateTokens(turn.steps) + estimateTokens(thread.streamingSteps)
     const elapsed = t.duration(Date.now() - (thread.runStartedAt || Date.now()))
+    // pi is blocked on the user (ask form, dialog); the waiting step says so, a spinner would not.
+    if (thread.waitingForUser)
+        return null
     return (
         <Gutter mark={SPARK_FRAMES[frame % SPARK_FRAMES.length]} markClassName="text-[#d7875f]">
             <div className="flex h-6 min-w-0 items-center gap-1.5 text-[13px]">

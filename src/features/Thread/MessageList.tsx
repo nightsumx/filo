@@ -4,6 +4,7 @@ import { observer } from 'mobx-react-lite'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { TRANSCRIPT_TEXT, TranscriptTextContext } from '@/lib/transcriptText'
 import { appStore } from '@/store/app'
+import { ThreadContext } from './ThreadContext'
 import { CwdContext } from './ToolRow'
 import { TurnView } from './TurnView'
 
@@ -53,9 +54,11 @@ export const MessageList = observer(({ thread }: { thread: Thread }) => {
                 <div ref={contentRef} className="mx-auto w-full max-w-5xl px-5 pb-6 pt-1">
                     <TranscriptTextContext value={TRANSCRIPT_TEXT[appStore.transcriptLang]}>
                         <CwdContext value={thread.cwd}>
-                            {turns.map((turn, i) => (
-                                <TurnView key={turn.key} turn={turn} thread={thread} isLast={i === turns.length - 1} />
-                            ))}
+                            <ThreadContext value={thread}>
+                                {turns.map((turn, i) => (
+                                    <TurnView key={turn.key} turn={turn} thread={thread} isLast={i === turns.length - 1} />
+                                ))}
+                            </ThreadContext>
                         </CwdContext>
                     </TranscriptTextContext>
                 </div>

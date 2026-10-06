@@ -1,3 +1,4 @@
+import type { CapabilityId } from './capabilities'
 import type { AgentMessage, PiEvent, RpcResponse } from './pi'
 
 export interface PiEnv {
@@ -65,6 +66,8 @@ export interface AppState {
     theme?: ThemePref
     /** Wording inside the conversation (tool rows, diffs, status lines). */
     transcriptLang?: TranscriptLang
+    /** Capabilities per project cwd; projects not listed use DEFAULT_CAPABILITIES. */
+    capabilities?: Record<string, CapabilityId[]>
 }
 
 /** pi's effective auto-compaction settings for a project + model. */
@@ -82,6 +85,8 @@ export const THEME_PREFS: readonly ThemePref[] = ['system', 'light', 'dark']
 export interface AgentStartOptions {
     cwd: string
     sessionPath?: string
+    /** Capability extensions to load with `-e`. */
+    capabilities?: CapabilityId[]
 }
 
 export interface AgentExitInfo {

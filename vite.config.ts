@@ -72,7 +72,7 @@ export default defineConfig(({ command }) => {
         server: { port: 5288 },
         clearScreen: false,
         test: {
-            include: ['src/**/*.test.ts', 'electron/**/*.test.ts', 'shared/**/*.test.ts'],
+            include: ['src/**/*.test.ts', 'electron/**/*.test.ts', 'shared/**/*.test.ts', 'test/**/*.test.ts'],
             environment: 'node',
         },
     }

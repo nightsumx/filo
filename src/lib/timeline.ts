@@ -7,6 +7,7 @@ import type {
     ToolCall,
     ToolResultMessage,
 } from '@shared/pi'
+import { CAPABILITY_TOOLS } from '@shared/capabilities'
 import { readableError } from './utils'
 
 /** One message in display order. Snapshot items carry their session entry id. */
@@ -181,8 +182,11 @@ export function buildTurns(messages: TimelineMessage[], options: BuildOptions = 
     return turns
 }
 
-/** Tools whose results carry their own diff stay on their own row, as in pi-cc-extensions. */
-const NON_GROUPABLE = new Set(['edit', 'write', 'apply_patch'])
+/**
+ * Tools whose results carry their own diff stay on their own row, as in pi-cc-extensions; so do
+ * capability tools, which have dedicated views.
+ */
+const NON_GROUPABLE = new Set(['edit', 'write', 'apply_patch', ...CAPABILITY_TOOLS.keys()])
 
 export type StepItem =
     | { kind: 'step', step: Step }

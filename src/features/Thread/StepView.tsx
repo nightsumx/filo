@@ -4,6 +4,8 @@ import { useT } from '@/lib/transcriptText'
 import { cn } from '@/lib/utils'
 import { Archive, GitBranch, Puzzle } from 'lucide-react'
 import { memo, useState } from 'react'
+import { AskStep } from './capabilities/AskStep'
+import { TodoStep } from './capabilities/TodoStep'
 import { Gutter, ToolRow } from './ToolRow'
 
 // Thinking is printed inline in dim italics, the way pi's TUI shows it, rather than behind a toggle.
@@ -96,6 +98,10 @@ export const StepView = memo(({ step }: { step: Step }) => {
                 </Gutter>
             )
         case 'tool':
+            if (step.call.name === 'todo')
+                return <TodoStep call={step.call} result={step.result} running={step.running} />
+            if (step.call.name === 'ask')
+                return <AskStep call={step.call} result={step.result} running={step.running} />
             return <ToolRow call={step.call} result={step.result} running={step.running} />
         case 'bash':
             return <BashExecution message={step.message} />

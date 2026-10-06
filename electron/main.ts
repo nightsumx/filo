@@ -15,18 +15,21 @@ import { assertInSessionsDir, listSessions, readSession } from './sessions'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
 // productName "Pi" would move userData to ~/Library/Application Support/Pi; keep the existing
-// pi-gui folder so saved projects and tabs survive the rename.
-app.setPath('userData', path.join(app.getPath('appData'), 'pi-gui'))
+// pi-gui folder so saved projects and tabs survive the rename. PI_GUI_USER_DATA isolates test runs.
+app.setPath('userData', process.env.PI_GUI_USER_DATA || path.join(app.getPath('appData'), 'pi-gui'))
 app.setName(APP_INFO.name)
 const DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL
 const statePath = () => path.join(app.getPath('userData'), 'state.json')
 
 let win: BrowserWindow | null = null
 
+// pi loads capability extensions from real files, so packaged builds keep them outside the asar.
+const extensionsDir = app.isPackaged ? path.join(process.resourcesPath, 'extensions') : path.join(__dirname, '../../extensions')
+
 const agents = new AgentManager({
     onEvent: (agentId, event) => win?.webContents.send(IPC.agentEvent, agentId, event),
     onExit: (agentId, info) => win?.webContents.send(IPC.agentExit, agentId, info),
-})
+}, extensionsDir)
 
 function isSafeExternalUrl(url: string) {
     try {

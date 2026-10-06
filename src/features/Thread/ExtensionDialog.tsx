@@ -1,6 +1,8 @@
 import type { Thread, UiRequest } from '@/store/thread'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { fieldClass } from '@/components/ui/form'
+import { cn } from '@/lib/utils'
 import { observer } from 'mobx-react-lite'
 import { useState } from 'react'
 
@@ -14,9 +16,9 @@ function RequestDialog({ request, onRespond }: {
 
     return (
         <Dialog open onOpenChange={open => !open && cancel()}>
-            <DialogContent className="max-w-[480px] p-6 gap-4">
+            <DialogContent className="max-w-[460px] gap-3 p-5">
                 <DialogHeader>
-                    <DialogTitle className="text-base leading-snug pr-6">{request.title || '扩展请求'}</DialogTitle>
+                    <DialogTitle className="pr-6">{request.title || '扩展请求'}</DialogTitle>
                     {request.message && <DialogDescription className="whitespace-pre-wrap">{request.message}</DialogDescription>}
                 </DialogHeader>
 
@@ -28,7 +30,7 @@ function RequestDialog({ request, onRespond }: {
                                 type="button"
                                 autoFocus={i === 0}
                                 onClick={() => onRespond({ value: option })}
-                                className="rounded-lg px-3 py-2 text-left text-sm text-gray-800 hover:bg-gray-100 focus:bg-gray-100 outline-none"
+                                className="flex h-7 items-center rounded-[4px] px-2 text-left text-[13px] text-gray-900 outline-none hover:bg-ide-hover focus:bg-ide-sel"
                             >
                                 {option}
                             </button>
@@ -58,7 +60,7 @@ function RequestDialog({ request, onRespond }: {
                                         value={value}
                                         placeholder={request.placeholder}
                                         onChange={e => setValue(e.target.value)}
-                                        className="h-10 w-full rounded-md bg-black/[0.06] px-3 text-sm outline-none focus:outline focus:outline-2 focus:outline-blue-400/50"
+                                        className={cn(fieldClass, 'w-full')}
                                     />
                                 )
                             : (
@@ -67,7 +69,7 @@ function RequestDialog({ request, onRespond }: {
                                         value={value}
                                         onChange={e => setValue(e.target.value)}
                                         rows={10}
-                                        className="w-full rounded-md bg-black/[0.06] px-3 py-2 font-mono text-[13px] outline-none focus:outline focus:outline-2 focus:outline-blue-400/50"
+                                        className={cn(fieldClass, 'h-auto w-full py-1.5 font-mono leading-5')}
                                     />
                                 )}
                         <DialogFooter>

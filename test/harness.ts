@@ -1,0 +1,182 @@
+// End-to-end harness for capability extensions: a scripted OpenAI-compatible model plus a real
+// `pi --mode rpc` started through the app's AgentManager. No real provider, no tokens spent.
+import type { CapabilityId } from '@shared/capabilities'
+import type { PiEnv } from '@shared/ipc'
+import type { PiEvent, RpcResponse } from '@shared/pi'
+import type { AddressInfo } from 'node:net'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import http from 'node:http'
+import os from 'node:os'
+import path from 'node:path'
+import { AgentManager } from '../electron/agents'
+import { resolvePiEnv } from '../electron/pi-env'
+
+export const EXTENSIONS_DIR = path.resolve(__dirname, '../extensions')
+
+/** What one model request looked like, decoded from the chat-completions body. */
+export interface MockRequest {
+    system: string
+    messages: any[]
+    tools: any[]
+    /** Text of every tool result message, in order. */
+    toolResults: string[]
+}
+
+export type MockReply =
+    | { text: string }
+    | { toolCalls: { name: string, arguments: Record<string, unknown> }[] }
+
+export interface MockLlm {
+    baseUrl: string
+    requests: MockRequest[]
+    close: () => Promise<void>
+}
+
+const text = (content: unknown): string => typeof content === 'string'
+    ? content
+    : Array.isArray(content) ? content.map((p: any) => p?.text ?? '').join('') : ''
+
+export async function startMockLlm(reply: (request: MockRequest, index: number) => MockReply): Promise<MockLlm> {
+    const requests: MockRequest[] = []
+    let callId = 0
+    const server = http.createServer((req, res) => {
+        let body = ''
+        req.on('data', (chunk) => {
+            body += chunk
+        })
+        req.on('end', () => {
+            const parsed = JSON.parse(body || '{}')
+            const messages: any[] = parsed.messages ?? []
+            const request: MockRequest = {
+                system: messages.filter(m => m.role === 'system' || m.role === 'developer').map(m => text(m.content)).join('\n'),
+                messages,
+                tools: parsed.tools ?? [],
+                toolResults: messages.filter(m => m.role === 'tool').map(m => text(m.content)),
+            }
+            requests.push(request)
+            const answer = reply(request, requests.length - 1)
+            const chunk = (delta: unknown, finish: string | null = null) => res.write(`data: ${JSON.stringify({
+                id: 'mock',
+                object: 'chat.completion.chunk',
+                created: 0,
+                model: parsed.model,
+                choices: [{ index: 0, delta, finish_reason: finish }],
+            })}\n\n`)
+            res.writeHead(200, { 'content-type': 'text/event-stream' })
+            if ('toolCalls' in answer) {
+                chunk({
+                    role: 'assistant',
+                    tool_calls: answer.toolCalls.map((c, index) => ({
+                        index,
+                        id: `call_${++callId}`,
+                        type: 'function',
+                        function: { name: c.name, arguments: JSON.stringify(c.arguments) },
+                    })),
+                })
+                chunk({}, 'tool_calls')
+            }
+            else {
+                chunk({ role: 'assistant', content: answer.text })
+                chunk({}, 'stop')
+            }
+            res.write(`data: ${JSON.stringify({ id: 'mock', object: 'chat.completion.chunk', created: 0, model: parsed.model, choices: [], usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } })}\n\n`)
+            res.end('data: [DONE]\n\n')
+        })
+    })
+    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+    const { port } = server.address() as AddressInfo
+    return {
+        baseUrl: `http://127.0.0.1:${port}/v1`,
+        requests,
+        close: () => new Promise(resolve => server.close(() => resolve())),
+    }
+}
+
+/** The installed pi, or null when it cannot be found (tests then skip). */
+export async function findPi(): Promise<PiEnv | null> {
+    const result = await resolvePiEnv()
+    return result.ok ? result.env : null
+}
+
+export interface PiSession {
+    events: PiEvent[]
+    request: <T = any>(command: Record<string, unknown>) => Promise<RpcResponse<T>>
+    /** Resolves with the first event (already seen or future) matching the predicate. */
+    waitFor: (match: (event: PiEvent) => boolean, timeoutMs?: number) => Promise<PiEvent>
+    /** Sends a prompt and waits for agent_settled. */
+    run: (message: string) => Promise<void>
+    stop: () => Promise<void>
+}
+
+/**
+ * Starts pi in a throwaway agent dir whose only model is the mock, so user settings, extensions
+ * and credentials are never read.
+ */
+export async function startPi(env: PiEnv, llm: MockLlm, capabilities: CapabilityId[]): Promise<PiSession> {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'pi-gui-test-'))
+    const agentDir = path.join(root, 'agent')
+    const cwd = path.join(root, 'project')
+    await mkdir(agentDir, { recursive: true })
+    await mkdir(cwd, { recursive: true })
+    await writeFile(path.join(agentDir, 'models.json'), JSON.stringify({
+        providers: { mock: { baseUrl: llm.baseUrl, api: 'openai-completions', apiKey: 'mock', models: [{ id: 'mock-1', contextWindow: 100_000, maxTokens: 1000 }] } },
+    }))
+    await writeFile(path.join(agentDir, 'settings.json'), JSON.stringify({ defaultProvider: 'mock', defaultModel: 'mock-1', defaultThinkingLevel: 'off' }))
+
+    const events: PiEvent[] = []
+    const waiters: { match: (e: PiEvent) => boolean, resolve: (e: PiEvent) => void }[] = []
+    let exited = false
+    const manager = new AgentManager({
+        onEvent: (_id, event) => {
+            events.push(event)
+            for (const w of [...waiters]) {
+                if (w.match(event)) {
+                    waiters.splice(waiters.indexOf(w), 1)
+                    w.resolve(event)
+                }
+            }
+        },
+        onExit: () => {
+            exited = true
+        },
+    }, EXTENSIONS_DIR)
+
+    // piSpawnEnv copies process.env at spawn time.
+    const previous = process.env.PI_CODING_AGENT_DIR
+    process.env.PI_CODING_AGENT_DIR = agentDir
+    const id = manager.start(env, { cwd, capabilities })
+    if (previous === undefined)
+        delete process.env.PI_CODING_AGENT_DIR
+    else
+        process.env.PI_CODING_AGENT_DIR = previous
+
+    const waitFor = (match: (event: PiEvent) => boolean, timeoutMs = 15_000) => {
+        const seen = events.find(match)
+        if (seen)
+            return Promise.resolve(seen)
+        return new Promise<PiEvent>((resolve, reject) => {
+            const timer = setTimeout(() => reject(new Error(`timed out waiting for event${exited ? ' (pi exited)' : ''}`)), timeoutMs)
+            waiters.push({ match, resolve: (e) => {
+                clearTimeout(timer)
+                resolve(e)
+            } })
+        })
+    }
+
+    return {
+        events,
+        request: command => manager.request(id, command),
+        waitFor,
+        async run(message) {
+            const before = events.length
+            const response = await manager.request(id, { type: 'prompt', message })
+            if (!response.success)
+                throw new Error(response.error)
+            await waitFor(e => e.type === 'agent_settled' && events.indexOf(e) >= before)
+        },
+        async stop() {
+            await manager.stopAll()
+            await rm(root, { recursive: true, force: true })
+        },
+    }
+}

@@ -3,6 +3,7 @@ import type { PiEvent, RpcResponse } from '@shared/pi'
 import type { ChildProcessWithoutNullStreams } from 'node:child_process'
 import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
+import { capabilityArgs } from './capabilities'
 import { JsonlSplitter } from './jsonl'
 import { piCommand, piSpawnEnv } from './pi-env'
 
@@ -27,8 +28,8 @@ class PiAgent {
     private stderr = ''
     private exited = false
 
-    constructor(env: PiEnv, options: AgentStartOptions, callbacks: AgentCallbacks) {
-        const args = ['--mode', 'rpc']
+    constructor(env: PiEnv, options: AgentStartOptions, extensionsDir: string, callbacks: AgentCallbacks) {
+        const args = ['--mode', 'rpc', ...capabilityArgs(options.capabilities, extensionsDir)]
         if (options.sessionPath)
             args.push('--session', options.sessionPath)
         const command = piCommand(env, args)
@@ -111,10 +112,11 @@ class PiAgent {
 export class AgentManager {
     private agents = new Map<string, PiAgent>()
 
-    constructor(private callbacks: AgentCallbacks) {}
+    /** extensionsDir holds the capability extensions (repo `extensions/`, or Resources when packaged). */
+    constructor(private callbacks: AgentCallbacks, private extensionsDir: string) {}
 
     start(env: PiEnv, options: AgentStartOptions): string {
-        const agent = new PiAgent(env, options, {
+        const agent = new PiAgent(env, options, this.extensionsDir, {
             onEvent: this.callbacks.onEvent,
             onExit: (id, info) => {
                 this.agents.delete(id)

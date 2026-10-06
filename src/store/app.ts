@@ -1,4 +1,6 @@
+import type { CapabilityId } from '@shared/capabilities'
 import type { AppState, PiEnvResult, SessionSummary, ThemePref, TranscriptLang } from '@shared/ipc'
+import { DEFAULT_CAPABILITIES, normalizeCapabilities } from '@shared/capabilities'
 import { THEME_PREFS, TRANSCRIPT_LANGS } from '@shared/ipc'
 import type { PiEvent } from '@shared/pi'
 import type { ThreadHost } from './thread'
@@ -47,6 +49,8 @@ class AppStore implements ThreadHost {
     themePref: ThemePref = 'system'
     /** Conversation wording; English matches pi's TUI. */
     transcriptLang: TranscriptLang = 'en'
+    /** Capabilities chosen per project; absent means DEFAULT_CAPABILITIES. */
+    capabilitiesByProject: Record<string, CapabilityId[]> = {}
     settingsOpen = false
     /** How many panes fit side by side; measured by the pane container. */
     paneCapacity = 1
@@ -153,7 +157,7 @@ class AppStore implements ThreadHost {
             open: tabs.filter(t => !t.isEmpty || t.persisted).length,
             running: tabs.filter(t => t.running).length,
             unread: tabs.filter(t => t.unread).length,
-            waiting: tabs.filter(t => t.uiRequests.length > 0).length,
+            waiting: tabs.filter(t => t.waitingForUser).length,
         }
     }
 
@@ -231,6 +235,7 @@ class AppStore implements ThreadHost {
         this.themePref = THEME_PREFS.includes(state.theme as ThemePref) ? state.theme! : 'system'
         this.transcriptLang = TRANSCRIPT_LANGS.includes(state.transcriptLang as TranscriptLang) ? state.transcriptLang! : 'en'
         this.activeProject = state.activeProject ?? null
+        this.capabilitiesByProject = Object.fromEntries(Object.entries(state.capabilities ?? {}).map(([cwd, ids]) => [cwd, normalizeCapabilities(ids)]))
         // Thread objects are created lazily per project (restoreTabs); keep the saved order for now.
         this.tabsByProject = { ...state.tabs }
         this.activeTabByProject = { ...state.activeTabs }
@@ -264,6 +269,7 @@ class AppStore implements ThreadHost {
             layout: this.layout,
             theme: this.themePref,
             transcriptLang: this.transcriptLang,
+            capabilities: this.capabilitiesByProject,
         }
         const json = JSON.stringify(state)
         if (json === this.savedState)
@@ -305,6 +311,11 @@ class AppStore implements ThreadHost {
 
     // ---------------------------------------------------------------- ThreadHost
 
+    /** A plain copy: it is sent over IPC, which cannot clone MobX arrays. */
+    capabilitiesOf(cwd: string): CapabilityId[] {
+        return [...(this.capabilitiesByProject[cwd] ?? DEFAULT_CAPABILITIES)]
+    }
+
     registerAgent(agentId: string, thread: Thread) {
         this.agentThreads.set(agentId, thread)
     }
@@ -339,7 +350,7 @@ class AppStore implements ThreadHost {
         if (live.length < MAX_AGENTS)
             return
         const idle = live
-            .filter(t => !t.running && !t.uiRequests.length && !this.isVisible(t))
+            .filter(t => !t.running && !t.waitingForUser && !this.isVisible(t))
             .sort((a, b) => a.lastUsed - b.lastUsed)
         await idle[0]?.stopAgent()
     }
@@ -466,6 +477,14 @@ class AppStore implements ThreadHost {
     setTranscriptLang(lang: TranscriptLang) {
         this.transcriptLang = lang
         this.persist()
+    }
+
+    /** Live threads of the project restart with the new set once idle, resuming their session. */
+    setCapabilities(cwd: string, ids: CapabilityId[]) {
+        this.capabilitiesByProject[cwd] = normalizeCapabilities(ids)
+        this.persist()
+        for (const thread of this.tabsOf(cwd))
+            void thread.applyCapabilities()
     }
 
     setSettingsOpen(open: boolean) {

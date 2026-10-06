@@ -77,3 +77,22 @@ describe('tabs and auto split', () => {
         expect(appStore.tabs.map(t => t.key)).toEqual([keys[2], keys[0], keys[1]])
     })
 })
+
+describe('capabilities per project', () => {
+    beforeEach(() => {
+        reset()
+        appStore.capabilitiesByProject = {}
+    })
+
+    it('defaults to the standard preset and returns plain, cloneable arrays', () => {
+        expect(appStore.capabilitiesOf('/p')).toEqual(['todo', 'ask'])
+        appStore.setCapabilities('/p', ['ask', 'bogus' as any, 'todo'])
+        const ids = appStore.capabilitiesOf('/p')
+        expect(ids).toEqual(['todo', 'ask'])
+        // agentStart sends this over IPC; MobX proxies fail structured clone.
+        expect(() => structuredClone(ids)).not.toThrow()
+        appStore.setCapabilities('/p', [])
+        expect(appStore.capabilitiesOf('/p')).toEqual([])
+        expect(appStore.capabilitiesOf('/other')).toEqual(['todo', 'ask'])
+    })
+})

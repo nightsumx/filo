@@ -11,6 +11,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { StatusLine } from '../Thread/StatusLine'
 import { ModelPicker, ThinkingPicker } from './Pickers'
+import { TodoBar } from './TodoBar'
 
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024
 
@@ -168,6 +169,7 @@ export const Composer = observer(({ thread }: { thread: Thread }) => {
             {widgetsAbove.map(([key, w]) => (
                 <pre key={key} className="mb-2 rounded-md bg-[var(--bg-side)] px-3 py-2 font-mono text-[12px] text-gray-600 whitespace-pre-wrap">{w.lines.join('\n')}</pre>
             ))}
+            <TodoBar thread={thread} />
             {queued.length > 0 && (
                 <div className="mb-2 flex flex-col gap-1">
                     {queued.map((text, i) => (

@@ -54,6 +54,11 @@ const en = {
     clock: (ts: number) => new Date(ts).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }),
     copy: 'Copy',
     copied: 'Copied',
+    todoProgress: (done: number, total: number) => `${done}/${total} done`,
+    todoCleared: 'List cleared',
+    askWaiting: 'Waiting for your answer',
+    askAnswered: 'Answered',
+    askCancelled: 'Dismissed',
 }
 
 export type TranscriptText = typeof en
@@ -102,6 +107,11 @@ const zh: TranscriptText = {
     },
     copy: '复制',
     copied: '已复制',
+    todoProgress: (done, total) => `已完成 ${done}/${total}`,
+    todoCleared: '清单已清空',
+    askWaiting: '等待你回答',
+    askAnswered: '已回答',
+    askCancelled: '已跳过',
 }
 
 export const TRANSCRIPT_TEXT: Record<TranscriptLang, TranscriptText> = { en, zh }

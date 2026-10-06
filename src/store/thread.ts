@@ -1,3 +1,4 @@
+import type { AskResponse, CapabilityId, GuiCommands, TodoDetails } from '@shared/capabilities'
 import type { AgentExitInfo } from '@shared/ipc'
 import type {
     AgentMessage,
@@ -14,6 +15,7 @@ import type {
 import type { Step, TimelineMessage, ToolExecState, ToolResultView } from '@/lib/timeline'
 import { parsePartialJson } from '@/lib/partialJson'
 import { buildTurns, contentText } from '@/lib/timeline'
+import { GUI_COMMAND_PREFIX } from '@shared/capabilities'
 import { readableError } from '@/lib/utils'
 import { makeAutoObservable, observable, runInAction, toJS } from 'mobx'
 import { toast } from 'sonner'
@@ -37,6 +39,7 @@ export interface ThreadHost {
     rekey: (thread: Thread, oldKey: string) => void
     onSettled: (thread: Thread) => void
     reserveAgentSlot: (thread: Thread) => Promise<void>
+    capabilitiesOf: (cwd: string) => CapabilityId[]
 }
 
 function toolView(result: any): ToolResultView | undefined {
@@ -94,6 +97,10 @@ export class Thread {
     private partialArgs = new Map<number, string>()
     private startPromise: Promise<string> | null = null
     private stopping = false
+    /** Capability set the running process was started with (comma-joined ids). */
+    private loadedCapabilities = ''
+    /** Capabilities changed mid-run; restart once the run settles. */
+    private restartPending = false
 
     constructor(private host: ThreadHost, init: { key: string, cwd: string, sessionPath?: string, name?: string, firstPrompt?: string }) {
         this.key = init.key
@@ -102,11 +109,13 @@ export class Thread {
         this.name = init.name
         this.firstPrompt = init.firstPrompt
         this.persisted = !!init.sessionPath
-        makeAutoObservable<this, 'liveCounter' | 'partialArgs' | 'startPromise' | 'stopping' | 'host'>(this, {
+        makeAutoObservable<this, 'liveCounter' | 'partialArgs' | 'startPromise' | 'stopping' | 'loadedCapabilities' | 'restartPending' | 'host'>(this, {
             liveCounter: false,
             partialArgs: false,
             startPromise: false,
             stopping: false,
+            loadedCapabilities: false,
+            restartPending: false,
             host: false,
         }, { autoBind: true })
     }
@@ -140,6 +149,29 @@ export class Thread {
 
     get contextPercent(): number | null {
         return this.stats?.contextUsage?.percent ?? null
+    }
+
+    /** Latest todo list on the branch; every todo call carries the full list. */
+    get todo(): TodoDetails | null {
+        const messages = [...this.items, ...this.live]
+        for (let i = messages.length - 1; i >= 0; i--) {
+            const m = messages[i].message
+            if (m.role === 'toolResult' && m.toolName === 'todo' && m.details?.kind === 'todo')
+                return m.details as TodoDetails
+        }
+        return null
+    }
+
+    /** pi is blocked on the user: an extension dialog or an unanswered ask. */
+    get waitingForUser(): boolean {
+        if (this.uiRequests.length)
+            return true
+        for (const state of this.tools.values()) {
+            const details = state.partial?.details
+            if (state.running && details?.kind === 'ask' && details.status === 'pending')
+                return true
+        }
+        return false
     }
 
     // ---------------------------------------------------------------- loading
@@ -184,7 +216,10 @@ export class Thread {
         })
         // A path pi never wrote (thread left empty) cannot be resumed; start fresh instead.
         const resumable = this.persisted ? this.sessionPath : undefined
-        const agentId = await api().agentStart({ cwd: this.cwd, sessionPath: resumable })
+        const capabilities = this.host.capabilitiesOf(this.cwd)
+        this.loadedCapabilities = capabilities.join(',')
+        this.restartPending = false
+        const agentId = await api().agentStart({ cwd: this.cwd, sessionPath: resumable, capabilities })
         runInAction(() => {
             this.agentId = agentId
             this.stopping = false
@@ -208,6 +243,32 @@ export class Thread {
             return
         this.stopping = true
         await api().agentStop(id)
+    }
+
+    /**
+     * Extensions load at startup, so a changed capability set needs a new process. It resumes the
+     * same session file; mid-run changes wait for the run to settle.
+     */
+    async applyCapabilities() {
+        if (!this.agentId || this.host.capabilitiesOf(this.cwd).join(',') === this.loadedCapabilities) {
+            this.restartPending = false
+            return
+        }
+        if (this.running || this.uiRequests.length) {
+            this.restartPending = true
+            return
+        }
+        const old = this.agentId
+        await this.stopAgent()
+        runInAction(() => {
+            // The exit event may arrive after agentStop resolves; do not wait for it.
+            if (this.agentId === old) {
+                this.agentId = null
+                this.agentStatus = 'none'
+                this.startPromise = null
+            }
+        })
+        await this.ensureAgent().catch(() => {})
     }
 
     async request<T = any>(command: Record<string, unknown>): Promise<RpcResponse<T>> {
@@ -273,7 +334,7 @@ export class Thread {
     async refreshCommands() {
         const data = await this.call<{ commands: SlashCommand[] }>({ type: 'get_commands' })
         if (data)
-            runInAction(() => (this.commands = data.commands))
+            runInAction(() => (this.commands = data.commands.filter(c => !c.name.startsWith(GUI_COMMAND_PREFIX))))
     }
 
     async refreshStats() {
@@ -381,6 +442,22 @@ export class Thread {
         try {
             await this.request({ type: 'compact' })
             await Promise.all([this.load(), this.refreshStats()])
+        }
+        catch (error: any) {
+            toast.error(error.message)
+        }
+    }
+
+    /** Hidden `/gui-…` capability command; pi runs extension commands immediately, even mid-run. */
+    private async guiCommand(name: GuiCommands[keyof GuiCommands], args: string) {
+        const response = await this.request<{ disposition: string }>({ type: 'prompt', message: `/${name} ${args}` })
+        if (response.data?.disposition !== 'handled')
+            throw new Error(`/${name} 未被处理，能力扩展可能没有加载`)
+    }
+
+    async answerAsk(toolCallId: string, response: AskResponse) {
+        try {
+            await this.guiCommand('gui-ask-answer', `${toolCallId} ${JSON.stringify(response)}`)
         }
         catch (error: any) {
             toast.error(error.message)
@@ -594,6 +671,8 @@ export class Thread {
         })
         await this.refreshStats()
         this.host.onSettled(this)
+        if (this.restartPending)
+            await this.applyCapabilities()
     }
 
     handleExit(info: AgentExitInfo) {
