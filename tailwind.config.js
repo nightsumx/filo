@@ -65,7 +65,7 @@ export default {
                     sel: 'var(--ide-sel)',
                     'sel-muted': 'var(--ide-sel-muted)',
                     tab: 'var(--ide-tab)',
-                    accent: 'var(--ide-accent)',
+                    accent: 'rgb(var(--ide-accent-rgb) / <alpha-value>)',
                     success: 'var(--ide-success)',
                     'accent-hover': 'var(--ide-accent-hover)',
                     fg: 'var(--ide-fg)',

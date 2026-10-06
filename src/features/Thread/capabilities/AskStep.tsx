@@ -4,7 +4,7 @@ import type { AskAnswer, AskDetails, AskQuestion } from '@shared/capabilities'
 import type { ToolCall } from '@shared/pi'
 import type { ToolResultView } from '@/lib/timeline'
 import { Button } from '@/components/ui/button'
-import { Check, fieldClass } from '@/components/ui/form'
+import { Choice, flatFieldClass } from '@/components/ui/form'
 import { useT } from '@/lib/transcriptText'
 import { cn } from '@/lib/utils'
 import { observer } from 'mobx-react-lite'
@@ -26,30 +26,32 @@ function QuestionField({ index, question, answer, onChange }: { index: number, q
         onChange({ ...answer, selected })
     }
     return (
-        <fieldset className="flex flex-col gap-1">
-            <legend className="mb-1.5 flex items-baseline gap-2 text-[13px] text-gray-900">
+        <fieldset className="flex min-w-0 flex-col">
+            <legend className="mb-2 flex items-baseline gap-2 text-[13px] text-gray-900">
                 <span className="font-mono text-[12px] text-gray-400">{index + 1}</span>
                 <span className="font-medium">{question.question}</span>
                 {question.multiple && <span className="text-[12px] text-[var(--jb-comment)]">可多选</span>}
             </legend>
-            {question.options.map(option => (
-                <Check
-                    key={option}
-                    type={question.multiple ? 'checkbox' : 'radio'}
-                    name={id}
-                    checked={answer.selected.includes(option)}
-                    onChange={() => toggle(option)}
-                >
-                    {option}
-                </Check>
-            ))}
-            <input
-                value={answer.text ?? ''}
-                onChange={e => onChange({ ...answer, text: e.target.value })}
-                placeholder="其他，自己填写…"
-                aria-label={`${question.question}：自己填写`}
-                className={cn(fieldClass, 'mt-1 ml-[22px] max-w-md')}
-            />
+            <div className="flex flex-wrap gap-1.5">
+                {question.options.map(option => (
+                    <Choice
+                        key={option}
+                        type={question.multiple ? 'checkbox' : 'radio'}
+                        name={id}
+                        checked={answer.selected.includes(option)}
+                        onChange={() => toggle(option)}
+                    >
+                        {option}
+                    </Choice>
+                ))}
+                <input
+                    value={answer.text ?? ''}
+                    onChange={e => onChange({ ...answer, text: e.target.value })}
+                    placeholder="其他，自己填写…"
+                    aria-label={`${question.question}：自己填写`}
+                    className={cn(flatFieldClass, 'min-w-48 flex-1')}
+                />
+            </div>
         </fieldset>
     )
 }
@@ -82,17 +84,17 @@ const AskForm = observer(({ toolCallId, questions }: { toolCallId: string, quest
                     submit()
                 }
             }}
-            className="mt-1 mb-1.5 flex max-w-2xl flex-col gap-4 rounded-[6px] border border-[var(--jb-dialog-border)] bg-[var(--jb-dialog-side)] px-4 pt-3 pb-3"
+            className="mt-1.5 mb-2 flex max-w-3xl flex-col gap-5"
         >
             {questions.map((q, i) => (
                 <QuestionField key={q.id} index={i} question={q} answer={answers[q.id]} onChange={a => setAnswers(prev => ({ ...prev, [q.id]: a }))} />
             ))}
-            <div className="flex items-center gap-2 border-t border-[var(--jb-separator)] pt-3">
-                <span className="flex-1 text-[12px] text-[var(--jb-comment)] tabular-nums">
-                    {questions.length > 1 ? `已回答 ${answered}/${questions.length}` : ''}
+            <div className="flex items-center gap-2">
+                <Button type="submit" variant="primary" disabled={sending || !answered} title="提交（⌘ Enter）" className="min-w-[72px]">提交</Button>
+                <Button type="button" variant="ghost" disabled={sending} onClick={() => void send({ cancelled: true })}>跳过</Button>
+                <span className="ml-auto text-[12px] text-[var(--jb-comment)] tabular-nums">
+                    {questions.length > 1 ? `已回答 ${answered}/${questions.length} · ⌘ Enter 提交` : '⌘ Enter 提交'}
                 </span>
-                <Button type="button" variant="outline" disabled={sending} onClick={() => void send({ cancelled: true })}>跳过</Button>
-                <Button type="submit" variant="primary" disabled={sending || !answered} title="提交（⌘↩）" className="min-w-[72px]">提交</Button>
             </div>
         </form>
     )

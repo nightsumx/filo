@@ -1,7 +1,7 @@
 import type { Thread, UiRequest } from '@/store/thread'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { fieldClass } from '@/components/ui/form'
+import { flatFieldClass } from '@/components/ui/form'
 import { cn } from '@/lib/utils'
 import { observer } from 'mobx-react-lite'
 import { useState } from 'react'
@@ -16,21 +16,21 @@ function RequestDialog({ request, onRespond }: {
 
     return (
         <Dialog open onOpenChange={open => !open && cancel()}>
-            <DialogContent className="max-w-[460px] gap-3 p-5">
+            <DialogContent className="max-w-[480px] gap-4 p-6">
                 <DialogHeader>
                     <DialogTitle className="pr-6">{request.title || '扩展请求'}</DialogTitle>
                     {request.message && <DialogDescription className="whitespace-pre-wrap">{request.message}</DialogDescription>}
                 </DialogHeader>
 
                 {request.method === 'select' && (
-                    <div className="flex max-h-[50vh] flex-col gap-1 overflow-y-auto">
+                    <div className="-mx-1 flex max-h-[50vh] flex-col gap-1 overflow-y-auto p-1">
                         {(request.options ?? []).map((option, i) => (
                             <button
                                 key={option}
                                 type="button"
                                 autoFocus={i === 0}
                                 onClick={() => onRespond({ value: option })}
-                                className="flex h-7 items-center rounded-[4px] px-2 text-left text-[13px] text-gray-900 outline-none hover:bg-ide-hover focus:bg-ide-sel"
+                                className="flex min-h-9 items-center rounded-[6px] bg-[var(--jb-fill)] px-3 py-1.5 text-left text-[13px] text-gray-900 outline-none hover:bg-[var(--jb-fill-hover)] focus-visible:shadow-[0_0_0_1.5px_var(--ide-accent)]"
                             >
                                 {option}
                             </button>
@@ -60,7 +60,7 @@ function RequestDialog({ request, onRespond }: {
                                         value={value}
                                         placeholder={request.placeholder}
                                         onChange={e => setValue(e.target.value)}
-                                        className={cn(fieldClass, 'w-full')}
+                                        className={cn(flatFieldClass, 'w-full')}
                                     />
                                 )
                             : (
@@ -69,7 +69,7 @@ function RequestDialog({ request, onRespond }: {
                                         value={value}
                                         onChange={e => setValue(e.target.value)}
                                         rows={10}
-                                        className={cn(fieldClass, 'h-auto w-full py-1.5 font-mono leading-5')}
+                                        className={cn(flatFieldClass, 'h-auto w-full py-2 font-mono leading-5')}
                                     />
                                 )}
                         <DialogFooter>

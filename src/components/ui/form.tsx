@@ -1,71 +1,34 @@
-// Form controls: check box, radio button, text field, switch, segmented choice, and the flat
-// setting row / group used by the Settings dialog.
-// Colours come from the --jb-* variables in index.css, so light and dark both follow IntUI.
+// Flat form controls: answer chips, filled text field, switch, segmented choice, and the setting
+// row / group used by the Settings dialog. Colours come from the --jb-* variables in index.css.
 import { cn } from '@/lib/utils'
 import * as React from 'react'
 
-/** Text field: 28px, 4px corners, 1px border that turns into a 2px accent border on focus. */
-export const fieldClass = cn(
-    'h-7 rounded-[4px] border border-[var(--jb-field-border)] bg-[var(--jb-field-bg)] px-2 text-[13px] text-gray-900 outline-none',
-    'placeholder:text-[var(--jb-comment)] focus:border-ide-accent focus:shadow-[0_0_0_1px_var(--ide-accent)]',
-    'disabled:border-[var(--jb-disabled-border)] disabled:text-[var(--jb-disabled-fg)]',
-)
-
-/** The 14px box of a check box or radio button; put a visually hidden input before it in a label. */
-export function CheckMark({ type, checked }: { type: 'checkbox' | 'radio', checked: boolean }) {
+/**
+ * One answer laid out as a chip, so every choice is visible at once. Radio or check-box semantics
+ * come from the visually hidden input, which keeps arrow-key navigation inside a radio group.
+ */
+export function Choice({ type, name, checked, onChange, children }: { type: 'checkbox' | 'radio', name?: string, checked: boolean, onChange: () => void, children: React.ReactNode }) {
     return (
-        <span
-            aria-hidden
+        <label
             className={cn(
-                'flex h-3.5 w-3.5 shrink-0 items-center justify-center border transition-colors',
-                // Focus ring follows the visually hidden input just before this mark.
-                'peer-focus-visible:shadow-[0_0_0_2px_var(--jb-dialog-bg),0_0_0_4px_var(--ide-accent)]',
-                type === 'checkbox' ? 'rounded-[3px]' : 'rounded-full',
-                checked ? 'border-ide-accent bg-ide-accent' : 'border-[var(--jb-check-border)] bg-[var(--jb-check-bg)]',
+                'inline-flex min-h-8 max-w-full cursor-pointer items-center gap-1.5 rounded-[6px] px-3 py-1 text-[13px] transition-colors',
+                'has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ide-accent/50',
+                checked ? 'bg-ide-accent/[0.14] text-ide-accent dark:text-[#8fb3ff]' : 'bg-[var(--jb-fill)] text-gray-800 hover:bg-[var(--jb-fill-hover)]',
             )}
         >
-            {checked && (type === 'checkbox'
-                ? <svg viewBox="0 0 10 10" className="h-2.5 w-2.5 text-always-white"><path d="M2 5.2 4.1 7.3 8 3" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
-                : <span className="h-1.5 w-1.5 rounded-full bg-always-white" />)}
-        </span>
+            <input type={type} name={name} checked={checked} onChange={onChange} className="sr-only" />
+            {/* Multi-select marks the picked chips; single choice needs no mark beyond the fill. */}
+            {type === 'checkbox' && checked && <svg aria-hidden viewBox="0 0 10 10" className="-ml-0.5 h-3 w-3"><path d="M2 5.2 4.1 7.3 8 3" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>}
+            <span className="min-w-0 [overflow-wrap:anywhere]">{children}</span>
+        </label>
     )
 }
 
-interface CheckProps {
-    type?: 'checkbox' | 'radio'
-    name?: string
-    checked: boolean
-    onChange: (checked: boolean) => void
-    children: React.ReactNode
-    /** Grey comment under the label, indented to the label text. */
-    comment?: React.ReactNode
-    /** Right-aligned extra on the label line. */
-    trailing?: React.ReactNode
-    className?: string
-}
-
-/** Check box or radio button with its label, the way JetBrains settings pages lay them out. */
-export function Check({ type = 'checkbox', name, checked, onChange, children, comment, trailing, className }: CheckProps) {
-    const commentId = React.useId()
-    return (
-        <div className={className}>
-            <label className="flex min-h-6 cursor-pointer items-center gap-2 text-[13px] text-gray-900">
-                <input
-                    type={type}
-                    name={name}
-                    checked={checked}
-                    onChange={e => onChange(e.target.checked)}
-                    aria-describedby={comment ? commentId : undefined}
-                    className="peer sr-only"
-                />
-                <CheckMark type={type} checked={checked} />
-                <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">{children}</span>
-                {trailing}
-            </label>
-            {comment && <Comment id={commentId} className="pl-[22px]">{comment}</Comment>}
-        </div>
-    )
-}
+/** Borderless filled text field, for inline forms that should read as part of the transcript. */
+export const flatFieldClass = cn(
+    'h-8 rounded-[6px] bg-[var(--jb-fill)] px-3 text-[13px] text-gray-900 outline-none transition-shadow',
+    'placeholder:text-[var(--jb-comment)] focus:shadow-[0_0_0_1.5px_var(--ide-accent)]',
+)
 
 /** On/off switch for a setting row; the row's label names it via aria-labelledby. */
 export function Switch({ checked, onChange, labelledBy, describedBy }: { checked: boolean, onChange: (checked: boolean) => void, labelledBy?: string, describedBy?: string }) {
