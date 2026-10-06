@@ -2,7 +2,7 @@ import { AssistantMessageComponent, InteractiveMode, ToolExecutionComponent, typ
 import { Spacer, Text, TruncatedText } from "@earendil-works/pi-tui";
 import { COLOR, fg, key, REJECTED } from "./lib/shared.ts";
 
-const INTERRUPTED = `${fg(COLOR.muted, "  ⎿  ")}${fg(COLOR.error, "Interrupted by user")}`;
+const interrupted = () => `${fg(COLOR.muted, "  ⎿  ")}${fg(COLOR.error, "Interrupted by user")}`;
 const ABORT_TEXTS = new Set(["Operation aborted", "Request was aborted"]);
 
 // "Operation aborted" under an interrupted reply -> "⎿  Interrupted by user".
@@ -14,7 +14,10 @@ assistant.updateContent = function (message: any, ...rest: unknown[]) {
 	if (message.errorMessage && !ABORT_TEXTS.has(message.errorMessage)) return; // e.g. "Aborted after 2 retry attempts"
 	const children = this.contentContainer?.children;
 	const last = children?.[children.length - 1];
-	if (last instanceof Text) children[children.length - 1] = new Text(INTERRUPTED, 0, 0);
+	if (!(last instanceof Text)) return;
+	children[children.length - 1] = new Text(interrupted(), 0, 0);
+	// pi puts a blank line before the abort notice; Claude Code hangs "⎿" right under the message.
+	if (children[children.length - 2] instanceof Spacer) children.splice(children.length - 2, 1);
 };
 
 // Tool calls cut off by an interrupt show the same wording; rejected calls read like Claude Code's.
