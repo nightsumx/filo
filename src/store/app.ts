@@ -1,7 +1,7 @@
 import type { ApprovalMode, CapabilityId, Presence } from '@shared/capabilities'
 import type { LangPref } from '@shared/i18n'
 import type { AppState, GlobalCompactionPatch, GlobalPrefs, OpenProject, PiEnvResult, ProjectActivity, ProjectTransfer, RepoEdits, ReviewView, SearchResult, SessionSummary, StateSave, ThemePref, ThreadTransfer, TranscriptLang, WindowReport } from '@shared/ipc'
-import { APPROVAL_MODES, DEFAULT_CAPABILITIES, normalizeCapabilities } from '@shared/capabilities'
+import { APPROVAL_MODES, normalizeCapabilities, presetOf, resolveCapabilities } from '@shared/capabilities'
 import { LANG_PREFS } from '@shared/i18n'
 import { DEFAULT_THEME, GLOBAL_PREF_KEYS, REVIEW_VIEWS, THEME_PREFS, TRANSCRIPT_LANGS } from '@shared/ipc'
 import type { PiEvent, PiModel } from '@shared/pi'
@@ -95,7 +95,9 @@ class AppStore implements ThreadHost {
     /** Changes panel layout, the same in every window. */
     reviewView: ReviewView = 'tree'
     /** Capability extensions every pi process loads, the same for all projects. */
-    capabilities: CapabilityId[] = [...DEFAULT_CAPABILITIES]
+    capabilities: CapabilityId[] = resolveCapabilities(undefined).ids
+    /** The preset the capabilities are, saved by id so its later changes apply; undefined: a custom set. */
+    capabilityPreset: string | undefined = resolveCapabilities(undefined).preset
     /** Mode new threads start in, the same for all projects; undefined until one is chosen. */
     /** Mode new threads start in; 全自动 until the user picks another. */
     approvalMode: ApprovalMode = 'auto'
@@ -473,7 +475,9 @@ class AppStore implements ThreadHost {
 
     private restoreState(state: AppState) {
         this.applyPrefs(state, false)
-        this.capabilities = restoreCapabilities(state)
+        const capabilities = restoreCapabilities(state)
+        this.capabilities = capabilities.ids
+        this.capabilityPreset = capabilities.preset
         this.approvalMode = restoreApprovalMode(state)
         // Thread objects are created lazily per project (restoreTabs); keep the saved order for now.
         this.tabsByProject = { ...state.tabs }
@@ -504,8 +508,10 @@ class AppStore implements ThreadHost {
             this.reviewView = REVIEW_VIEWS.includes(prefs.reviewView as ReviewView) ? prefs.reviewView! : 'tree'
         if (has('compactAt'))
             this.compactAt = prefs.compactAt === null || (typeof prefs.compactAt === 'number' && prefs.compactAt > 0) ? prefs.compactAt : undefined
-        if (live && Object.hasOwn(prefs, 'capabilities') && Array.isArray(prefs.capabilities)) {
-            this.capabilities = normalizeCapabilities(prefs.capabilities)
+        if (live && Object.hasOwn(prefs, 'capabilities') && (Array.isArray(prefs.capabilities) || typeof prefs.capabilities === 'string')) {
+            const capabilities = resolveCapabilities(prefs.capabilities)
+            this.capabilities = capabilities.ids
+            this.capabilityPreset = capabilities.preset
             for (const thread of this.threads.values())
                 void thread.applyConfig()
         }
@@ -542,6 +548,22 @@ class AppStore implements ThreadHost {
             void thread.applyConfig()
     }
 
+    /** The shared settings as saved. */
+    private prefsSnapshot(): GlobalPrefs {
+        return {
+            projects: this.projectOrder,
+            hiddenProjects: this.hiddenProjects,
+            layout: this.layout,
+            theme: this.themePref,
+            lang: this.langPref,
+            transcriptLang: this.transcriptLang,
+            reviewView: this.reviewView,
+            capabilities: this.capabilityPreset ?? this.capabilities,
+            approvalMode: this.approvalMode,
+            compactAt: this.compactAt,
+        }
+    }
+
     private persist() {
         if (!this.ready)
             return
@@ -561,18 +583,7 @@ class AppStore implements ThreadHost {
             if (active && kept.includes(active))
                 activeTabs[cwd] = active
         }
-        const current: GlobalPrefs = {
-            projects: this.projectOrder,
-            hiddenProjects: this.hiddenProjects,
-            layout: this.layout,
-            theme: this.themePref,
-            lang: this.langPref,
-            transcriptLang: this.transcriptLang,
-            reviewView: this.reviewView,
-            capabilities: this.capabilities,
-            approvalMode: this.approvalMode,
-            compactAt: this.compactAt,
-        }
+        const current = this.prefsSnapshot()
         const prefs: Partial<GlobalPrefs> = {}
         for (const key of GLOBAL_PREF_KEYS) {
             const json = JSON.stringify(current[key]) ?? ''
@@ -897,6 +908,7 @@ class AppStore implements ThreadHost {
     /** Live threads restart with the new set once idle, resuming their session. */
     setCapabilities(ids: CapabilityId[]) {
         this.capabilities = normalizeCapabilities(ids)
+        this.capabilityPreset = presetOf(this.capabilities)?.id
         this.persist()
         for (const thread of this.threads.values())
             void thread.applyConfig()
@@ -1339,14 +1351,12 @@ export const appStore = new AppStore()
  * Older state kept a set per project. Keep the active project's set (the one the user last saw in
  * Settings), else the most recently saved one.
  */
-function restoreCapabilities(state: AppState): CapabilityId[] {
+function restoreCapabilities(state: AppState): { ids: CapabilityId[], preset?: string } {
     const saved = state.capabilities
-    if (Array.isArray(saved))
-        return normalizeCapabilities(saved)
-    if (!saved || typeof saved !== 'object')
-        return [...DEFAULT_CAPABILITIES]
+    if (!saved || typeof saved !== 'object' || Array.isArray(saved))
+        return resolveCapabilities(saved)
     const ids = (state.activeProject && saved[state.activeProject]) || Object.values(saved).at(-1)
-    return ids ? normalizeCapabilities(ids) : [...DEFAULT_CAPABILITIES]
+    return resolveCapabilities(ids)
 }
 
 /** Older state kept the mode per project; same choice as restoreCapabilities. */

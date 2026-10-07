@@ -88,6 +88,34 @@ export const PRESETS: readonly CapabilityPreset[] = [
 
 export const DEFAULT_CAPABILITIES: readonly CapabilityId[] = PRESETS.find(p => p.id === 'standard')!.capabilities
 
+const sameSet = (a: readonly CapabilityId[], b: readonly CapabilityId[]) => a.length === b.length && a.every(id => b.includes(id))
+
+/** The preset with exactly these capabilities, if any. */
+export function presetOf(ids: readonly CapabilityId[]): CapabilityPreset | undefined {
+    return PRESETS.find(p => sameSet(p.capabilities, ids))
+}
+
+/**
+ * Capabilities added after Settings started saving presets by id. A list saved by an older build
+ * could not include them, so it is still the preset it was without them.
+ */
+const NEWER_THAN_LISTS: readonly CapabilityId[] = ['review']
+
+/** A saved choice (preset id, list, or anything unreadable) → the ids it enables. */
+export function resolveCapabilities(saved: unknown): { ids: CapabilityId[], preset?: string } {
+    if (typeof saved === 'string') {
+        const preset = PRESETS.find(p => p.id === saved) ?? PRESETS.find(p => sameSet(p.capabilities, DEFAULT_CAPABILITIES))!
+        return { ids: [...preset.capabilities], preset: preset.id }
+    }
+    if (!Array.isArray(saved)) {
+        const preset = presetOf(DEFAULT_CAPABILITIES)
+        return { ids: [...DEFAULT_CAPABILITIES], preset: preset?.id }
+    }
+    const list = normalizeCapabilities(saved)
+    const preset = presetOf(list) ?? PRESETS.find(p => p.capabilities.length && sameSet(p.capabilities.filter(id => !NEWER_THAN_LISTS.includes(id)), list))
+    return preset ? { ids: [...preset.capabilities], preset: preset.id } : { ids: list }
+}
+
 /** Valid ids only, deduplicated, in CAPABILITIES order (so equal sets compare equal). */
 export function normalizeCapabilities(value: unknown): CapabilityId[] {
     const wanted = new Set(Array.isArray(value) ? value : [])

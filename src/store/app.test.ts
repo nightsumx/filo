@@ -82,11 +82,16 @@ describe('tabs and auto split', () => {
 describe('capabilities', () => {
     beforeEach(() => {
         reset()
-        appStore.capabilities = ['todo', 'ask', 'approval', 'plan']
+        appStore.setCapabilities(['todo', 'ask', 'approval', 'plan', 'review'])
     })
+    const restore = (state: object) => {
+        ;(appStore as any).restoreState(state)
+        return appStore.enabledCapabilities
+    }
+    const saved = () => (appStore as any).prefsSnapshot().capabilities
 
     it('defaults to the standard preset and returns plain, cloneable arrays', () => {
-        expect(appStore.enabledCapabilities).toEqual(['todo', 'ask', 'approval', 'plan'])
+        expect(appStore.enabledCapabilities).toEqual(['todo', 'ask', 'approval', 'plan', 'review'])
         appStore.setCapabilities(['ask', 'bogus' as any, 'todo'])
         const ids = appStore.enabledCapabilities
         expect(ids).toEqual(['todo', 'ask'])
@@ -96,17 +101,53 @@ describe('capabilities', () => {
         expect(appStore.enabledCapabilities).toEqual([])
     })
 
-    it('restores the active project\'s set from the old per-project state', () => {
-        const restore = (state: object) => {
-            ;(appStore as any).restoreState(state)
-            return appStore.enabledCapabilities
-        }
+    it('saves a preset by its id, so later additions to it reach users who chose it', () => {
+        appStore.setCapabilities(['todo', 'ask', 'approval', 'plan', 'review'])
+        expect(saved()).toBe('standard')
+        expect(appStore.capabilityPreset).toBe('standard')
+        appStore.setCapabilities(['todo', 'plan'])
+        expect(saved()).toEqual(['todo', 'plan'])
+        expect(appStore.capabilityPreset).toBeUndefined()
+        expect(restore({ capabilities: 'full' })).toEqual(['todo', 'ask', 'approval', 'plan', 'subagent', 'review'])
+        expect(appStore.capabilityPreset).toBe('full')
+        expect(restore({ capabilities: 'lean' })).toEqual([])
+        expect(restore({ capabilities: 'gone' })).toEqual(['todo', 'ask', 'approval', 'plan', 'review'])
+    })
+
+    it('nothing saved is the standard preset', () => {
         expect(restore({})).toEqual(['todo', 'ask', 'approval', 'plan', 'review'])
+        expect(appStore.capabilityPreset).toBe('standard')
+    })
+
+    it('a list saved before presets were saved by id becomes the preset it was', () => {
+        // Those builds could not offer review, so a list without it still matches.
+        expect(restore({ capabilities: ['todo', 'ask', 'approval', 'plan', 'subagent'] })).toEqual(['todo', 'ask', 'approval', 'plan', 'subagent', 'review'])
+        expect(appStore.capabilityPreset).toBe('full')
+        expect(restore({ capabilities: ['todo', 'ask', 'approval', 'plan'] })).toEqual(['todo', 'ask', 'approval', 'plan', 'review'])
+        expect(restore({ capabilities: ['todo', 'ask', 'approval', 'plan', 'review'] })).toEqual(['todo', 'ask', 'approval', 'plan', 'review'])
+        // Lean stays lean, and other lists stay as they are.
+        expect(restore({ capabilities: [] })).toEqual([])
+        expect(appStore.capabilityPreset).toBe('lean')
         expect(restore({ capabilities: ['plan', 'todo'] })).toEqual(['todo', 'plan'])
+        expect(appStore.capabilityPreset).toBeUndefined()
+    })
+
+    it('restores the active project\'s set from the old per-project state', () => {
         const old = { capabilities: { '/a': ['todo'], '/b': ['todo', 'ask', 'subagent'] } }
         expect(restore({ ...old, activeProject: '/a' })).toEqual(['todo'])
         expect(restore({ ...old, activeProject: '/c' })).toEqual(['todo', 'ask', 'subagent'])
     })
+
+    it('another window\'s choice applies here, by id or as a list', () => {
+        ;(appStore as any).applyPrefs({ capabilities: 'lean' }, true)
+        expect(appStore.enabledCapabilities).toEqual([])
+        ;(appStore as any).applyPrefs({ capabilities: ['todo'] }, true)
+        expect(appStore.enabledCapabilities).toEqual(['todo'])
+    })
+})
+
+describe('approval mode', () => {
+    beforeEach(reset)
 
     it('keeps one approval mode for all projects, reading the old per-project map once', () => {
         const restore = (state: object) => {

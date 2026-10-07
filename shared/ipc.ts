@@ -116,8 +116,8 @@ export interface GlobalPrefs {
     transcriptLang?: TranscriptLang
     /** Changes panel: files in a folder tree (default) or a flat list. */
     reviewView?: ReviewView
-    /** Capabilities every pi process loads; absent means DEFAULT_CAPABILITIES. Older state has a map per project cwd. */
-    capabilities?: CapabilityId[] | Record<string, CapabilityId[]>
+    /** Capabilities every pi process loads: a preset id (so the preset's later changes apply) or a custom list; absent means DEFAULT_CAPABILITIES. Older state has a map per project cwd. */
+    capabilities?: string | CapabilityId[] | Record<string, CapabilityId[]>
     /** Approval mode new threads start in: the last one chosen in any thread. */
     approvalMode?: ApprovalMode
     /** Tokens at which every model compacts (see lib/compactAt); null: none, absent: not decided yet. */

@@ -1,5 +1,5 @@
-// Settings → 能力: which capability extensions every pi process loads. A preset is only a
-// shortcut for a set of switches; any other combination shows no preset selected.
+// Settings → 能力: which capability extensions every pi process loads. A preset is a named set of
+// switches, saved by id so its later changes apply; any other combination is a custom set.
 import type { CapabilityId } from '@shared/capabilities'
 import { CAPABILITIES, PRESETS } from '@shared/capabilities'
 import { Comment, Segmented, SettingRow, SettingsPage, Switch } from '@/components/ui/form'
@@ -10,7 +10,7 @@ import { observer } from 'mobx-react-lite'
 export const CapabilitiesPage = observer(() => {
     const enabled = appStore.capabilities
     const set = (ids: CapabilityId[]) => appStore.setCapabilities(ids)
-    const preset = PRESETS.find(p => p.capabilities.length === enabled.length && p.capabilities.every(id => enabled.includes(id)))
+    const preset = PRESETS.find(p => p.id === appStore.capabilityPreset)
     const extra = CAPABILITIES.filter(c => enabled.includes(c.id)).reduce((sum, c) => sum + c.contextTokens, 0)
 
     return (
