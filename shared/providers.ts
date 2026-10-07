@@ -37,6 +37,22 @@ export interface ProvidersState extends ProviderList {
 
 export type AuthMethod = 'api_key' | 'oauth'
 
+/**
+ * Providers most people sign in to, shown first in this order (the big subscriptions, then the
+ * common key-based ones). pi lists providers alphabetically, which buries OpenAI and Anthropic.
+ */
+export const POPULAR_PROVIDERS = ['openai', 'anthropic', 'github-copilot', 'google', 'xai', 'openrouter', 'deepseek'] as const
+
+/** Popular providers first, the rest after them in pi's order. */
+export function sortProviders<T extends { id: string }>(providers: readonly T[]): T[] {
+    const rank = (id: string) => {
+        const i = (POPULAR_PROVIDERS as readonly string[]).indexOf(id)
+        return i < 0 ? POPULAR_PROVIDERS.length : i
+    }
+    // Array.prototype.sort is stable, so the unranked keep their order.
+    return [...providers].sort((a, b) => rank(a.id) - rank(b.id))
+}
+
 /** A question a login flow asks (pi's AuthPrompt). */
 export type LoginPrompt =
     | { type: 'text' | 'secret' | 'manual_code', message: string, placeholder?: string }

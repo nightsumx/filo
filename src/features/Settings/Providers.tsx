@@ -3,7 +3,7 @@
 // custom OpenAI/Anthropic-compatible servers). Everything is pi's own auth.json and models.json, so
 // the terminal pi sees the same setup.
 import type { AuthMethod, Endpoint, EndpointModel, LoginNotice, LoginPrompt, LoginUpdate, ProviderInfo, ProvidersState } from '@shared/providers'
-import { ENDPOINT_APIS } from '@shared/providers'
+import { ENDPOINT_APIS, sortProviders } from '@shared/providers'
 import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Comment, flatFieldClass, Segmented, SettingsPage, Switch } from '@/components/ui/form'
@@ -14,6 +14,7 @@ import { Check, Copy, ExternalLink, Loader2, MoreHorizontal, Plus, RefreshCw, Se
 import { observer } from 'mobx-react-lite'
 import { useEffect, useId, useRef, useState } from 'react'
 import { toast } from 'sonner'
+import { ProviderIcon } from './providerIcons'
 
 const DANGER = 'text-[var(--sl-danger)]'
 
@@ -179,7 +180,7 @@ export const ProvidersPage = observer(() => {
     }
 
     const needle = query.trim().toLowerCase()
-    const shown = state.providers.filter(p => !needle || p.name.toLowerCase().includes(needle) || p.id.includes(needle))
+    const shown = sortProviders(state.providers).filter(p => !needle || p.name.toLowerCase().includes(needle) || p.id.includes(needle))
     const configured = shown.filter(p => p.configured)
     const others = shown.filter(p => !p.configured)
     const total = state.providers.filter(p => p.configured).length
@@ -269,6 +270,7 @@ const ProviderRow = observer(function ProviderRow({ provider: p, endpoint, onLog
     return (
         <div className="py-2">
             <div className="flex items-center gap-3">
+                <ProviderIcon id={p.id} name={p.name} size={20} />
                 <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-1.5 text-[13px] leading-5 text-gray-900">
                         {p.configured && <Check size={13} className="shrink-0 text-ide-success" aria-label={tr('已配置', 'Configured')} />}
@@ -588,7 +590,12 @@ const EndpointForm = observer(function EndpointForm({ provider, endpoint, onDone
             {isNew && (
                 <div className="flex flex-wrap items-center gap-1">
                     <span className="mr-1 text-[12px] text-[var(--jb-comment)]">{tr('本地服务：', 'Local servers:')}</span>
-                    {LOCAL_PRESETS.map(p => <Button key={p.id} type="button" variant="ghost" size="sm" className="h-6 px-2 text-gray-700" onClick={() => applyPreset(p)}>{p.name}</Button>)}
+                    {LOCAL_PRESETS.map(p => (
+                        <Button key={p.id} type="button" variant="ghost" size="sm" className="h-6 px-2 text-gray-700" onClick={() => applyPreset(p)}>
+                            <ProviderIcon id={p.id} name={p.name} size={13} />
+                            {p.name}
+                        </Button>
+                    ))}
                 </div>
             )}
             {!builtIn && (
