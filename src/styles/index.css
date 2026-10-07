@@ -11,66 +11,79 @@
 @layer base {
     :root {
         --color-primary: rgba(69, 89, 164, 1);
-        --text-color-a: #1e1f22;
+        --text-color-a: #0d0d0d;
         --text-color-b: rgba(0, 0, 0, 0.6);
         --text-color-c: rgba(0, 0, 0, 0.3);
         --bg-main: #fff;
-        --bg-side: #f7f8fa;
+        --bg-side: #f9f9f9;
         --bg-hover: rgba(0, 0, 0, 0.05);
-        --bg-selected: #dfe1e5;
-        --bg-active: #dfe1e5;
-        --border-color: #ebecf0;
+        --bg-selected: #e1e1e1;
+        --bg-active: #e1e1e1;
+        --border-color: #ececec;
 
-        /* WebStorm "Islands" chrome. Light = Int UI Light, dark = Islands Dark (sampled). */
-        --ide-frame: #e9eaee;
-        --ide-panel: #f7f8fa;
+        /* Light follows the Codex app's light palette (its default theme: surface #fff, ink #0d0d0d,
+           accent #0169cc, contrast 45). Neutrals are pure grey; fills and lines are ink at the
+           alpha Codex derives (border 7.8%, button/code fill 4.9%, user bubble 5%). The island layout
+           is still WebStorm's: frame, tool-window panels, editor. Dark = Islands Dark (sampled). */
+        --ide-frame: #f3f3f3;
+        --ide-panel: #f9f9f9;
         --ide-editor: #ffffff;
-        --ide-border: #dfe1e5;
-        --ide-line: #ebecf0;
-        --ide-hover: rgba(0, 0, 0, 0.05);
-        --ide-sel: #d4e2ff;
-        --ide-sel-muted: #dfe1e5;
+        --ide-border: #e3e3e3;
+        --ide-line: #ececec;
+        --ide-hover: rgba(13, 13, 13, 0.05);
+        /* Codex selects with grey, not blue: list hover and active selection are ink fills. */
+        --ide-sel: rgba(13, 13, 13, 0.08);
+        --ide-sel-muted: rgba(13, 13, 13, 0.05);
         --ide-tab: #ffffff;
-        /* Filled block on the editor (prompt, composer, code, tool output, diff). Both themes are
-           borderless; blocks separate from the editor by fill alone. */
-        --ide-block: #f7f8fa;
-        /* User prompt bar: a step darker than --ide-block so it reads as the turn's heading. */
-        --ide-prompt: #ebecf0;
+        /* Filled block on the editor (prompt, composer, code, tool output, diff): Codex's code-block
+           fill. Both themes are borderless; blocks separate from the editor by fill alone. */
+        --ide-block: #f3f3f3;
+        /* User message bubble: Codex's ink at 5% on white. */
+        --ide-prompt: #f3f3f3;
         --ide-tab-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
-        --ide-accent: #3574f0;
+        --ide-accent: #0169cc;
         /* Same colour as channels, so Tailwind opacity modifiers (ring-ide-accent/50) work. */
-        --ide-accent-rgb: 53 116 240;
-        --ide-accent-hover: #2d63cf;
+        --ide-accent-rgb: 1 105 204;
+        --ide-accent-hover: #015cb3;
         /* Tool success mark. pi-cc-extensions' #99d58f is too faint on white, so light uses a deeper shade of it. */
         --ide-success: #5c9e51;
+        /* Diff rows, word marks, bar and added-line numbers (TuiDiff and the review panel): Codex's
+           decoration colours (#00a240 / #e02e2a). Codex tints rows 15% on white; these rows sit on
+           the grey block, which already adds weight, so they stay a few points lower. */
+        --diff-add-row: rgb(0 162 64 / 0.12);
+        --diff-del-row: rgb(224 46 42 / 0.1);
+        --diff-add-mark: rgb(0 162 64 / 0.26);
+        --diff-del-mark: rgb(224 46 42 / 0.22);
+        --diff-add-bar: #00a240;
+        --diff-add-num: #008635;
         /* Composer status line (cc-statusline palette, darkened for white). */
         --sl-ok: #4f8a4f;
         --sl-dir: #3b70a6;
         --sl-model: #7a4fd0;
-        --sl-muted: #8a8d96;
+        --sl-muted: #8a8a8a;
         --sl-warn: #a6791c;
         --sl-danger: #c0504d;
-        --ide-fg: #1e1f22;
-        --ide-muted: #6c707e;
-        --ide-dim: #818594;
+        --ide-fg: #0d0d0d;
+        --ide-muted: #575757;
+        --ide-dim: #878787;
         --ide-radius: 10px;
         /* Dialogs and form controls (light). */
         --jb-dialog-bg: #ffffff;
         /* Settings dialog's page list. */
-        --jb-dialog-side: #f7f8fa;
-        --jb-dialog-border: rgba(0, 0, 0, 0.12);
-        --jb-dialog-shadow: 0 14px 40px rgba(0, 0, 0, 0.16), 0 2px 8px rgba(0, 0, 0, 0.06);
-        --jb-scrim: rgba(0, 0, 0, 0.06);
-        --jb-separator: #ebecf0;
-        --jb-field-border: #c9ccd6;
-        --jb-comment: #818594;
-        --jb-disabled-fg: #a8adbd;
-        --jb-disabled-border: #dfe1e5;
+        --jb-dialog-side: #f9f9f9;
+        --jb-dialog-border: rgba(0, 0, 0, 0.1);
+        --jb-dialog-shadow: 0 14px 40px rgba(0, 0, 0, 0.14), 0 2px 8px rgba(0, 0, 0, 0.05);
+        --jb-scrim: rgba(0, 0, 0, 0.1);
+        --jb-separator: #ececec;
+        --jb-field-border: #d4d4d4;
+        --jb-comment: #878787;
+        --jb-disabled-fg: #ababab;
+        --jb-disabled-border: #e3e3e3;
         --jb-secondary-bg: #ffffff;
-        --jb-secondary-hover: #f7f8fa;
-        --jb-fill: rgba(0, 0, 0, 0.05);
-        --jb-fill-hover: rgba(0, 0, 0, 0.08);
-        --jb-switch-off: #c9ccd6;
+        --jb-secondary-hover: #f9f9f9;
+        --jb-fill: rgba(13, 13, 13, 0.05);
+        --jb-fill-hover: rgba(13, 13, 13, 0.08);
+        --jb-switch-off: #d4d4d4;
         --box-shadow: rgba(0, 0, 0, 0.15);
         --background: 0 0% 100%;
         --foreground: 0 0% 3.9%;
@@ -136,6 +149,12 @@
         --ide-accent-hover: #4682fa;
         /* BRIGHT_GREEN in pi-cc-extensions (default-mode.ts). */
         --ide-success: #99d58f;
+        --diff-add-row: rgb(var(--emerald-500) / 0.09);
+        --diff-del-row: rgb(var(--red-500) / 0.09);
+        --diff-add-mark: rgb(var(--emerald-500) / 0.26);
+        --diff-del-mark: rgb(var(--red-500) / 0.26);
+        --diff-add-bar: rgb(var(--emerald-500));
+        --diff-add-num: rgb(var(--emerald-600));
         /* xterm-256 colours 108 / 110 / 141 / 244 / 179 / 174 from cc-statusline. */
         --sl-ok: #87af87;
         --sl-dir: #87afd7;
@@ -385,4 +404,27 @@ ul {
 .ide-island {
     border-radius: var(--ide-radius);
     overflow: hidden;
+}
+
+/* Review panel diffs (@git-diff-view) in light: its GitHub palette (mint rows, saturated line-number
+   cells, blue hunk bars) replaced by the transcript diff's tints (TuiDiff), on the block fill. */
+html .diff-tailwindcss-wrapper[data-theme='light'] .diff-style-root {
+    --diff-border--: var(--ide-line);
+    --diff-add-content--: var(--diff-add-row);
+    --diff-del-content--: var(--diff-del-row);
+    --diff-add-lineNumber--: var(--diff-add-row);
+    --diff-del-lineNumber--: var(--diff-del-row);
+    --diff-add-content-highlight--: var(--diff-add-mark);
+    --diff-del-content-highlight--: var(--diff-del-mark);
+    --diff-plain-content--: transparent;
+    --diff-plain-lineNumber--: transparent;
+    --diff-expand-content--: transparent;
+    --diff-expand-lineNumber--: transparent;
+    --diff-empty-content--: transparent;
+    --diff-plain-lineNumber-color--: rgb(var(--gray-400));
+    --diff-expand-lineNumber-color--: rgb(var(--gray-400));
+    --diff-hunk-content--: transparent;
+    --diff-hunk-lineNumber--: transparent;
+    --diff-hunk-content-color--: rgb(var(--gray-500));
+    --diff-hunk-lineNumber-hover--: var(--ide-accent);
 }

@@ -11,8 +11,10 @@ const buttonVariants = cva(
             variant: {
                 default:
                     'bg-black/[0.06] text-gray-900 hover:bg-black/[0.08] active:bg-black/[0.12]',
+                // Disabled: a faded blue in dark; on white that reads as a pastel button, so light uses
+                // JetBrains' disabled look (grey outline and text) instead.
                 primary:
-                    'border border-ide-accent bg-ide-accent text-always-white hover:border-ide-accent-hover hover:bg-ide-accent-hover disabled:opacity-40',
+                    'border border-ide-accent bg-ide-accent text-always-white hover:border-ide-accent-hover hover:bg-ide-accent-hover disabled:opacity-40 light:disabled:border-[var(--jb-disabled-border)] light:disabled:bg-transparent light:disabled:text-[var(--jb-disabled-fg)] light:disabled:opacity-100',
                 destructive:
                     'bg-[#FF3B30] text-always-white hover:bg-[#FF453A] active:bg-[#FF2D1F]',
                 // JetBrains secondary button.

@@ -15,9 +15,42 @@ const rgb = hex => [1, 3, 5].map(i => Number.parseInt(hex.slice(i, i + 2), 16)).
 const gray = v => `${v} ${v} ${v}`
 /** JetBrains "Islands" dark neutrals (slightly cool), lightest last; tuned against the #1e1f22 editor. */
 const DARK_GRAY = { 50: '34 35 39', 100: '43 45 48', 200: '57 59 64', 300: '78 81 87', 400: '111 115 122', 500: '134 138 145', 600: '157 161 168', 700: '180 184 191', 800: '206 208 214', 900: '223 225 229', 950: '240 241 242' }
-/** JetBrains light neutrals (Int UI light). */
-const LIGHT_GRAY = { 50: '247 248 250', 100: '235 236 240', 200: '223 225 229', 300: '201 204 214', 400: '160 164 173', 500: '129 133 148', 600: '108 112 126', 700: '81 84 96', 800: '55 57 66', 900: '30 31 34', 950: '18 19 21' }
+/**
+ * Light neutrals, pure grey like the Codex app's (its gray-50 #f9f9f9, ink #0d0d0d). Each step keeps
+ * the OKLab lightness of the JetBrains Int UI Light scale it replaced, so contrast between steps is
+ * unchanged and 500 / 700 sit next to Codex's tertiary (#878787) and secondary (#575757) text.
+ * 900 / 950 are Codex's ink (#0d0d0d) and black.
+ */
+const LIGHT_GRAY = { 50: '248 248 248', 100: '236 236 236', 200: '225 225 225', 300: '204 204 204', 400: '164 164 164', 500: '134 134 134', 600: '112 112 112', 700: '84 84 84', 800: '57 57 57', 900: '13 13 13', 950: '0 0 0' }
 const SURFACE = { light: { 'white': '255 255 255', 'black': '0 0 0', 'elevated': '255 255 255' }, dark: { 'white': '30 31 34', 'black': '255 255 255', 'elevated': '43 45 48' } }
+
+/*
+ * White shows a hue at full strength; a dark surface swallows part of it. Tailwind's hues are tuned
+ * for white pages, so next to the muted JetBrains neutrals they shout (red-500 status text, emerald
+ * diff rows). The light theme keeps each shade's OKLCH lightness and hue and scales its chroma by
+ * LIGHT_CHROMA; dark keeps Tailwind's values, which already read calm there.
+ */
+const LIGHT_CHROMA = 0.78
+const toLinear = c => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4)
+const toGamma = c => (c <= 0.0031308 ? 12.92 * c : 1.055 * c ** (1 / 2.4) - 0.055)
+/** sRGB hex → OKLab with a and b scaled by k (chroma × k) → "r g b" (Björn Ottosson's OKLab matrices). */
+const damp = (hex, k) => {
+    const [r, g, b] = [1, 3, 5].map(i => toLinear(Number.parseInt(hex.slice(i, i + 2), 16) / 255))
+    const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b)
+    const m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b)
+    const s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b)
+    const L = 0.2104542553 * l + 0.7936177850 * m - 0.0040720468 * s
+    const A = (1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s) * k
+    const B = (0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s) * k
+    const l3 = (L + 0.3963377774 * A + 0.2158037573 * B) ** 3
+    const m3 = (L - 0.1055613458 * A - 0.0638541728 * B) ** 3
+    const s3 = (L - 0.0894841775 * A - 1.2914855480 * B) ** 3
+    return [
+        4.0767416621 * l3 - 3.3077115913 * m3 + 0.2309699292 * s3,
+        -1.2684380046 * l3 + 2.6097574011 * m3 - 0.3413193965 * s3,
+        -0.0041960863 * l3 - 0.7034186147 * m3 + 1.7076147010 * s3,
+    ].map(c => Math.round(Math.min(1, Math.max(0, toGamma(c))) * 255)).join(' ')
+}
 
 const scale = name => Object.fromEntries(SHADES.map(s => [s, `rgb(var(--${name}-${s}) / <alpha-value>)`]))
 const paletteVars = (dark) => {
@@ -26,14 +59,18 @@ const paletteVars = (dark) => {
         for (const [i, s] of SHADES.entries()) {
             vars[`--${hue}-${s}`] = hue === 'gray'
                 ? (dark ? DARK_GRAY : LIGHT_GRAY)[s]
-                : rgb(defaults[hue][dark ? SHADES[SHADES.length - 1 - i] : s])
+                : dark ? rgb(defaults[hue][SHADES[SHADES.length - 1 - i]]) : damp(defaults[hue][s], LIGHT_CHROMA)
         }
     }
     for (const [k, v] of Object.entries(SURFACE[dark ? 'dark' : 'light']))
         vars[`--${k}`] = v
     return vars
 }
-const palette = plugin(({ addBase }) => addBase({ ':root': paletteVars(false), '.dark': paletteVars(true) }))
+const palette = plugin(({ addBase, addVariant }) => {
+    addBase({ ':root': paletteVars(false), '.dark': paletteVars(true) })
+    // The light theme only (there is no .light class: light is the absence of .dark).
+    addVariant('light', ':root:not(.dark) &')
+})
 
 /** @type {import('tailwindcss').Config} */
 export default {

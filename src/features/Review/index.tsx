@@ -483,7 +483,7 @@ export const ReviewPanel = observer(({ thread, onClose }: { thread: Thread, onCl
                             disabled={!picked.length || !message.trim() || committing}
                             onClick={() => void commit()}
                             title={tr('提交所选文件（⌘↩）', 'Commit the selected files (⌘↩)')}
-                            className="flex h-7 items-center gap-1.5 rounded-md bg-ide-accent px-3 text-[12px] font-medium text-white hover:bg-ide-accent-hover disabled:opacity-40 disabled:hover:bg-ide-accent"
+                            className="flex h-7 items-center gap-1.5 rounded-md bg-ide-accent px-3 text-[12px] font-medium text-white hover:bg-ide-accent-hover disabled:opacity-40 disabled:hover:bg-ide-accent light:disabled:bg-transparent light:disabled:text-[var(--jb-disabled-fg)] light:disabled:opacity-100 light:disabled:shadow-[inset_0_0_0_1px_var(--jb-disabled-border)] light:disabled:hover:bg-transparent"
                         >
                             {committing && <Loader2 size={12} className="animate-spin" />}
                             {tr('提交', 'Commit')}

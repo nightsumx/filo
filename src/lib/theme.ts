@@ -5,7 +5,7 @@
 import mdDark from 'github-markdown-css/github-markdown-dark.css?inline'
 import mdLight from 'github-markdown-css/github-markdown-light.css?inline'
 import hljsDark from 'highlight.js/styles/github-dark.css?inline'
-import hljsLight from 'highlight.js/styles/github.css?inline'
+import hljsLight from '@/styles/syntax-light.css?inline'
 import { makeAutoObservable } from 'mobx'
 
 const query = window.matchMedia('(prefers-color-scheme: dark)')

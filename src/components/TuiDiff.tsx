@@ -11,10 +11,11 @@ import { memo, useMemo } from 'react'
 
 const MAX_HIGHLIGHT_ROWS = 3000
 
-const rowBg = { del: 'bg-red-500/[0.09]', add: 'bg-emerald-500/[0.09]', ctx: '' } as const
-const markBg = { del: 'rounded-[2px] bg-red-500/[0.26]', add: 'rounded-[2px] bg-emerald-500/[0.26]', ctx: '' } as const
-const numColor = { del: 'text-red-500', add: 'text-emerald-600', ctx: 'text-gray-400' } as const
-const barColor = { del: 'bg-red-500', add: 'bg-emerald-500', ctx: '' } as const
+// Row, word-mark and bar colours come from --diff-* in index.css, shared with the review panel's diffs.
+const rowBg = { del: 'bg-[var(--diff-del-row)]', add: 'bg-[var(--diff-add-row)]', ctx: '' } as const
+const markBg = { del: 'rounded-[2px] bg-[var(--diff-del-mark)]', add: 'rounded-[2px] bg-[var(--diff-add-mark)]', ctx: '' } as const
+const numColor = { del: 'text-red-500', add: 'text-[var(--diff-add-num)]', ctx: 'text-gray-400' } as const
+const barColor = { del: 'bg-red-500', add: 'bg-[var(--diff-add-bar)]', ctx: '' } as const
 
 /** Token spans for one line, cut further where word-level marks start and end. */
 function LineText({ line, tokens }: { line: DiffLine, tokens?: Token[] }) {
