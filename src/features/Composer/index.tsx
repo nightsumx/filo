@@ -3,6 +3,7 @@
 // Esc aborts and restores queued messages, "/" opens extension commands, prompt templates and skills.
 import type { ImageContent, SlashCommand } from '@shared/pi'
 import type { Thread } from '@/store/thread'
+import { ImageThumb } from '@/components/ImageView'
 import { cn } from '@/lib/utils'
 import { appStore } from '@/store/app'
 import { ArrowUp, ImagePlus, Square, X } from 'lucide-react'
@@ -210,9 +211,9 @@ export const Composer = observer(({ thread }: { thread: Thread }) => {
                 >
                     {thread.images.length > 0 && (
                         <div className="flex flex-wrap gap-2 px-3 pt-2.5">
-                            {thread.images.map((img, i) => (
+                            {thread.images.map((_, i) => (
                                 <div key={i} className="group relative">
-                                    <img src={`data:${img.mimeType};base64,${img.data}`} alt={tr('待发送图片', 'Image to send')} className="h-14 w-14 rounded-md border border-gray-200 object-cover" />
+                                    <ImageThumb images={thread.images} index={i} alt={tr('待发送图片', 'Image to send')} className="h-14 w-14 rounded-md border border-gray-200 object-cover" />
                                     <button
                                         type="button"
                                         aria-label={tr('移除图片', 'Remove image')}

@@ -2,6 +2,7 @@ import type { Step, Turn, UserPrompt } from '@/lib/timeline'
 import type { TranscriptRow } from '@/lib/transcriptRows'
 import type { Thread } from '@/store/thread'
 import { ActionBtn } from '@/components/ActionBtn'
+import { ImageThumb } from '@/components/ImageView'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { USER_BUBBLE_MAX_HEIGHT } from '@/lib/rowEstimate'
 import { useT, verbFor } from '@/lib/transcriptText'
@@ -80,8 +81,8 @@ const PromptBubble = observer(({ user, thread, entryId }: { user: UserPrompt, th
         <div className="group flex flex-col items-end gap-1.5 pl-[15%]" title={user.timestamp ? t.dateTime(user.timestamp) : undefined}>
             {user.images.length > 0 && (
                 <div className="flex flex-wrap justify-end gap-2">
-                    {user.images.map((img, i) => (
-                        <img key={i} src={`data:${img.mimeType};base64,${img.data}`} alt="attached image" className="h-20 rounded-lg border border-gray-200 object-cover" />
+                    {user.images.map((_, i) => (
+                        <ImageThumb key={i} images={user.images} index={i} alt="attached image" className="h-20 rounded-lg border border-gray-200 object-cover" />
                     ))}
                 </div>
             )}

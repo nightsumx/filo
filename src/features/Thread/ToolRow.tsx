@@ -6,6 +6,7 @@
 import type { ImageContent, TextContent, ToolCall } from '@shared/pi'
 import type { DiffModel } from '@/lib/diffModel'
 import type { Step, ToolResultView } from '@/lib/timeline'
+import { ImageThumb } from '@/components/ImageView'
 import { TuiDiff } from '@/components/TuiDiff'
 import { diffFromContent, diffFromEdits, diffFromPatch } from '@/lib/diffModel'
 import { formatToolInput, tuiSummary, tuiTitle } from '@/lib/toolMeta'
@@ -341,8 +342,10 @@ export const ToolRow = memo(({ call, result, running, startedAt, ms }: { call: T
                     </div>
                 )}
                 {expanded && !diff && status !== 'running' && <IoPanel call={call} output={output} error={failed} />}
-                {images.map((img, i) => (
-                    <img key={i} src={`data:${img.mimeType};base64,${img.data}`} alt="" className="mt-1 max-h-80 w-fit rounded-md" />
+                {images.map((_, i) => (
+                    <div key={i} className="mt-1">
+                        <ImageThumb images={images} index={i} alt="" className="max-h-80 w-fit rounded-md" />
+                    </div>
                 ))}
             </div>
         </Gutter>
