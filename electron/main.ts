@@ -1,6 +1,6 @@
 import type { AgentStartOptions, GlobalCompactionPatch, SearchResult, StateSave, TabMove, ThemePref, WindowBounds, WindowReport } from '@shared/ipc'
 import type { LoginUpdate } from '@shared/providers'
-import { agentOfKey, parseAcpSessionKey } from '@shared/agents'
+import { acpAgent, agentOfKey, parseAcpSessionKey } from '@shared/agents'
 import { APP_INFO } from '@shared/app'
 import { resolveLang } from '@shared/i18n'
 import { stat } from 'node:fs/promises'
@@ -50,7 +50,14 @@ const agents = new AgentManager({
 
 // Sessions of ACP agents (Codex, …) started from the app; the agents keep the conversations.
 const acpMirrorDir = () => path.join(app.getPath('userData'), 'acp-transcripts')
-const acp = new AcpService(() => path.join(app.getPath('userData'), 'acp-sessions.json'), acpMirrorDir)
+const acp = new AcpService(
+    () => path.join(app.getPath('userData'), 'acp-sessions.json'),
+    acpMirrorDir,
+    // Agents the app installs (Settings → Agents, or picking one that is not installed).
+    () => path.join(app.getPath('userData'), 'agents'),
+    () => windows.broadcast(null, IPC.agentsChanged),
+    url => net.fetch(url),
+)
 
 const windows = new Windows({ store, create: createWindow, stopAgent: id => agents.stop(id) })
 
@@ -236,6 +243,12 @@ const absolutePath = (value: unknown): string => {
 function registerIpc() {
     ipcMain.handle(IPC.resolveEnv, () => resolvePiEnv())
     ipcMain.handle(IPC.listAgents, () => acp.availability())
+    ipcMain.handle(IPC.installAgent, (_e, id: unknown) => {
+        const spec = typeof id === 'string' ? acpAgent(id) : undefined
+        if (!spec)
+            throw new Error('unknown agent')
+        return acp.install(spec.id)
+    })
     ipcMain.handle(IPC.listSessions, async () => {
         const pi = await listSessions()
         const known = new Set([...store.state.projects, ...pi.map(s => s.cwd)])

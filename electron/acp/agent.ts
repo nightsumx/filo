@@ -32,7 +32,9 @@ export interface AcpLaunch {
     file: string
     args: string[]
     env: Record<string, string>
-    via?: 'path' | 'npx' | 'override'
+    via?: 'path' | 'app' | 'override'
+    /** The app's install predates the pinned version. */
+    outdated?: boolean
 }
 
 export interface AcpAgentOptions {

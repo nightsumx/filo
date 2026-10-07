@@ -5,10 +5,12 @@ import type { Thread, ThreadMode } from '@/store/thread'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { cn, formatTokens } from '@/lib/utils'
-import { Bot, Brain, Check, ChevronDown, ClipboardList, Cpu, FilePen, KeyRound, ShieldCheck, SlidersHorizontal, Zap } from 'lucide-react'
+import { Bot, Brain, Check, ChevronDown, ClipboardList, Cpu, Download, FilePen, KeyRound, Loader2, ShieldCheck, SlidersHorizontal, Zap } from 'lucide-react'
+import { observable, runInAction } from 'mobx'
 import { observer } from 'mobx-react-lite'
 import { useEffect, useRef, useState } from 'react'
 import { tr } from '@/lib/i18n'
+import { agentsStore } from '@/store/agents'
 import { appStore } from '@/store/app'
 import type { Localized } from '@shared/i18n'
 
@@ -286,62 +288,84 @@ export const ConfigPickers = observer(({ thread }: { thread: Thread }) => {
     )
 })
 
-/** Agents found on this machine, asked once per app run. */
-let agentsQuery: Promise<AgentAvailability[]> | undefined
-function useAgents(): AgentAvailability[] {
-    const [agents, setAgents] = useState<AgentAvailability[]>([])
-    useEffect(() => {
-        let live = true
-        agentsQuery ??= window.pi.listAgents().catch(() => [])
-        void agentsQuery.then(list => live && setAgents(list))
-        return () => {
-            live = false
-        }
-    }, [])
-    return agents
+function agentHint(agent: AgentAvailability): string | undefined {
+    if (agent.installing)
+        return tr('安装中…', 'Installing…')
+    if (!agent.available)
+        return agent.installable ? tr('未安装，选中后自动安装', 'Not installed; pick it to install') : agent.error
+    if (agent.via === 'app')
+        return agent.outdated ? tr('有新版本，可在 设置 → Agent 里更新', 'An update is available in Settings → Agents') : tr('已由应用安装', 'Installed by the app')
+    return agent.command
 }
 
-function agentHint(agent: AgentAvailability): string | undefined {
-    if (!agent.available)
-        return agent.error
-    if (agent.via === 'npx')
-        return tr(`首次使用时用 npx 下载（${agent.command?.replace(/^npx -y /, '')}）`, `Downloaded with npx on first use (${agent.command?.replace(/^npx -y /, '')})`)
-    return agent.command
+/** The agent a thread is waiting on an install for, by thread key. */
+const installingFor = observable.map<string, AgentKind>()
+
+async function pickAgent(thread: Thread, agent: AgentAvailability | undefined, id: AgentKind) {
+    if (id === 'pi' || agent?.available) {
+        await thread.setAgent(id)
+        return
+    }
+    if (!agent?.installable && !agent?.installing)
+        return
+    runInAction(() => installingFor.set(thread.key, id))
+    const ok = await agentsStore.install(id)
+    runInAction(() => installingFor.delete(thread.key))
+    // Still a fresh thread, and nobody picked another agent meanwhile.
+    if (ok && thread.agentSwitchable)
+        await thread.setAgent(id)
 }
 
 /** Which agent a fresh thread runs: pi, or an ACP agent (Codex, …). Gone once the thread has history. */
 export const AgentPicker = observer(({ thread }: { thread: Thread }) => {
-    const agents = useAgents()
+    useEffect(() => agentsStore.ensure(), [])
+    const agents = agentsStore.list
     if (!thread.agentSwitchable && thread.agent === 'pi')
         return null
-    const choices: { id: AgentKind, label: string, available: boolean, hint?: string }[] = [
-        { id: 'pi', label: 'pi', available: true },
-        ...agents.map(a => ({ id: a.id, label: a.label, available: a.available, hint: agentHint(a) })),
-    ]
-    if (!thread.agentSwitchable || choices.length < 2) {
+    if (!thread.agentSwitchable || !agents.length) {
         // A thread of another agent keeps saying which one it is.
         return thread.agent === 'pi'
             ? null
             : <span className={cn(pill, 'pointer-events-none')}><Bot size={13} /><span>{thread.agentLabel}</span></span>
     }
+    const pending = installingFor.get(thread.key)
+    const pendingLabel = pending && agentsStore.get(pending)?.label
     return (
         <DropdownMenu>
             <DropdownMenuTrigger className={pill} title={tr('这个线程用哪个 Agent', 'Which agent runs this thread')} aria-label={tr(`Agent：${thread.agentLabel}`, `Agent: ${thread.agentLabel}`)}>
-                <Bot size={13} />
-                <span>{thread.agentLabel}</span>
+                {pendingLabel ? <Loader2 size={13} className="animate-spin" /> : <Bot size={13} />}
+                <span>{pendingLabel ? tr(`正在安装 ${pendingLabel}…`, `Installing ${pendingLabel}…`) : thread.agentLabel}</span>
                 <ChevronDown size={12} />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" className="w-80">
                 <DropdownMenuLabel>{tr('Agent', 'Agent')}</DropdownMenuLabel>
-                {choices.map(choice => (
-                    <DropdownMenuItem key={choice.id} disabled={!choice.available} onSelect={() => void thread.setAgent(choice.id)} className="h-auto items-start py-1.5">
-                        <span className="flex min-w-0 flex-1 flex-col">
-                            <span>{choice.label}</span>
-                            {choice.hint && <span className="text-[11.5px] break-all text-gray-500">{choice.hint}</span>}
-                        </span>
-                        {choice.id === thread.agent && <Check size={14} className="mt-0.5 text-ide-accent" />}
-                    </DropdownMenuItem>
-                ))}
+                <DropdownMenuItem onSelect={() => void pickAgent(thread, undefined, 'pi')} className="h-auto items-start py-1.5">
+                    <span className="min-w-0 flex-1">pi</span>
+                    {thread.agent === 'pi' && <Check size={14} className="mt-0.5 text-ide-accent" />}
+                </DropdownMenuItem>
+                {agents.map((agent) => {
+                    const install = !agent.available && (agent.installable || agent.installing)
+                    return (
+                        <DropdownMenuItem
+                            key={agent.id}
+                            disabled={!agent.available && !install}
+                            onSelect={() => void pickAgent(thread, agent, agent.id)}
+                            className="h-auto items-start py-1.5"
+                        >
+                            <span className="flex min-w-0 flex-1 flex-col">
+                                <span>{agent.label}</span>
+                                {agentHint(agent) && <span className="text-[11.5px] break-all text-gray-500">{agentHint(agent)}</span>}
+                            </span>
+                            {agent.id === thread.agent && <Check size={14} className="mt-0.5 text-ide-accent" />}
+                            {install && (
+                                <span className="mt-px flex shrink-0 items-center gap-1 rounded-[4px] bg-ide-accent/[0.14] px-1.5 py-px text-[11.5px] text-ide-accent dark:text-[#8fb3ff]">
+                                    {agent.installing ? <Loader2 size={11} className="animate-spin" /> : <Download size={11} />}
+                                    {agent.installing ? tr('安装中', 'Installing') : tr('安装', 'Install')}
+                                </span>
+                            )}
+                        </DropdownMenuItem>
+                    )
+                })}
             </DropdownMenuContent>
         </DropdownMenu>
     )

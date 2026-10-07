@@ -14,22 +14,28 @@ export interface AcpAgentSpec {
     args?: string[]
     /** Install folders the login shell may not have on PATH (`~/` is the home folder). */
     dirs?: string[]
-    /** Fallback when `bin` is missing: an npm package run with npx, pinned. None: install it yourself. */
+    /** What the app installs (into its own folder) when `bin` is not on PATH: a pinned npm package. */
     npm?: string
-    npmArgs?: string[]
+    /** Or a pinned archive per platform (`process.platform-process.arch`), with the command inside it. */
+    archive?: Partial<Record<string, AgentArchive>>
     /** The agent's own CLI, passed to the adapter so it uses the user's install and sign-in. */
     cli?: { bin: string, env: string }
     /** An API key the agent takes from pi's auth.json (Model providers) when the environment has none. */
     apiKey?: { provider: string, env: string }
     /** What to do when the agent says it is not signed in. */
     signIn: { zh: string, en: string }
-    /** Where to get it when it is neither installed nor on npm. */
-    install?: string
     /**
      * Whether ACP `inputTokens` already counts cache reads (OpenAI style) or not (Anthropic style).
      * Undefined: decide from totalTokens.
      */
     inputIncludesCache?: boolean
+}
+
+export interface AgentArchive {
+    url: string
+    sha256: string
+    /** The ACP command, relative to the unpacked archive. */
+    cmd: string
 }
 
 export const ACP_AGENTS: readonly AcpAgentSpec[] = [
@@ -64,7 +70,6 @@ export const ACP_AGENTS: readonly AcpAgentSpec[] = [
         args: ['agent', 'stdio'],
         dirs: ['~/.grok/bin'],
         npm: '@xai-official/grok@1.0.50',
-        npmArgs: ['agent', 'stdio'],
         inputIncludesCache: true,
         signIn: { zh: '在终端里运行 grok 完成登录', en: 'run grok in a terminal and sign in' },
     },
@@ -75,7 +80,6 @@ export const ACP_AGENTS: readonly AcpAgentSpec[] = [
         args: ['acp'],
         dirs: ['~/.opencode/bin', '~/.bun/bin'],
         npm: 'opencode-ai@1.18.35',
-        npmArgs: ['acp'],
         signIn: { zh: '在终端里运行 opencode auth login', en: 'run opencode auth login in a terminal' },
     },
     {
@@ -84,7 +88,6 @@ export const ACP_AGENTS: readonly AcpAgentSpec[] = [
         bin: 'gemini',
         args: ['--acp'],
         npm: '@google/gemini-cli@0.63.0',
-        npmArgs: ['--acp'],
         apiKey: { provider: 'google', env: 'GEMINI_API_KEY' },
         inputIncludesCache: true,
         signIn: { zh: '在终端里运行 gemini 登录，或在 设置 → 模型供应商 里填 Google 的 API key', en: 'run gemini in a terminal and sign in, or enter a Google API key in Settings → Model providers' },
@@ -95,7 +98,6 @@ export const ACP_AGENTS: readonly AcpAgentSpec[] = [
         bin: 'copilot',
         args: ['--acp'],
         npm: '@github/copilot@1.0.92',
-        npmArgs: ['--acp'],
         signIn: { zh: '在终端里运行 copilot 并用 /login 登录 GitHub', en: 'run copilot in a terminal and sign in with /login' },
     },
     {
@@ -104,7 +106,12 @@ export const ACP_AGENTS: readonly AcpAgentSpec[] = [
         bin: 'cursor-agent',
         args: ['acp'],
         dirs: ['~/.local/bin'],
-        install: 'curl https://cursor.com/install -fsS | bash',
+        // From the ACP registry (cdn.agentclientprotocol.com/registry/v1); the hashes are of the
+        // archives as downloaded on 2026-10-07 (the registry lists none for Cursor).
+        archive: {
+            'darwin-arm64': { url: 'https://downloads.cursor.com/lab/2026.10.01-14929f9/darwin/arm64/agent-cli-package.tar.gz', sha256: '778d04e542adc5c8b6760fda3ebe0757f903b1764f2792c232ef9a35e6e2151b', cmd: 'dist-package/cursor-agent' },
+            'darwin-x64': { url: 'https://downloads.cursor.com/lab/2026.10.01-14929f9/darwin/x64/agent-cli-package.tar.gz', sha256: '8930008f9902a4d02d3185c0d34071e0536bac3426439b55bcfd48b78765a3dd', cmd: 'dist-package/cursor-agent' },
+        },
         signIn: { zh: '在终端里运行 cursor-agent login', en: 'run cursor-agent login in a terminal' },
     },
 ]
@@ -122,9 +129,15 @@ export interface AgentAvailability {
     available: boolean
     /** The adapter command that will run, for the settings line. */
     command?: string
-    /** Where the command comes from: installed, run through npx (downloaded on first use), or a test override. */
-    via?: 'path' | 'npx' | 'override'
+    /** Where the command comes from: the user's PATH, the app's own install, or a test override. */
+    via?: 'path' | 'app' | 'override'
     error?: string
+    /** Not installed (or the app's install is older than the pinned version), and the app can install it. */
+    installable?: boolean
+    /** The app's install is older than the version it would install now. */
+    outdated?: boolean
+    /** An install is running. */
+    installing?: boolean
 }
 
 // ---------------------------------------------------------------- session keys

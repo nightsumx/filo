@@ -10,6 +10,7 @@
 //   - ACP threads are in session search and in the changes panel's edit log
 //   - typing mid-run queues a follow-up; /compact, fork and delete-from-agent go to the agent
 //   - an agent without image prompts hides the image button
+//   - picking an agent that is not installed installs it (from a local package here), then runs it
 //
 //   bun run build && bun run e2e:acp
 import { execFileSync } from 'node:child_process'
@@ -21,6 +22,16 @@ import { check, launch, until, windows } from './app'
 const WORK = '/private/tmp/pi-gui-acp'
 const SHOTS = process.env.SHOTS ?? ''
 const FAKE = path.resolve(import.meta.dirname, 'fakeAcp.mjs')
+
+/** An npm package whose cursor-agent bin runs the fake agent, packed as a tarball. */
+async function fakeCursorPackage(work: string): Promise<string> {
+    const dir = path.join(work, 'fake-cursor')
+    await mkdir(path.join(dir, 'bin'), { recursive: true })
+    await writeFile(path.join(dir, 'package.json'), JSON.stringify({ name: 'fake-cursor-agent', version: '1.0.0', bin: { 'cursor-agent': 'bin/cursor-agent.mjs' } }))
+    await writeFile(path.join(dir, 'bin', 'cursor-agent.mjs'), `#!/usr/bin/env node\nprocess.argv.push('--agent=cursor')\nawait import(${JSON.stringify(FAKE)})\n`)
+    const tgz = execFileSync('npm', ['pack', '--silent', '--pack-destination', work], { cwd: dir }).toString().trim()
+    return path.join(work, tgz)
+}
 
 async function main() {
     await rm(WORK, { recursive: true, force: true })
@@ -63,7 +74,8 @@ async function main() {
         PI_GUI_ACP_OPENCODE: JSON.stringify(['node', FAKE, '--agent=opencode']),
         PI_GUI_ACP_GEMINI: JSON.stringify(['node', FAKE, '--agent=gemini']),
         PI_GUI_ACP_COPILOT: JSON.stringify(['node', FAKE, '--agent=copilot']),
-        PI_GUI_ACP_CURSOR: JSON.stringify(['node', FAKE, '--agent=cursor']),
+        // Cursor is not installed: picking it installs this package into the app's folder.
+        PI_GUI_ACP_INSTALL_CURSOR: await fakeCursorPackage(WORK),
         FAKE_ACP_DIR: fakeDir,
     }
     const R = JSON.stringify(repo)
@@ -220,11 +232,40 @@ async function main() {
         await until('Claude listed', () => js<boolean>(`[...document.querySelectorAll('[role=treeitem]')].some(r => r.textContent.includes('hi claude') && r.textContent.includes('Claude Code'))`))
         check(true, 'its sidebar row says Claude Code')
 
+        // Cursor is not installed: the picker offers to install it, and picking it does.
+        await js(`(() => { window.__app.newThread(${R}); return true })()`)
+        await until('a thread for Cursor', () => js<boolean>(`!!${T} && ${T}.isEmpty && ${T}.agent === 'pi'`))
+        await until('the agent picker', () => js<boolean>(`!![...document.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'Agent: pi')`))
+        // The fresh thread focuses its input a moment later, which would close the menu.
+        await new Promise(r => setTimeout(r, 800))
+        await js(`(() => { const b = [...document.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'Agent: pi'); b.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0 })); return true })()`)
+        const cursorRow = () => `[...document.querySelectorAll('[role=menuitem]')].find(r => r.textContent.startsWith('Cursor'))`
+        await until('the Cursor row', () => js<boolean>(`!!${cursorRow()}`))
+        check(await js<boolean>(`${cursorRow()}.textContent.includes('Not installed; pick it to install') && ${cursorRow()}.textContent.includes('Install') && ${cursorRow()}.getAttribute('aria-disabled') !== 'true'`), 'the picker offers to install Cursor')
+        if (SHOTS) {
+            await new Promise(r => setTimeout(r, 400))
+            await page.screenshot(path.join(SHOTS, 'acp-install.png'))
+        }
+        if (!(await js<boolean>(`!!${cursorRow()}`))) {
+            await js(`(() => { const b = [...document.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'Agent: pi'); b.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0 })); return true })()`)
+            await until('the Cursor row again', () => js<boolean>(`!!${cursorRow()}`))
+        }
+        await js(`(() => { ${cursorRow()}.click(); return true })()`)
+        await until('installing', () => js<boolean>(`[...document.querySelectorAll('button')].some(b => b.textContent.includes('Installing Cursor'))`))
+        check(true, 'the picker says it is installing Cursor')
+        await until('Cursor installed and running', () => js<boolean>(`${T}.agent === 'cursor' && ${T}.agentStatus === 'ready'`), 60_000)
+        check(true, 'once installed, the thread runs Cursor')
+        await js(`(() => { const t = ${T}; t.draft = 'hi cursor'; void t.send(); return true })()`)
+        await until('Cursor answers', () => js<boolean>(`(() => { const t = ${T}; return !t.running && JSON.stringify(t.turns.at(-1)?.steps ?? []).includes('echo: hi cursor') })()`), 20_000)
+        check(true, 'the installed Cursor answers')
+        const cursorAgent = await js<any>(`(async () => (await window.pi.listAgents()).find(a => a.id === 'cursor'))()`)
+        check(cursorAgent.via === 'app' && cursorAgent.command.startsWith(path.join(WORK, 'userdata', 'agents', 'cursor')), `it runs from the app's folder (${cursorAgent.command})`)
+
         // Settings → Agents lists every agent with how it runs.
         await js(`(() => { window.__app.setSettingsPage('agents'); window.__app.setSettingsOpen(true); return true })()`)
         await until('the Agents page', () => js<boolean>(`(() => { const p = document.querySelector('section[aria-label="Agents"]'); return !!p && p.textContent.includes('Grok Build') && !p.textContent.includes('Checking') })()`))
         const page2 = await js<string>(`document.querySelector('section[aria-label="Agents"]').textContent`)
-        check(['pi', 'Codex', 'Claude Code', 'OpenCode', 'Gemini CLI', 'GitHub Copilot', 'Cursor', 'Sign in:'].every(t => page2.includes(t)), 'Settings → Agents lists every agent and how to sign in')
+        check(['pi', 'Codex', 'Claude Code', 'OpenCode', 'Gemini CLI', 'GitHub Copilot', 'Cursor', 'Sign in:', 'Installed (app)'].every(t => page2.includes(t)), 'Settings → Agents lists every agent and how to sign in, Cursor as installed by the app')
         if (SHOTS)
             await page.screenshot(path.join(SHOTS, 'acp-settings.png'))
         await js(`(() => { window.__app.setSettingsOpen(false); return true })()`)

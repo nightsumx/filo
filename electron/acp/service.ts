@@ -15,6 +15,7 @@ import { tr } from '../i18n'
 import { loginShellPath } from '../pi-env'
 import { agentDir } from '../piSettings'
 import { AcpAgent } from './agent'
+import { installAgent, installedAgent, installSource } from './install'
 import { deleteAgentSession, listAgentSessions } from './list'
 import { mirrorFile, mirrorFiles, mirrorKey, mirrorText } from './mirror'
 
@@ -84,7 +85,29 @@ async function piApiKey(provider: string): Promise<string | undefined> {
     }
 }
 
-export async function resolveLaunch(spec: AcpAgentSpec): Promise<AcpLaunch> {
+/**
+ * Tests install from a local package instead of the pinned one: PI_GUI_ACP_INSTALL_<ID>=<npm spec>,
+ * read only with PI_GUI_TEST=1.
+ */
+function installSpec(spec: AcpAgentSpec): AcpAgentSpec {
+    const npm = process.env.PI_GUI_TEST === '1' ? process.env[`PI_GUI_ACP_INSTALL_${spec.id.toUpperCase()}`] : undefined
+    return npm ? { ...spec, npm, archive: undefined } : spec
+}
+
+/** Thrown when an agent is neither on PATH nor installed by the app. */
+export class AgentNotInstalled extends Error {
+    constructor(spec: AcpAgentSpec, readonly installable: boolean) {
+        super(installable
+            ? tr(`${spec.label} 还没有安装`, `${spec.label} is not installed`)
+            : tr(`找不到 ${spec.bin}`, `${spec.bin} not found`))
+    }
+}
+
+/**
+ * How to start an agent: a test override, the user's own install (PATH or the agent's usual
+ * folders), else the app's install under `appRoot` (install.ts). Nothing is downloaded here.
+ */
+export async function resolveLaunch(spec: AcpAgentSpec, appRoot?: string): Promise<AcpLaunch> {
     const searchPath = await loginShellPath()
     const env: Record<string, string> = { ...process.env as Record<string, string>, PATH: searchPath }
     delete env.ELECTRON_RUN_AS_NODE
@@ -106,20 +129,10 @@ export async function resolveLaunch(spec: AcpAgentSpec): Promise<AcpLaunch> {
     const adapter = await findIn(spec.bin, dirs)
     if (adapter)
         return { file: adapter, args: spec.args ?? [], env, via: 'path' }
-    if (!spec.npm) {
-        throw new Error(tr(
-            `找不到 ${spec.bin}。安装：${spec.install ?? spec.bin}`,
-            `${spec.bin} not found. Install it: ${spec.install ?? spec.bin}`,
-        ))
-    }
-    const npx = await findOnPath('npx', searchPath)
-    if (npx)
-        return { file: npx, args: ['-y', spec.npm, ...(spec.npmArgs ?? spec.args ?? [])], env, via: 'npx' }
-    const pkg = spec.npm.replace(/@[^@/]+$/, '')
-    throw new Error(tr(
-        `找不到 ${spec.bin}，也没有 npx 可以临时运行它。安装 Node.js，或者 npm install -g ${pkg}。`,
-        `${spec.bin} not found, and no npx to run it. Install Node.js, or npm install -g ${pkg}.`,
-    ))
+    const installed = appRoot ? await installedAgent(appRoot, spec) : undefined
+    if (installed)
+        return { file: installed.file, args: spec.args ?? [], env, via: 'app', outdated: installed.outdated }
+    throw new AgentNotInstalled(spec, !!appRoot && !!installSource(spec))
 }
 
 export class AcpService {
@@ -137,8 +150,20 @@ export class AcpService {
     /** What each agent said it can do, the last time one started. */
     private caps: Partial<Record<AcpAgentId, AcpAgentCaps>> = {}
 
-    /** `mirrorDir`: where the pi-format copies go; none, no copies. */
-    constructor(private file: () => string, private mirrorDir?: () => string) {
+    private installs = new Map<AcpAgentId, Promise<void>>()
+
+    /**
+     * `mirrorDir`: where the pi-format copies go; none, no copies. `agentsDir`: where the app installs
+     * agents; none, only the user's own installs run. `onAgentsChanged`: an install started or ended.
+     * `download`: how installs fetch archives (main passes Electron's, which honours the system proxy).
+     */
+    constructor(
+        private file: () => string,
+        private mirrorDir?: () => string,
+        private agentsDir?: () => string,
+        private onAgentsChanged?: () => void,
+        private download: (url: string) => Promise<Response> = url => fetch(url),
+    ) {
         try {
             const saved = JSON.parse(readFileSync(file(), 'utf8'))
             for (const record of Array.isArray(saved?.sessions) ? saved.sessions : []) {
@@ -157,16 +182,45 @@ export class AcpService {
         catch {}
     }
 
+    private launchOf(spec: AcpAgentSpec): Promise<AcpLaunch> {
+        return resolveLaunch(installSpec(spec), this.agentsDir?.())
+    }
+
     async availability(): Promise<AgentAvailability[]> {
-        return Promise.all(ACP_AGENTS.map(async (spec) => {
+        return Promise.all(ACP_AGENTS.map(async (spec): Promise<AgentAvailability> => {
+            const base = { id: spec.id, label: spec.label, installing: this.installs.has(spec.id) }
             try {
-                const launch = await resolveLaunch(spec)
-                return { id: spec.id, label: spec.label, available: true, via: launch.via, command: [path.basename(launch.file), ...launch.args].join(' ') }
+                const launch = await this.launchOf(spec)
+                const command = launch.via === 'app' ? launch.file : [path.basename(launch.file), ...launch.args].join(' ')
+                return { ...base, available: true, via: launch.via, command, outdated: launch.outdated, installable: launch.outdated }
             }
             catch (error: any) {
-                return { id: spec.id, label: spec.label, available: false, error: String(error?.message ?? error) }
+                return { ...base, available: false, error: String(error?.message ?? error), installable: error instanceof AgentNotInstalled && error.installable }
             }
         }))
+    }
+
+    /** Installs or updates an agent in the app's folder; one install per agent at a time. */
+    install(agent: AcpAgentId): Promise<void> {
+        const spec = acpAgent(agent)
+        const root = this.agentsDir?.()
+        if (!spec || !root)
+            return Promise.reject(new Error(`Cannot install ${agent}`))
+        let running = this.installs.get(agent)
+        if (!running) {
+            running = (async () => {
+                const searchPath = await loginShellPath()
+                const env: Record<string, string> = { ...process.env as Record<string, string>, PATH: searchPath }
+                delete env.ELECTRON_RUN_AS_NODE
+                await installAgent(root, installSpec(spec), { searchPath, env, fetch: this.download })
+            })().finally(() => {
+                this.installs.delete(agent)
+                this.onAgentsChanged?.()
+            })
+            this.installs.set(agent, running)
+            this.onAgentsChanged?.()
+        }
+        return running
     }
 
     /** Starts an agent process for a thread; `sessionKey` resumes that session. */
@@ -176,7 +230,7 @@ export class AcpService {
             throw new Error(`Unknown agent: ${agent}`)
         const resume = parseAcpSessionKey(sessionKey)
         const record = sessionKey ? this.records.get(sessionKey) : undefined
-        const launch = await resolveLaunch(spec)
+        const launch = await this.launchOf(spec)
         const instance = new AcpAgent(spec, launch, { cwd, sessionId: resume?.sessionId, replayTime: record?.updatedAt }, {
             onEvent: (id, event) => {
                 callbacks.onEvent(id, event)
@@ -292,14 +346,11 @@ export class AcpService {
                 return
             let launch: AcpLaunch
             try {
-                launch = await resolveLaunch(spec)
+                launch = await this.launchOf(spec)
             }
             catch {
                 return
             }
-            // npx would download the adapter (hundreds of MB) just to list: only once the user ran it.
-            if (launch.via === 'npx' && ![...this.records.values()].some(r => r.agent === spec.id && !r.imported))
-                return
             this.importedAt[spec.id] = now
             try {
                 const { caps, list } = await listAgentSessions(spec, launch)
@@ -390,7 +441,7 @@ export class AcpService {
     /** Opens the session in a throwaway process; session/load streams the history back. */
     private async replay(record: AcpSessionRecord) {
         const spec = acpAgent(record.agent)!
-        const launch = await resolveLaunch(spec)
+        const launch = await this.launchOf(spec)
         let failure = ''
         const agent = new AcpAgent(spec, launch, { cwd: record.cwd, sessionId: record.sessionId, readOnly: true, replayTime: record.updatedAt }, {
             onEvent: () => {},
@@ -448,7 +499,7 @@ export class AcpService {
         const live = this.live.get(key)
         if (live)
             await live.stop()
-        await deleteAgentSession(spec, await resolveLaunch(spec), record.sessionId)
+        await deleteAgentSession(spec, await this.launchOf(spec), record.sessionId)
         this.remove(key)
     }
 

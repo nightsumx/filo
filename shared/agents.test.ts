@@ -32,6 +32,6 @@ describe('acp session keys', () => {
 
     it('every agent can be found or installed', () => {
         for (const spec of ACP_AGENTS)
-            expect(spec.npm || spec.install, spec.id).toBeTruthy()
+            expect(spec.npm || spec.archive, spec.id).toBeTruthy()
     })
 })

@@ -279,6 +279,10 @@ export interface PiBridge {
     resolveEnv: () => Promise<PiEnvResult>
     /** ACP agents (Codex, …) and whether each can start here. */
     listAgents: () => Promise<AgentAvailability[]>
+    /** Installs (or updates) an ACP agent in the app's own folder. */
+    installAgent: (id: string) => Promise<void>
+    /** An agent install started or ended (any window). */
+    onAgentsChanged: (listener: () => void) => () => void
     listSessions: () => Promise<SessionSummary[]>
     readSession: (path: string) => Promise<SessionSnapshot>
     /** pi: the file goes to the Trash. ACP: off the app's list; `history` deletes it in the agent too. */
@@ -404,6 +408,8 @@ export interface AppNotice {
 export const IPC = {
     resolveEnv: 'pi:resolve-env',
     listAgents: 'agents:list',
+    installAgent: 'agents:install',
+    agentsChanged: 'agents:changed',
     listSessions: 'sessions:list',
     readSession: 'sessions:read',
     trashSession: 'sessions:trash',
