@@ -1,6 +1,7 @@
 import type { AcpConfigOption, AgentFeatures, AgentKind } from '@shared/agents'
 import type { ApprovalChoice, ApprovalMode, ApprovalRequest, AskResponse, CapabilityId, GuiCommands, PlanDecision, ReviewApply, ReviewProgress, TodoDetails } from '@shared/capabilities'
 import type { AgentExitInfo } from '@shared/ipc'
+import type { Presence } from '@shared/capabilities'
 import type {
     AgentMessage,
     AssistantMessage,
@@ -145,6 +146,10 @@ export class Thread {
     private restartPending = false
     /** The end-of-run reload in progress (see settle). */
     private settling: Promise<void> | null = null
+    /** Following the session file a terminal pi writes (no bridge to join it); stops the watch. */
+    private unfollow: (() => void) | null = null
+    /** The session file changed under this thread's own pi: restart it before the next prompt. */
+    private agentStale = false
 
     constructor(private host: ThreadHost, init: { key: string, cwd: string, sessionPath?: string, name?: string, firstPrompt?: string, agent?: AgentKind }) {
         this.key = init.key
@@ -154,7 +159,7 @@ export class Thread {
         this.name = init.name
         this.firstPrompt = init.firstPrompt
         this.persisted = !!init.sessionPath
-        makeAutoObservable<this, 'liveCounter' | 'partialArgs' | 'startPromise' | 'stopping' | 'loadedConfig' | 'restartPending' | 'settling' | 'host'>(this, {
+        makeAutoObservable<this, 'liveCounter' | 'partialArgs' | 'startPromise' | 'stopping' | 'loadedConfig' | 'restartPending' | 'settling' | 'unfollow' | 'agentStale' | 'host'>(this, {
             lastEventAt: false,
             liveCounter: false,
             partialArgs: false,
@@ -163,6 +168,8 @@ export class Thread {
             loadedConfig: false,
             restartPending: false,
             settling: false,
+            unfollow: false,
+            agentStale: false,
             host: false,
         }, { autoBind: true })
     }
@@ -263,6 +270,48 @@ export class Thread {
     /** The agent can still be switched: nothing was said in the thread yet. */
     get agentSwitchable(): boolean {
         return !this.persisted && this.isEmpty && !this.uiRequests.length
+    }
+
+    /** The terminal pi this thread joined over pi-cc-tui's bridge, by pid; both show the same run. */
+    get terminalPid(): number | undefined {
+        return this.agentStatus === 'ready' ? this.state?.terminalPid : undefined
+    }
+
+    /**
+     * What the terminal pi on this session is doing changed (pi-cc-tui's presence). With a bridge,
+     * an idle own pi gives way to joining it; without one the thread follows the file it writes.
+     */
+    onTerminalPresence(terminal: Presence | undefined) {
+        if (this.agent !== 'pi' || !this.sessionPath)
+            return
+        const follow = !!terminal && !terminal.bridge
+        if (follow && !this.unfollow) {
+            const path = this.sessionPath
+            const off = api().onSessionChanged((changed) => {
+                if (changed === this.sessionPath)
+                    void this.reloadFollowed()
+            })
+            void api().followSession(path, true)
+            this.unfollow = () => {
+                off()
+                void api().followSession(path, false)
+            }
+        }
+        else if (!follow && this.unfollow) {
+            this.unfollow()
+            this.unfollow = null
+        }
+        if (terminal?.bridge && this.agentId && this.agentStatus === 'ready' && !this.terminalPid && !this.running && !this.uiRequests.length)
+            void this.restartAgent()
+    }
+
+    /** The terminal pi wrote the session file: show it; this thread's own pi now lags behind it. */
+    private async reloadFollowed() {
+        if (this.running || this.settling || !this.loaded)
+            return
+        await this.load()
+        if (this.agentId)
+            this.agentStale = true
     }
 
     /** Picks the agent of a fresh thread; a started process of the old one stops. */
@@ -496,7 +545,11 @@ export class Thread {
         ])
         runInAction(() => {
             this.agentStatus = 'ready'
+            this.agentStale = false
         })
+        // Joined a terminal pi: entries it wrote since this thread read the file come in now.
+        if (this.state?.terminalPid)
+            await this.load()
         return agentId
     }
 
@@ -528,6 +581,11 @@ export class Thread {
             this.restartPending = true
             return
         }
+        await this.restartAgent()
+    }
+
+    /** A new process (or joining the terminal pi) for the same session file. */
+    private async restartAgent() {
         const old = this.agentId
         await this.stopAgent()
         runInAction(() => {
@@ -641,9 +699,14 @@ export class Thread {
             return
         }
 
-        this.pendingPrompt = { text, images, timestamp: Date.now() }
-        this.running = true
-        this.runStartedAt = Date.now()
+        // The terminal pi moved the session on: a fresh process reads it before this prompt.
+        if (this.agentStale && this.agentId)
+            await this.restartAgent()
+        runInAction(() => {
+            this.pendingPrompt = { text, images, timestamp: Date.now() }
+            this.running = true
+            this.runStartedAt = Date.now()
+        })
         try {
             const response = await this.request<{ disposition: string }>({ type: 'prompt', message: text, images })
             if (response.data?.disposition === 'handled') {
@@ -987,6 +1050,13 @@ export class Thread {
             case 'acp_commands_changed':
                 void this.refreshCommands()
                 break
+            // Not pi's: a joined terminal pi (cc-bridge) changed model, or settled a dialog itself.
+            case 'state_changed':
+                void this.syncState()
+                break
+            case 'extension_ui_cancel':
+                this.uiRequests = this.uiRequests.filter(r => r.id !== event.id)
+                break
             case 'extension_error':
                 toast.error(`${tr('扩展出错：', 'Extension error: ')}${event.error}`, { description: event.extensionPath })
                 break
@@ -1132,6 +1202,10 @@ export class Thread {
     }
 
     handleExit(info: AgentExitInfo) {
+        if (info.detached) {
+            this.detached()
+            return
+        }
         const unexpected = !this.stopping
         this.agentId = null
         this.agentStatus = unexpected ? 'exited' : 'none'
@@ -1146,5 +1220,20 @@ export class Thread {
             this.agentError = info.stderr.trim().split('\n').slice(-6).join('\n') || tr(`${label} 进程退出（${info.code ?? info.signal}）`, `${label} exited (${info.code ?? info.signal})`)
             toast.error(tr(`${label} 进程意外退出`, `${label} exited unexpectedly`), { description: this.agentError.slice(0, 300) })
         }
+    }
+
+    /** The joined terminal pi quit or moved to another session: what it wrote is in the file. */
+    private detached() {
+        this.agentId = null
+        this.agentStatus = 'none'
+        this.startPromise = null
+        this.running = false
+        this.streaming = null
+        this.pendingPrompt = null
+        this.uiRequests = []
+        this.tools.clear()
+        if (this.state)
+            this.state = { ...this.state, terminalPid: undefined, isStreaming: false }
+        void this.load().catch(() => {})
     }
 }

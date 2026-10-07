@@ -5,6 +5,7 @@ import type { ChildProcessWithoutNullStreams } from 'node:child_process'
 import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import type { AcpService } from './acp/service'
+import { BridgeAgent } from './bridge'
 import { ENV } from '@shared/capabilities'
 import { capabilityArgs } from './capabilities'
 import { tr } from './i18n'
@@ -155,6 +156,19 @@ export class AgentManager {
         })
         this.agents.set(instance.id, instance)
         return instance.id
+    }
+
+    /** Joins a terminal pi over its bridge socket instead of starting one; rejects if it does not answer. */
+    async attach(socketPath: string, pid: number): Promise<string> {
+        const agent = await BridgeAgent.connect(socketPath, pid, {
+            onEvent: this.callbacks.onEvent,
+            onExit: (id, info) => {
+                this.agents.delete(id)
+                this.callbacks.onExit(id, info)
+            },
+        })
+        this.agents.set(agent.id, agent)
+        return agent.id
     }
 
     async request(agentId: string, command: Record<string, unknown>): Promise<RpcResponse> {

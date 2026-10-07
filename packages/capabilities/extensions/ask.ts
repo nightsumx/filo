@@ -1,7 +1,8 @@
 // ask: the model asks the user multiple-choice questions instead of guessing. The tool publishes the
 // questions as pending details and waits; the GUI answers with `/gui-ask-answer <toolCallId> <json>`.
-// In the terminal the questions open as a form under the transcript instead.
-import type { ExtensionAPI } from '@earendil-works/pi-coding-agent'
+// In the terminal the questions open as a form under the transcript; the app can still answer them
+// when it joined that pi over pi-cc-tui's bridge, and the form closes.
+import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent'
 import type { AskAnswer, AskDetails, AskQuestion, AskResponse, GuiCommands } from '../protocol'
 import { Container, Text } from '@earendil-works/pi-tui'
 import { Type } from 'typebox'
@@ -44,6 +45,24 @@ function answerFromGui(toolCallId: string, signal: AbortSignal | undefined): Pro
     })
 }
 
+/** The terminal form, or the app's answer if it comes first (which closes the form). */
+function inTerminal(toolCallId: string, questions: AskQuestion[], signal: AbortSignal | undefined, ctx: ExtensionContext): Promise<AskResponse> {
+    const close = new AbortController()
+    const fromApp = answerFromGui(toolCallId, signal).then((r) => {
+        close.abort()
+        return r
+    })
+    const fromTerminal = serialized(() => askQuestions(ctx, questions, close.signal)).then((answers): AskResponse | null => {
+        if (close.signal.aborted)
+            return null
+        // Settles the app's side too, so its wait ends.
+        const r: AskResponse = answers ? { answers } : { cancelled: true }
+        waiting.get(toolCallId)?.(r)
+        return r
+    })
+    return Promise.race([fromApp, fromTerminal.then(r => r ?? fromApp)])
+}
+
 export default function (pi: ExtensionAPI) {
     pi.registerTool({
         name: 'ask',
@@ -70,7 +89,7 @@ export default function (pi: ExtensionAPI) {
             onUpdate?.({ content: [{ type: 'text', text: 'Waiting for the user to answer.' }], details: pending })
 
             const response = ctx.mode === 'tui'
-                ? await serialized(() => askQuestions(ctx, questions)).then((answers): AskResponse => answers ? { answers } : { cancelled: true })
+                ? await inTerminal(toolCallId, questions, signal, ctx)
                 : await answerFromGui(toolCallId, signal)
 
             if ('cancelled' in response) {

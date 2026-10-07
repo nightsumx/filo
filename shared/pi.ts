@@ -90,6 +90,8 @@ export interface RpcSessionState {
     configOptions?: AcpConfigOption[]
     /** Not pi's: what the ACP agent can do. */
     agentCaps?: AcpAgentCaps
+    /** Not pi's: a terminal pi joined over pi-cc-tui's bridge reports its pid. */
+    terminalPid?: number
 }
 
 export interface SessionStats {

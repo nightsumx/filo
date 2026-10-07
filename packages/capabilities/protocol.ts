@@ -75,6 +75,45 @@ export interface Presence {
     state: PresenceState
     /** When the state began (ms). */
     since: number
+    /** Not in the file: the app sets it when pi-cc-tui's bridge listens for this pid (BRIDGE_SOCKET_SUFFIX). */
+    bridge?: string
+}
+
+// ---------------------------------------------------------------- bridge
+
+/**
+ * pi-cc-tui's bridge extension lets the desktop app join a terminal pi: it listens on a unix socket
+ * next to the presence file, `<agent dir>/PRESENCE_DIR/<pid>.sock` (mode 0600), and speaks pi's RPC
+ * protocol over it (JSONL: commands in, responses and events out), as `pi --mode rpc` does on stdio.
+ * A client joining mid-run first gets the run so far as events. Both sides then drive the same
+ * process, so nothing forks. Its get_state adds `terminalPid`.
+ */
+export const BRIDGE_SOCKET_SUFFIX = '.sock'
+
+/**
+ * A capability's terminal dialog, mirrored to the app over the bridge (`pi.events`):
+ *   capability → bridge: DIALOG.open with a DialogRequest, DIALOG.close with `{ id }` once settled;
+ *   bridge → capability: DIALOG.answer with a DialogAnswer from the app.
+ * Whichever side answers first wins; the other one's dialog closes.
+ */
+export const DIALOG_EVENTS = {
+    open: 'gui-dialog:open',
+    close: 'gui-dialog:close',
+    answer: 'gui-dialog:answer',
+} as const
+
+/** Shaped like pi's RPC `extension_ui_request` select, so the app shows it as it would from RPC. */
+export interface DialogRequest {
+    id: string
+    method: 'select'
+    title: string
+    options: string[]
+}
+
+export interface DialogAnswer {
+    id: string
+    /** The chosen option; undefined when dismissed. */
+    value?: string
 }
 
 /** `ctx.ui.setStatus` keys carrying mode state; hidden from the status list. */

@@ -8,6 +8,7 @@ import path from 'node:path'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
 import { Worker } from 'node:worker_threads'
+import { SessionFollower } from './follow'
 import { PresenceWatcher, presenceDir } from './presence'
 import { DEFAULT_THEME, IPC, THEME_PREFS } from '@shared/ipc'
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, net, Notification, shell } from 'electron'
@@ -97,6 +98,7 @@ const providers = (() => {
 })()
 
 /** Terminal pi sessions; every window gets the list when it changes. */
+const follower = new SessionFollower(IPC.sessionChanged)
 const presence = new PresenceWatcher(presenceDir(), list => windows.broadcast(null, IPC.presence, list))
 
 /** Session search runs in a worker thread (searchWorker.ts), started on first use. */
@@ -257,6 +259,12 @@ function registerIpc() {
     })
     ipcMain.handle(IPC.readSession, (_e, file: string) => (parseAcpSessionKey(file) ? acp.readSession(file) : readSession(file)))
     ipcMain.handle(IPC.presence, () => presence.current)
+    ipcMain.handle(IPC.followSession, async (e, file: unknown, on: unknown) => {
+        if (typeof file !== 'string')
+            return
+        await assertInSessionsDir(file)
+        follower.follow(e.sender, file, on === true)
+    })
     // ACP sessions are indexed through their pi-format copies; results name the session key.
     ipcMain.handle(IPC.searchSessions, async (_e, query: unknown) => (await search.search(typeof query === 'string' ? query.slice(0, 500) : ''))
         .map(r => ({ ...r, session: acp.keyOfMirror(r.session) ?? r.session })))
@@ -338,6 +346,17 @@ function registerIpc() {
             throw new Error(env.error)
         if (options.sessionPath)
             await assertInSessionsDir(options.sessionPath)
+        // A terminal pi holds this session with pi-cc-tui's bridge: join it rather than start a second
+        // process on the same file (that forks the conversation).
+        const terminal = options.sessionPath ? presence.current.find(p => p.session === options.sessionPath && p.bridge) : undefined
+        if (terminal?.bridge) {
+            try {
+                const agentId = await agents.attach(terminal.bridge, terminal.pid)
+                windows.addAgent(agentId, e.sender, options.cwd)
+                return agentId
+            }
+            catch {}
+        }
         // spawn reports a missing cwd as "spawn <node> ENOENT", which reads like node is missing.
         if (!(await isDirectory(options.cwd)))
             throw new Error(tr(`项目目录不存在：${options.cwd}`, `Project folder not found: ${options.cwd}`))

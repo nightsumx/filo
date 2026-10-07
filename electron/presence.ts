@@ -1,9 +1,9 @@
 // Terminal pi sessions, as reported by pi-cc-tui's presence extension: one JSON file per process
 // (see PRESENCE_DIR in packages/capabilities/protocol.ts). Watched here, pushed to every window.
 import type { Presence } from '@shared/capabilities'
-import { PRESENCE_DIR } from '@shared/capabilities'
+import { BRIDGE_SOCKET_SUFFIX, PRESENCE_DIR } from '@shared/capabilities'
 import { watch } from 'node:fs'
-import { mkdir, readdir, readFile, rm } from 'node:fs/promises'
+import { mkdir, readdir, readFile, rm, stat } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import process from 'node:process'
@@ -48,7 +48,12 @@ export async function readPresence(dir: string): Promise<Presence[]> {
         return []
     }
     const out: Presence[] = []
+    const sockets = new Set(names.filter(n => n.endsWith(BRIDGE_SOCKET_SUFFIX)))
     for (const name of names) {
+        const socket = name.match(/^(\d+)\.sock$/)
+        // A killed pi leaves its bridge socket behind too.
+        if (socket && !alive(Number(socket[1])))
+            await rm(path.join(dir, name), { force: true }).catch(() => {})
         if (!/^\d+\.json$/.test(name))
             continue
         const pid = Number.parseInt(name)
@@ -59,8 +64,12 @@ export async function readPresence(dir: string): Promise<Presence[]> {
             continue
         }
         const p = parsePresence(await readFile(file, 'utf8').catch(() => ''))
-        if (p && p.pid === pid)
-            out.push(p)
+        if (!p || p.pid !== pid)
+            continue
+        const bridge = path.join(dir, `${pid}${BRIDGE_SOCKET_SUFFIX}`)
+        if (sockets.has(`${pid}${BRIDGE_SOCKET_SUFFIX}`) && (await stat(bridge).catch(() => null))?.isSocket())
+            p.bridge = bridge
+        out.push(p)
     }
     return out.sort((a, b) => a.pid - b.pid)
 }

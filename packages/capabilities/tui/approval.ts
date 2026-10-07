@@ -21,7 +21,7 @@ const preview = (text: string, sign: string, max: number, color: (s: string) => 
  * Asks about one tool call. `input` is the call's arguments when the call is local (a subagent's
  * forwarded request carries only its summary). Undefined when dismissed.
  */
-export async function promptApproval(ctx: ExtensionContext, request: ApprovalRequest, input: Record<string, unknown> | undefined, choices: readonly ApprovalChoice[]): Promise<ApprovalChoice | undefined> {
+export async function promptApproval(ctx: ExtensionContext, request: ApprovalRequest, input: Record<string, unknown> | undefined, choices: readonly ApprovalChoice[], signal?: AbortSignal): Promise<ApprovalChoice | undefined> {
     const theme = ctx.ui.theme
     const muted = (s: string) => theme.fg('muted', s)
     const tool = request.tool
@@ -72,6 +72,6 @@ export async function promptApproval(ctx: ExtensionContext, request: ApprovalReq
     }
 
     const options = choices.map(c => c === 'allow' ? 'Yes' : c === 'always' ? always : 'No, and tell pi what to do differently (esc)')
-    const index = await choose(ctx, { title: title + agent, body, question, options })
+    const index = await choose(ctx, { title: title + agent, body, question, options }, signal)
     return index === undefined ? undefined : choices[index]
 }

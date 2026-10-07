@@ -64,11 +64,22 @@ const Hero = observer(({ thread }: { thread: Thread }) => {
 })
 
 /**
- * The same session is open in a terminal pi too. Both processes append to the file, each from its own
- * view of it, so the turns land as separate branches: worth knowing before sending from here.
+ * The same session is open in a terminal pi too. Joined over pi-cc-tui's bridge, both are one
+ * process and stay in step. Otherwise both processes append to the file, each from its own view of
+ * it, so the turns land as separate branches: worth knowing before sending from here.
  */
 const TerminalNotice = observer(({ thread }: { thread: Thread }) => {
     const terminal = thread.sessionPath ? appStore.terminalSessions.get(thread.sessionPath) : undefined
+    if (thread.terminalPid) {
+        return (
+            <div role="status" className="mx-auto flex w-full max-w-5xl items-center gap-1.5 px-5 pb-1 text-[12px] text-gray-500">
+                <SquareTerminal size={13} className="shrink-0" />
+                <span className="min-w-0 truncate">
+                    {tr(`已连接终端里的 pi（进程 ${thread.terminalPid}），两边是同一个会话，在这里发送也会在终端里运行。`, `Joined the pi in your terminal (process ${thread.terminalPid}): one session on both sides, and what you send here runs there.`)}
+                </span>
+            </div>
+        )
+    }
     if (!terminal)
         return null
     const text = terminal.state === 'idle'
@@ -96,6 +107,14 @@ export const ThreadPane = observer(({ thread, focused }: { thread: Thread, focus
     useEffect(() => {
         thread.unread = false
     }, [thread, thread.unread])
+    // A terminal pi on this session: join it (bridge) or follow the file it writes.
+    const terminal = thread.sessionPath ? appStore.terminalSessions.get(thread.sessionPath) : undefined
+    useEffect(() => {
+        if (!thread.loaded)
+            return
+        thread.onTerminalPresence(terminal)
+    }, [thread, thread.loaded, terminal?.pid, terminal?.bridge])
+    useEffect(() => () => thread.onTerminalPresence(undefined), [thread])
 
     return (
         <section

@@ -94,20 +94,34 @@ export default function (pi: ExtensionAPI) {
             const pending: PlanDetails = { kind: 'plan', status: 'pending', plan }
             onUpdate?.({ content: [{ type: 'text', text: 'Waiting for the user to review the plan.' }], details: pending })
 
-            const decision = ctx.mode === 'tui'
-                ? await serialized(() => decideInTerminal(ctx, plan))
-                : await new Promise<PlanDecision>((resolve) => {
-                    const finish = (d: PlanDecision) => {
-                        waiting.delete(toolCallId)
-                        signal?.removeEventListener('abort', onAbort)
-                        resolve(d)
-                    }
-                    const onAbort = () => finish({ cancelled: true })
-                    if (signal?.aborted)
-                        return finish({ cancelled: true })
-                    signal?.addEventListener('abort', onAbort, { once: true })
-                    waiting.set(toolCallId, finish)
+            const fromApp = new Promise<PlanDecision>((resolve) => {
+                const finish = (d: PlanDecision) => {
+                    waiting.delete(toolCallId)
+                    signal?.removeEventListener('abort', onAbort)
+                    resolve(d)
+                }
+                const onAbort = () => finish({ cancelled: true })
+                if (signal?.aborted)
+                    return finish({ cancelled: true })
+                signal?.addEventListener('abort', onAbort, { once: true })
+                waiting.set(toolCallId, finish)
+            })
+            // In the terminal the box opens, and the app may still decide first (over the bridge).
+            let decision: PlanDecision
+            if (ctx.mode === 'tui') {
+                const close = new AbortController()
+                void fromApp.then(() => close.abort())
+                const fromTerminal = serialized(() => decideInTerminal(ctx, plan, close.signal)).then((d) => {
+                    if (close.signal.aborted)
+                        return fromApp
+                    waiting.get(toolCallId)?.(d)
+                    return d
                 })
+                decision = await Promise.race([fromApp, fromTerminal])
+            }
+            else {
+                decision = await fromApp
+            }
 
             if ('approve' in decision) {
                 set(false, ctx)
@@ -147,16 +161,18 @@ export default function (pi: ExtensionAPI) {
     })
 
     /** Claude Code's choices; approving also picks how edits are approved from here on. */
-    async function decideInTerminal(ctx: ExtensionContext, plan: string): Promise<PlanDecision> {
+    async function decideInTerminal(ctx: ExtensionContext, plan: string, signal: AbortSignal): Promise<PlanDecision> {
         const options = ['Yes, and auto-accept edits', 'Yes, and manually approve edits', 'No, keep planning']
-        const index = await choose(ctx, { title: 'Ready to code?', body: ['Here is pi\'s plan:'], markdown: plan, question: 'Would you like to proceed?', options })
+        const index = await choose(ctx, { title: 'Ready to code?', body: ['Here is pi\'s plan:'], markdown: plan, question: 'Would you like to proceed?', options }, signal)
+        if (signal.aborted)
+            return { cancelled: true }
         if (index === 0 || index === 1) {
             pi.events.emit(APPROVAL_SET_EVENT, (index === 0 ? 'edits' : 'ask') satisfies ApprovalMode)
             return { approve: true }
         }
         if (index === undefined)
             return { cancelled: true }
-        const feedback = (await ctx.ui.input('What should change in the plan?', 'Tell pi what to do differently'))?.trim()
+        const feedback = (await ctx.ui.input('What should change in the plan?', 'Tell pi what to do differently', { signal }))?.trim()
         return feedback ? { feedback } : { cancelled: true }
     }
 

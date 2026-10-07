@@ -272,6 +272,8 @@ export interface AgentExitInfo {
     code: number | null
     signal: string | null
     stderr: string
+    /** A joined terminal pi went away (it quit or switched session); not an error of the thread. */
+    detached?: boolean
 }
 
 /** The API preload exposes on window.pi. */
@@ -292,6 +294,9 @@ export interface PiBridge {
     /** Terminal pi sessions (pi-cc-tui's presence extension), and their changes. */
     getPresence: () => Promise<Presence[]>
     onPresence: (listener: (list: Presence[]) => void) => () => void
+    /** Reports changes to a session file a terminal pi writes (no bridge to join it). */
+    followSession: (path: string, on: boolean) => Promise<void>
+    onSessionChanged: (listener: (path: string) => void) => () => void
 
     loadState: () => Promise<AppState>
     saveState: (save: StateSave) => Promise<void>
@@ -415,6 +420,8 @@ export const IPC = {
     trashSession: 'sessions:trash',
     searchSessions: 'sessions:search',
     presence: 'sessions:presence',
+    followSession: 'sessions:follow',
+    sessionChanged: 'sessions:changed',
     loadState: 'state:load',
     saveState: 'state:save',
     pickFolder: 'dialog:pick-folder',

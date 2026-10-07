@@ -14,6 +14,7 @@ import type { ExtensionAPI, ExtensionContext, ToolCallEvent } from '@earendil-wo
 import type { ApprovalChoice, ApprovalMode, ApprovalRequest, GuiCommands } from '../protocol'
 import path from 'node:path'
 import process from 'node:process'
+import { mirrored } from '../lib/mirror'
 import { isReadOnlyCommand } from '../lib/readonly'
 import { promptApproval } from '../tui/approval'
 import { serialized } from '../tui/dialog'
@@ -170,8 +171,9 @@ export default function (pi: ExtensionAPI) {
             scope: scope.startsWith('bash:') ? scope.slice(5) : scope,
         }
         const options: ApprovalChoice[] = scope ? ['allow', 'always', 'deny'] : ['allow', 'deny']
+        // The terminal dialog is offered to the app too, which may have joined this pi.
         const choice = ctx.mode === 'tui'
-            ? await promptApproval(ctx, request, event.input as Record<string, unknown>, options)
+            ? await mirrored(pi, { title: TITLE_PREFIX + JSON.stringify(request), options }, signal => promptApproval(ctx, request, event.input as Record<string, unknown>, options, signal), ctx.signal) as ApprovalChoice | undefined
             : await ctx.ui.select(TITLE_PREFIX + JSON.stringify(request), options, { signal: ctx.signal }) as ApprovalChoice | undefined
 
         if (choice === 'allow')

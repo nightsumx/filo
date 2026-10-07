@@ -1,6 +1,7 @@
 // Terminal prompts for the capabilities, in Claude Code's style: a rounded box, numbered choices with
 // ❯ on the selected one, digits pick directly, enter confirms, esc dismisses. The desktop app never
-// reaches these; capabilities call them only when ctx.mode === 'tui'.
+// reaches these; capabilities call them only when ctx.mode === 'tui'. A `signal` closes the dialog
+// as dismissed: the desktop app answered it first, over pi-cc-tui's bridge.
 import type { ExtensionContext, Theme } from '@earendil-works/pi-coding-agent'
 import { getMarkdownTheme } from '@earendil-works/pi-coding-agent'
 import type { AskAnswer, AskQuestion } from '../protocol'
@@ -48,10 +49,31 @@ export interface Choice {
     options: string[]
 }
 
+/** ctx.ui.custom, closed with `dismissed` when `signal` aborts. */
+function closable<T>(ctx: ExtensionContext, signal: AbortSignal | undefined, dismissed: T, factory: Parameters<ExtensionContext['ui']['custom']>[0]): Promise<T> {
+    if (signal?.aborted)
+        return Promise.resolve(dismissed)
+    return ctx.ui.custom<T>((tui, theme, kb, done) => {
+        let finished = false
+        const finish = (result: T) => {
+            if (finished)
+                return
+            finished = true
+            signal?.removeEventListener('abort', onAbort)
+            done(result)
+        }
+        const onAbort = () => finish(dismissed)
+        signal?.addEventListener('abort', onAbort, { once: true })
+        if (signal?.aborted)
+            queueMicrotask(onAbort)
+        return factory(tui, theme, kb, finish as (result: unknown) => void)
+    })
+}
+
 /** Index of the chosen option, or undefined when dismissed with esc / ctrl+c. */
-export function choose(ctx: ExtensionContext, choice: Choice): Promise<number | undefined> {
+export function choose(ctx: ExtensionContext, choice: Choice, signal?: AbortSignal): Promise<number | undefined> {
     const { title, body = [], question, options } = choice
-    return ctx.ui.custom<number | undefined>((tui, theme, _kb, done) => {
+    return closable<number | undefined>(ctx, signal, undefined, (tui, theme, _kb, done) => {
         let selected = 0
         const markdown = choice.markdown?.trim() ? new Markdown(choice.markdown.trim(), 0, 0, getMarkdownTheme()) : undefined
         return {
@@ -91,8 +113,8 @@ export function choose(ctx: ExtensionContext, choice: Choice): Promise<number | 
  * Multiple-choice questions toggle with space or enter and move on from "Submit". Undefined when
  * dismissed.
  */
-export function askQuestions(ctx: ExtensionContext, questions: AskQuestion[]): Promise<Record<string, AskAnswer> | undefined> {
-    return ctx.ui.custom<Record<string, AskAnswer> | undefined>((tui, theme, _kb, done) => {
+export function askQuestions(ctx: ExtensionContext, questions: AskQuestion[], signal?: AbortSignal): Promise<Record<string, AskAnswer> | undefined> {
+    return closable<Record<string, AskAnswer> | undefined>(ctx, signal, undefined, (tui, theme, _kb, done) => {
         const answers: Record<string, AskAnswer> = {}
         let index = 0
         let selected = 0
