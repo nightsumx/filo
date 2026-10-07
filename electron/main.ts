@@ -247,9 +247,12 @@ function registerIpc() {
     // ACP sessions are indexed through their pi-format copies; results name the session key.
     ipcMain.handle(IPC.searchSessions, async (_e, query: unknown) => (await search.search(typeof query === 'string' ? query.slice(0, 500) : ''))
         .map(r => ({ ...r, session: acp.keyOfMirror(r.session) ?? r.session })))
-    ipcMain.handle(IPC.trashSession, async (_e, file: string) => {
+    ipcMain.handle(IPC.trashSession, async (_e, file: string, options?: { history?: unknown }) => {
         if (parseAcpSessionKey(file)) {
-            acp.remove(file)
+            if (options?.history === true)
+                await acp.deleteHistory(file)
+            else
+                acp.remove(file)
             return
         }
         await assertInSessionsDir(file)

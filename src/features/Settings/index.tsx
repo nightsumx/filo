@@ -9,8 +9,9 @@ import { systemLang, tr } from '@/lib/i18n'
 import { TRANSCRIPT_TEXT } from '@/lib/transcriptText'
 import { cn } from '@/lib/utils'
 import { appStore } from '@/store/app'
-import { Archive, KeyRound, Palette, Puzzle } from 'lucide-react'
+import { Archive, Bot, KeyRound, Palette, Puzzle } from 'lucide-react'
 import { observer } from 'mobx-react-lite'
+import { AgentsPage } from './Agents'
 import { CapabilitiesPage } from './Capabilities'
 import { CompactionPage } from './Compaction'
 import { ProvidersPage } from './Providers'
@@ -113,6 +114,7 @@ const TranscriptLangRow = observer(() => (
 const PAGES: { id: SettingsPageId, label: Localized, icon: LucideIcon, page: React.FC }[] = [
     { id: 'appearance', label: { zh: '外观', en: 'Appearance' }, icon: Palette, page: AppearancePage },
     { id: 'providers', label: { zh: '模型供应商', en: 'Model providers' }, icon: KeyRound, page: ProvidersPage },
+    { id: 'agents', label: { zh: 'Agent', en: 'Agents' }, icon: Bot, page: AgentsPage },
     { id: 'capabilities', label: { zh: '能力', en: 'Capabilities' }, icon: Puzzle, page: CapabilitiesPage },
     { id: 'compaction', label: { zh: '上下文压缩', en: 'Compaction' }, icon: Archive, page: CompactionPage },
 ]

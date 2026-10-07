@@ -5,13 +5,18 @@
 // it lists, since every agent of the e2e runs this one script.
 //
 //   "edit <file>"  runs `ls`, asks to write <file> (diff), writes it once allowed, then answers
+//   "slow"         answers "slow done" after a second (to type a follow-up meanwhile)
+//   "/compact"     answers "Compacted."
 //   anything else  answers "echo: <prompt>"
-import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
+//
+// `--no-images` leaves image prompts out of its capabilities (like Grok Build).
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import process from 'node:process'
 
 const DIR = process.env.FAKE_ACP_DIR || '/tmp/fake-acp'
 const AGENT = process.argv.find(a => a.startsWith('--agent='))?.slice('--agent='.length) ?? 'codex'
+const IMAGES = !process.argv.includes('--no-images')
 mkdirSync(DIR, { recursive: true })
 
 const metaFile = id => path.join(DIR, `${id}.meta.json`)
@@ -64,6 +69,15 @@ async function prompt(session, params) {
     session.cancelled = false
     touch(session, existsSync(metaFile(session.id)) ? {} : { title: text })
     const edit = /^edit (\S+)/.exec(text)
+    if (text === 'slow') {
+        await new Promise(resolve => setTimeout(resolve, 1000))
+        update(session, say('slow done'))
+        return { stopReason: 'end_turn' }
+    }
+    if (text === '/compact') {
+        update(session, say('Compacted.'))
+        return { stopReason: 'end_turn' }
+    }
     if (!edit) {
         update(session, say(`echo: ${text}`))
         return { stopReason: 'end_turn', usage: { inputTokens: 10, outputTokens: 3, totalTokens: 13 } }
@@ -99,6 +113,11 @@ async function prompt(session, params) {
     return { stopReason: 'end_turn', usage: { inputTokens: 1000, cachedReadTokens: 400, outputTokens: 50, thoughtTokens: 5, totalTokens: 1050 } }
 }
 
+function commandsSoon(session) {
+    const availableCommands = [{ name: 'review', description: 'Review the changes' }, { name: 'compact', description: 'Summarize the conversation' }]
+    setTimeout(() => update(session, { sessionUpdate: 'available_commands_update', availableCommands }, { record: false }), 10)
+}
+
 function newSession(id, cwd) {
     const session = { id, cwd, mode: 'read-only', model: 'fake-1', effort: 'low', cancelled: false }
     sessions.set(id, session)
@@ -108,13 +127,13 @@ function newSession(id, cwd) {
 const handlers = {
     initialize: () => ({
         protocolVersion: 1,
-        agentCapabilities: { loadSession: true, promptCapabilities: { image: true }, sessionCapabilities: { list: {} } },
+        agentCapabilities: { loadSession: true, promptCapabilities: { image: IMAGES }, sessionCapabilities: { list: {}, fork: {}, delete: {} } },
         authMethods: [],
         _meta: { steering: { supported: false } },
     }),
     'session/new': (params) => {
         const session = newSession(`fake-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`, params.cwd)
-        setTimeout(() => update(session, { sessionUpdate: 'available_commands_update', availableCommands: [{ name: 'review', description: 'Review the changes' }] }, { record: false }), 10)
+        commandsSoon(session)
         return { sessionId: session.id, configOptions: configOptions(session) }
     },
     'session/load': (params) => {
@@ -124,6 +143,7 @@ const handlers = {
             throw Object.assign(new Error('Session not found'), { code: -32002 })
         for (const line of readFileSync(file, 'utf8').split('\n').filter(Boolean))
             update(session, JSON.parse(line), { record: false })
+        commandsSoon(session)
         return { configOptions: configOptions(session) }
     },
     'session/list': () => ({
@@ -132,6 +152,21 @@ const handlers = {
             return { sessionId: f.slice(0, -'.meta.json'.length), cwd: meta.cwd, title: meta.title, updatedAt: meta.updatedAt, agent: meta.agent }
         }).filter(s => s.agent === AGENT).map(({ agent, ...s }) => s),
     }),
+    'session/fork': (params) => {
+        const id = `fork-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`
+        const from = path.join(DIR, `${params.sessionId}.jsonl`)
+        if (!existsSync(from))
+            throw Object.assign(new Error('Session not found'), { code: -32002 })
+        writeFileSync(path.join(DIR, `${id}.jsonl`), readFileSync(from))
+        const meta = existsSync(metaFile(params.sessionId)) ? JSON.parse(readFileSync(metaFile(params.sessionId), 'utf8')) : { agent: AGENT, cwd: params.cwd }
+        writeFileSync(metaFile(id), JSON.stringify({ ...meta, updatedAt: new Date().toISOString() }))
+        return { sessionId: id }
+    },
+    'session/delete': (params) => {
+        rmSync(path.join(DIR, `${params.sessionId}.jsonl`), { force: true })
+        rmSync(metaFile(params.sessionId), { force: true })
+        return {}
+    },
     'session/set_config_option': (params) => {
         const session = sessions.get(params.sessionId)
         const key = { mode: 'mode', model: 'model', reasoning_effort: 'effort' }[params.configId]

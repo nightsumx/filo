@@ -253,7 +253,7 @@ export class Thread {
 
     /** What the UI offers for this thread's agent. */
     get features(): AgentFeatures {
-        return agentFeatures(this.agent)
+        return agentFeatures(this.agent, this.state?.agentCaps, this.commands)
     }
 
     get agentLabel(): string {
@@ -763,9 +763,24 @@ export class Thread {
         }
     }
 
+    /** ACP: the agent copies the whole session; resolves to the copy's session key. */
+    async forkSession(): Promise<string | undefined> {
+        try {
+            const response = await this.request<{ sessionFile?: string }>({ type: 'acp_fork' })
+            return response.data?.sessionFile
+        }
+        catch (error: any) {
+            toast.error(`${tr('分叉失败：', 'Fork failed: ')}${error.message}`)
+            return undefined
+        }
+    }
+
     async compact() {
         try {
             await this.request({ type: 'compact' })
+            // ACP agents compact as a turn of their own: it streams in and settles like any other.
+            if (this.agent !== 'pi')
+                return
             await Promise.all([this.load(), this.refreshStats()])
         }
         catch (error: any) {

@@ -1,9 +1,10 @@
 // Thread actions (rename, compact, reveal, close, delete). Rendered both in the tab's right-click
 // menu and the tab bar's ⋯ menu, so the item components are passed in.
 import type { Thread } from '@/store/thread'
+import type { SessionSummary } from '@shared/ipc'
 import { confirm } from '@/lib/confirm'
 import { appStore } from '@/store/app'
-import { AppWindow, Archive, ArrowRightToLine, FolderOpen, Pencil, Trash2, X, XCircle } from 'lucide-react'
+import { AppWindow, Archive, ArrowRightToLine, EyeOff, FolderOpen, GitFork, Pencil, Trash2, X, XCircle } from 'lucide-react'
 import { observable, runInAction } from 'mobx'
 import { observer } from 'mobx-react-lite'
 import { tr } from '@/lib/i18n'
@@ -25,6 +26,25 @@ export async function closeTabWithConfirm(thread: Thread) {
     await appStore.closeTab(thread.key)
 }
 
+/** An ACP session copied whole by its agent; the copy opens next to it. */
+async function forkSession(thread: Thread) {
+    const key = await thread.forkSession()
+    if (key)
+        await appStore.revealHere(key)
+}
+
+/** pi: the session file goes to the Trash. ACP: off the list, or out of the agent's history too. */
+async function deleteThread(thread: Thread, session: SessionSummary, history: boolean) {
+    const agent = thread.agentLabel
+    const ok = thread.agent === 'pi'
+        ? await confirm({ title: tr('删除线程', 'Delete thread'), description: tr(`「${thread.title}」的会话文件会移到废纸篓。`, `The session file of “${thread.title}” goes to the Trash.`), confirmText: tr('删除', 'Delete') })
+        : history
+            ? await confirm({ title: tr(`从 ${agent} 删除`, `Delete from ${agent}`), description: tr(`「${thread.title}」会从 ${agent} 自己的会话记录里删除，无法恢复。`, `“${thread.title}” is deleted from ${agent}'s own session history. This cannot be undone.`), confirmText: tr('删除', 'Delete') })
+            : await confirm({ title: tr('移出列表', 'Remove from list'), description: tr(`「${thread.title}」不再显示在这里；${agent} 自己的会话记录保留。`, `“${thread.title}” no longer shows here; ${agent} keeps its own session history.`), confirmText: tr('移出', 'Remove') })
+    if (ok)
+        await appStore.deleteSession(session, { history })
+}
+
 async function closeOthers(thread: Thread) {
     const others = appStore.tabsOf(thread.cwd).filter(t => t !== thread)
     const running = others.filter(t => t.running).length
@@ -42,6 +62,8 @@ export const ThreadActions = observer(({ thread, parts: { Item, Separator } }: {
     const hasOthers = appStore.tabsOf(thread.cwd).length > 1
     // The window's only tab would just take the window along.
     const canTearOff = hasOthers || appStore.windowProjects.length > 1
+    const caps = thread.state?.agentCaps ?? session?.agentCaps
+    const acp = thread.agent !== 'pi'
     return (
         <>
             {!thread.isEmpty && (
@@ -54,6 +76,12 @@ export const ThreadActions = observer(({ thread, parts: { Item, Separator } }: {
                         <Item disabled={thread.running} onSelect={() => void thread.compact()}>
                             <Archive size={14} />
                             {tr('压缩上下文', 'Compact context')}
+                        </Item>
+                    )}
+                    {acp && caps?.fork && thread.sessionPath && (
+                        <Item disabled={thread.running} onSelect={() => void forkSession(thread)}>
+                            <GitFork size={14} />
+                            {tr('分叉线程', 'Fork thread')}
                         </Item>
                     )}
                 </>
@@ -84,17 +112,16 @@ export const ThreadActions = observer(({ thread, parts: { Item, Separator } }: {
                 <XCircle size={14} />
                 {tr('关闭其他标签', 'Close other tabs')}
             </Item>
-            {session && (
-                <Item
-                    className="text-red-600 focus:text-red-600"
-                    onSelect={async () => {
-                        const ok = await confirm({ title: tr('删除线程', 'Delete thread'), description: tr(`「${thread.title}」的会话文件会移到废纸篓。`, `The session file of “${thread.title}” goes to the Trash.`), confirmText: tr('删除', 'Delete') })
-                        if (ok)
-                            await appStore.deleteSession(session)
-                    }}
-                >
+            {session && acp && (
+                <Item onSelect={() => void deleteThread(thread, session, false)}>
+                    <EyeOff size={14} />
+                    {tr('移出列表', 'Remove from list')}
+                </Item>
+            )}
+            {session && (!acp || caps?.delete) && (
+                <Item className="text-red-600 focus:text-red-600" onSelect={() => void deleteThread(thread, session, acp)}>
                     <Trash2 size={14} />
-                    {tr('删除线程', 'Delete thread')}
+                    {acp ? tr(`从 ${thread.agentLabel} 删除`, `Delete from ${thread.agentLabel}`) : tr('删除线程', 'Delete thread')}
                 </Item>
             )}
         </>

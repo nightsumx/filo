@@ -5,13 +5,13 @@
 // events through AcpTranscript. Approvals become the approval capability's select dialog, so the
 // existing prompt UI handles them.
 
-import type { AcpAgentSpec, AcpConfigOption } from '@shared/agents'
+import type { AcpAgentCaps, AcpAgentSpec, AcpConfigOption } from '@shared/agents'
 import type { AgentExitInfo, SessionItem } from '@shared/ipc'
 import type { ApprovalChoice, ApprovalRequest } from '@shared/capabilities'
 import type { ImageContent, PiEvent, PiModel, RpcResponse, SlashCommand } from '@shared/pi'
 import type { ChildProcessWithoutNullStreams } from 'node:child_process'
 import type { PromptUsage } from './transcript'
-import { acpSessionKey } from '@shared/agents'
+import { acpCaps, acpSessionKey } from '@shared/agents'
 import { APPROVAL_TITLE_PREFIX } from '@shared/capabilities'
 import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
@@ -21,6 +21,11 @@ import { AcpConnection, methodNotFound } from './connection'
 import { AcpTranscript, piToolCalls } from './transcript'
 
 const STDERR_LIMIT = 64 * 1024
+
+const blocksOf = (message: string, images: ImageContent[]) => [
+    ...(message ? [{ type: 'text', text: message }] : []),
+    ...images.map(i => ({ type: 'image', data: i.data, mimeType: i.mimeType })),
+]
 export const ACP_PROTOCOL_VERSION = 1
 
 export interface AcpLaunch {
@@ -45,6 +50,8 @@ export interface AcpAgentCallbacks {
     onExit: (agentId: string, info: AgentExitInfo) => void
     /** The session exists (new or loaded); `prompt` is set when the user just sent one. */
     onSession?: (agent: AcpAgent, change: { prompt?: string, title?: string, name?: string }) => void
+    /** The agent forked the session into `sessionId`; returns the fork's session key. */
+    onFork?: (agent: AcpAgent, sessionId: string) => string
 }
 
 interface PermissionWait {
@@ -98,8 +105,16 @@ export class AcpAgent {
     /** session/load is replaying history. */
     private loading = true
     private permissions = new Map<string, PermissionWait>()
+    /** Typed mid-run where the agent cannot take it then: sent as the next prompts, in order. */
+    private queued: { message: string, images: ImageContent[] }[] = []
+    /** The session cwd as ACP knows it (real path). */
+    private sessionCwd = ''
+
+    /** The launch environment holds the agent's API key (from the environment or pi's providers). */
+    private hasApiKey: boolean
 
     constructor(readonly spec: AcpAgentSpec, launch: AcpLaunch, private options: AcpAgentOptions, private callbacks: AcpAgentCallbacks) {
+        this.hasApiKey = !!(spec.apiKey && launch.env[spec.apiKey.env])
         this.transcript = new AcpTranscript('', { model: () => this.modelStamp(), inputIncludesCache: spec.inputIncludesCache, now: () => (this.loading && options.replayTime ? options.replayTime : Date.now()) })
         this.child = spawn(launch.file, launch.args, { cwd: options.cwd, env: launch.env, stdio: ['pipe', 'pipe', 'pipe'] })
         this.connection = new AcpConnection(this.child.stdin, this.child.stdout, {
@@ -140,6 +155,10 @@ export class AcpAgent {
         return this.options.cwd
     }
 
+    get caps(): AcpAgentCaps {
+        return acpCaps(this.initResult)
+    }
+
     snapshot(): SessionItem[] {
         return this.transcript.snapshot()
     }
@@ -156,6 +175,7 @@ export class AcpAgent {
         })
         // ACP sessions are keyed by the real path (macOS: /tmp → /private/tmp).
         const cwd = await realpath(this.options.cwd).catch(() => this.options.cwd)
+        this.sessionCwd = cwd
         let result: any
         try {
             if (this.options.sessionId) {
@@ -163,10 +183,10 @@ export class AcpAgent {
                     throw new Error(tr(`${this.spec.label} 不支持打开旧会话`, `${this.spec.label} cannot reopen sessions`))
                 // History arrives as updates before the response; it fills the transcript silently.
                 this.sessionId = this.options.sessionId
-                result = await this.connection.request('session/load', { sessionId: this.sessionId, cwd, mcpServers: [] })
+                result = await this.signedIn(() => this.connection.request('session/load', { sessionId: this.sessionId, cwd, mcpServers: [] }))
             }
             else {
-                result = await this.connection.request('session/new', { cwd, mcpServers: [] })
+                result = await this.signedIn(() => this.connection.request('session/new', { cwd, mcpServers: [] }))
                 this.sessionId = String(result?.sessionId ?? '')
             }
         }
@@ -179,6 +199,24 @@ export class AcpAgent {
         this.transcript.setEmitter(event => this.emit(event))
         if (!this.options.readOnly)
             this.callbacks.onSession?.(this, {})
+    }
+
+    /**
+     * Runs `open`; when the agent wants a sign-in and an API key is at hand, picks its API-key method
+     * (ACP authenticate) and tries once more. Gemini CLI asks for that even with GEMINI_API_KEY set.
+     */
+    private async signedIn<T>(open: () => Promise<T>): Promise<T> {
+        try {
+            return await open()
+        }
+        catch (error: any) {
+            const methods: any[] = Array.isArray(this.initResult?.authMethods) ? this.initResult.authMethods : []
+            const method = methods.find(m => m?._meta?.['api-key'] || /api[-_]?key/i.test(String(m?.id ?? '')))
+            if (error?.code !== -32000 || !this.hasApiKey || !method)
+                throw error
+            await this.connection.request('authenticate', { methodId: method.id })
+            return await open()
+        }
     }
 
     /** Sign-in errors read as what to do about them. */
@@ -355,6 +393,7 @@ export class AcpAgent {
                         sessionId: this.sessionId,
                         sessionName: undefined,
                         configOptions: this.configOptions,
+                        agentCaps: this.caps,
                     })
                 case 'get_available_models': {
                     const model = this.option('model')
@@ -381,8 +420,30 @@ export class AcpAgent {
                     for (const [id] of this.permissions)
                         this.answerPermission(id, { cancelled: true })
                     return ok()
-                case 'clear_queue':
-                    return ok({ steering: [], followUp: [] })
+                case 'clear_queue': {
+                    const followUp = this.queued.map(q => q.message).filter(Boolean)
+                    this.queued = []
+                    this.emitQueue()
+                    return ok({ steering: [], followUp })
+                }
+                case 'compact':
+                    // The agent's own command; it runs as a turn of the session.
+                    if (!this.commands.some(c => c.name === 'compact'))
+                        throw new Error(tr(`${this.spec.label} 没有 /compact 命令`, `${this.spec.label} has no /compact command`))
+                    if (this.running)
+                        throw new Error(tr('运行中不能压缩，等它结束或先停止', 'Cannot compact while running; wait or stop it first'))
+                    return ok(await this.prompt('/compact', [], false))
+                case 'acp_fork': {
+                    if (!this.caps.fork)
+                        throw new Error(tr(`${this.spec.label} 不支持分叉会话`, `${this.spec.label} cannot fork sessions`))
+                    if (this.running)
+                        throw new Error(tr('运行中不能分叉，先停止或等它结束', 'Cannot fork while running; stop it or wait for it to finish'))
+                    const result: any = await this.connection.request('session/fork', { sessionId: this.sessionId, cwd: this.sessionCwd || this.options.cwd, mcpServers: [] })
+                    const forked = String(result?.sessionId ?? '')
+                    if (!forked)
+                        throw new Error(tr('分叉没有返回会话', 'The fork returned no session'))
+                    return ok({ sessionFile: this.callbacks.onFork?.(this, forked) ?? acpSessionKey(this.spec.id, forked) })
+                }
                 case 'set_model':
                     await this.setConfig(this.option('model')?.id, String(command.modelId ?? ''))
                     return ok()
@@ -424,34 +485,56 @@ export class AcpAgent {
     }
 
     private async prompt(message: string, images: ImageContent[], steer: boolean) {
-        const blocks = [
-            ...(message ? [{ type: 'text', text: message }] : []),
-            ...images.map(i => ({ type: 'image', data: i.data, mimeType: i.mimeType })),
-        ]
+        if (images.length && !this.caps.images)
+            throw new Error(tr(`${this.spec.label} 不接受图片`, `${this.spec.label} does not take images`))
         if (this.running) {
-            if (!steer || !this.initResult?._meta?.steering?.supported)
-                throw new Error(tr(`${this.spec.label} 运行中不能插话，等它结束或先停止`, `${this.spec.label} cannot take input mid-run; wait or stop it first`))
-            const result: any = await this.connection.request('_session/steering', { sessionId: this.sessionId, prompt: blocks })
-            if (result?.outcome === 'failed')
-                throw new Error(tr('插话没有送达', 'The message did not reach the agent'))
-            this.transcript.userPrompt(message, images)
-            return {}
+            if (steer && this.caps.steering) {
+                // promptRequired: the turn ended meanwhile, and the message is still ours to send.
+                const result: any = await this.connection.request('_session/steering', { sessionId: this.sessionId, prompt: blocksOf(message, images), _meta: { steering: { idleBehavior: 'promptRequired' } } })
+                if (result?.outcome === 'failed')
+                    throw new Error(tr('插话没有送达', 'The message did not reach the agent'))
+                if (result?.outcome !== 'promptRequired') {
+                    this.transcript.userPrompt(message, images)
+                    return {}
+                }
+            }
+            if (this.running) {
+                // Sent as the next prompt once this one ends, as pi does with follow-ups.
+                this.queued.push({ message, images })
+                this.emitQueue()
+                return {}
+            }
         }
         this.running = true
-        this.transcript.userPrompt(message, images)
         this.emit({ type: 'agent_start' })
+        this.run(message, images)
+        return {}
+    }
+
+    /** One session/prompt; pi answers a prompt at once and streams the run, so this does not wait. */
+    private run(message: string, images: ImageContent[]) {
+        this.transcript.userPrompt(message, images)
         this.callbacks.onSession?.(this, { prompt: message })
-        // pi answers a prompt at once and streams the run; do the same and settle when ACP returns.
-        this.connection.request('session/prompt', { sessionId: this.sessionId, prompt: blocks }).then(
+        this.connection.request('session/prompt', { sessionId: this.sessionId, prompt: blocksOf(message, images) }).then(
             // Grok Build reports the prompt's usage only under _meta.
             (result: any) => this.settle(result?.stopReason, result?.usage ?? result?._meta?.usage),
             (error: any) => this.settle(undefined, undefined, this.explain(error)),
         )
-        return {}
+    }
+
+    private emitQueue() {
+        this.emit({ type: 'queue_update', steering: [], followUp: this.queued.map(q => q.message) })
     }
 
     private settle(stopReason?: string, usage?: PromptUsage, errorMessage?: string) {
         this.transcript.finish(stopReason, usage, errorMessage)
+        // A follow-up typed during the run goes next, in the same run (Stop pulls them back first).
+        const next = stopReason === 'cancelled' ? undefined : this.queued.shift()
+        if (next && !this.exited) {
+            this.emitQueue()
+            this.run(next.message, next.images)
+            return
+        }
         this.running = false
         this.emit({ type: 'agent_end' })
         this.emit({ type: 'agent_settled' })

@@ -1,8 +1,9 @@
-// An agent's own session list (session/list), read by a short-lived process. It brings in the
-// sessions started outside the app (Codex / Claude Code / Grok in a terminal) next to the app's own.
+// Short-lived agent processes for work outside a thread: an agent's own session list (session/list,
+// which brings in sessions started in a terminal) and deleting a session from the agent's history.
 
-import type { AcpAgentSpec } from '@shared/agents'
+import type { AcpAgentCaps, AcpAgentSpec } from '@shared/agents'
 import type { AcpLaunch } from './agent'
+import { acpCaps } from '@shared/agents'
 import { spawn } from 'node:child_process'
 import { ACP_PROTOCOL_VERSION } from './agent'
 import { AcpConnection, methodNotFound } from './connection'
@@ -21,8 +22,8 @@ export interface SessionList {
     complete: boolean
 }
 
-/** Null when the agent cannot list sessions. Pages stop at `maxPages`; the whole read at `timeoutMs`. */
-export async function listAgentSessions(spec: AcpAgentSpec, launch: AcpLaunch, { maxPages = 8, timeoutMs = 20_000 } = {}): Promise<SessionList | null> {
+/** Starts the agent, initializes, runs `work`, and ends the process; the whole of it within `timeoutMs`. */
+export async function withAgent<T>(spec: AcpAgentSpec, launch: AcpLaunch, work: (connection: AcpConnection, caps: AcpAgentCaps) => Promise<T>, timeoutMs = 20_000): Promise<{ caps: AcpAgentCaps, result: T }> {
     const child = spawn(launch.file, launch.args, { env: launch.env, stdio: ['pipe', 'pipe', 'ignore'] })
     const connection = new AcpConnection(child.stdin, child.stdout, {
         onNotification: () => {},
@@ -34,17 +35,35 @@ export async function listAgentSessions(spec: AcpAgentSpec, launch: AcpLaunch, {
         child.on('error', reject)
         child.on('exit', code => reject(new Error(`${spec.label} exited (${code})`)))
     })
+    exited.catch(() => {})
     let timer: ReturnType<typeof setTimeout> | undefined
     const timeout = new Promise<never>((_resolve, reject) => {
-        timer = setTimeout(() => reject(new Error(`${spec.label}: session/list timed out`)), timeoutMs)
+        timer = setTimeout(() => reject(new Error(`${spec.label}: timed out`)), timeoutMs)
     })
-    const read = async (): Promise<SessionList | null> => {
+    const run = async () => {
         const init = await connection.request('initialize', {
             protocolVersion: ACP_PROTOCOL_VERSION,
             clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
             clientInfo: { name: 'pi-gui', version: '0.1.0' },
         })
-        if (!init?.agentCapabilities?.sessionCapabilities?.list)
+        const caps = acpCaps(init)
+        return { caps, result: await work(connection, caps) }
+    }
+    try {
+        return await Promise.race([run(), exited, timeout])
+    }
+    finally {
+        clearTimeout(timer)
+        connection.close(new Error('closed'))
+        child.stdin.end()
+        child.kill('SIGTERM')
+    }
+}
+
+/** Null when the agent cannot list sessions. Pages stop at `maxPages`. */
+export async function listAgentSessions(spec: AcpAgentSpec, launch: AcpLaunch, { maxPages = 8 } = {}): Promise<{ caps: AcpAgentCaps, list: SessionList | null }> {
+    const { caps, result } = await withAgent(spec, launch, async (connection, caps) => {
+        if (!caps.list)
             return null
         const sessions: ListedSession[] = []
         let cursor: string | undefined
@@ -65,15 +84,15 @@ export async function listAgentSessions(spec: AcpAgentSpec, launch: AcpLaunch, {
                 return { sessions, complete: true }
         }
         return { sessions, complete: false }
-    }
-    exited.catch(() => {})
-    try {
-        return await Promise.race([read(), exited, timeout])
-    }
-    finally {
-        clearTimeout(timer)
-        connection.close(new Error('closed'))
-        child.stdin.end()
-        child.kill('SIGTERM')
-    }
+    })
+    return { caps, list: result }
+}
+
+/** Deletes a session from the agent's own history (session/delete). */
+export async function deleteAgentSession(spec: AcpAgentSpec, launch: AcpLaunch, sessionId: string): Promise<void> {
+    await withAgent(spec, launch, async (connection, caps) => {
+        if (!caps.delete)
+            throw new Error(`${spec.label} cannot delete sessions`)
+        await connection.request('session/delete', { sessionId })
+    })
 }

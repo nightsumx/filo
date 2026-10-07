@@ -159,7 +159,7 @@ export const StatusLine = observer(({ thread }: { thread: Thread }) => {
     // cc-statusline reads only compaction.reserveTokens; this also applies compaction.modelOverrides
     // like pi itself, so the figure matches when auto-compaction actually fires.
     let right: string | null = null
-    if (thread.features.compaction && usage?.tokens && usage.contextWindow && compaction?.enabled) {
+    if (thread.features.autoCompaction && usage?.tokens && usage.contextWindow && compaction?.enabled) {
         const until = Math.max(0, Math.floor(((usage.contextWindow - compaction.reserveTokens - usage.tokens) / usage.contextWindow) * 100))
         right = `${until}% until auto-compact`
     }

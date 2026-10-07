@@ -2,7 +2,7 @@
 // (started from the app, or listed by the agent itself), reading a session back (live transcript, or
 // a session/load replay), and the pi-format copies that search and the edit log read (mirror.ts).
 
-import type { AcpAgentId, AcpAgentSpec, AgentAvailability } from '@shared/agents'
+import type { AcpAgentCaps, AcpAgentId, AcpAgentSpec, AgentAvailability } from '@shared/agents'
 import type { SessionItem, SessionSnapshot, SessionSummary } from '@shared/ipc'
 import type { AcpAgentCallbacks, AcpLaunch } from './agent'
 import { ACP_AGENTS, acpAgent, acpSessionKey, parseAcpSessionKey } from '@shared/agents'
@@ -15,7 +15,7 @@ import { tr } from '../i18n'
 import { loginShellPath } from '../pi-env'
 import { agentDir } from '../piSettings'
 import { AcpAgent } from './agent'
-import { listAgentSessions } from './list'
+import { deleteAgentSession, listAgentSessions } from './list'
 import { mirrorFile, mirrorFiles, mirrorKey, mirrorText } from './mirror'
 
 /** What the app remembers of an ACP session (the agent keeps the conversation itself). */
@@ -106,6 +106,12 @@ export async function resolveLaunch(spec: AcpAgentSpec): Promise<AcpLaunch> {
     const adapter = await findIn(spec.bin, dirs)
     if (adapter)
         return { file: adapter, args: spec.args ?? [], env, via: 'path' }
+    if (!spec.npm) {
+        throw new Error(tr(
+            `找不到 ${spec.bin}。安装：${spec.install ?? spec.bin}`,
+            `${spec.bin} not found. Install it: ${spec.install ?? spec.bin}`,
+        ))
+    }
     const npx = await findOnPath('npx', searchPath)
     if (npx)
         return { file: npx, args: ['-y', spec.npm, ...(spec.npmArgs ?? spec.args ?? [])], env, via: 'npx' }
@@ -128,6 +134,8 @@ export class AcpService {
     private importedAt: Partial<Record<AcpAgentId, number>> = {}
     private importing: Promise<void> | null = null
     private mirrorTimers = new Map<string, ReturnType<typeof setTimeout>>()
+    /** What each agent said it can do, the last time one started. */
+    private caps: Partial<Record<AcpAgentId, AcpAgentCaps>> = {}
 
     /** `mirrorDir`: where the pi-format copies go; none, no copies. */
     constructor(private file: () => string, private mirrorDir?: () => string) {
@@ -143,6 +151,8 @@ export class AcpService {
             }
             if (saved?.importedAt && typeof saved.importedAt === 'object')
                 this.importedAt = saved.importedAt
+            if (saved?.caps && typeof saved.caps === 'object')
+                this.caps = saved.caps
         }
         catch {}
     }
@@ -178,9 +188,11 @@ export class AcpService {
                     this.live.delete(instance.key)
                 callbacks.onExit(id, info)
             },
+            onFork: (a, sessionId) => this.noteFork(a, sessionId),
             onSession: (a, change) => {
                 if (!a.key)
                     return
+                this.noteCaps(spec.id, a.caps)
                 this.live.set(a.key, a)
                 this.replays.delete(a.key)
                 this.note(a, change)
@@ -234,6 +246,7 @@ export class AcpService {
             createdAt: r.createdAt,
             updatedAt: r.updatedAt,
             agent: r.agent,
+            agentCaps: this.caps[r.agent],
         }))
     }
 
@@ -289,7 +302,8 @@ export class AcpService {
                 return
             this.importedAt[spec.id] = now
             try {
-                const list = await listAgentSessions(spec, launch)
+                const { caps, list } = await listAgentSessions(spec, launch)
+                this.noteCaps(spec.id, caps)
                 if (list)
                     this.merge(spec.id, list.sessions, list.complete)
             }
@@ -396,6 +410,48 @@ export class AcpService {
         }
     }
 
+    private noteCaps(agent: AcpAgentId, caps: AcpAgentCaps) {
+        if (JSON.stringify(this.caps[agent]) === JSON.stringify(caps))
+            return
+        this.caps[agent] = caps
+        this.save()
+    }
+
+    /** A fork the agent just made: listed like the session it came from. */
+    private noteFork(from: AcpAgent, sessionId: string): string {
+        const key = acpSessionKey(from.spec.id, sessionId)
+        const source = this.records.get(from.key)
+        const now = Date.now()
+        const title = source?.name ?? source?.title ?? source?.firstPrompt
+        this.records.set(key, {
+            key,
+            agent: from.spec.id,
+            sessionId,
+            cwd: from.cwd,
+            name: title ? tr(`${title}（分叉）`, `${title} (fork)`) : undefined,
+            firstPrompt: source?.firstPrompt,
+            createdAt: now,
+            updatedAt: now,
+        })
+        this.save()
+        // Its copy for search: the transcript so far, which the fork holds too.
+        void this.writeMirror(key, from.snapshot())
+        return key
+    }
+
+    /** Deletes the session in the agent's own history too (session/delete), then forgets it. */
+    async deleteHistory(key: string) {
+        const record = this.records.get(key)
+        const spec = record && acpAgent(record.agent)
+        if (!record || !spec)
+            return
+        const live = this.live.get(key)
+        if (live)
+            await live.stop()
+        await deleteAgentSession(spec, await resolveLaunch(spec), record.sessionId)
+        this.remove(key)
+    }
+
     /** Forgets a session in the app; the agent's own history is left alone (and stays hidden here). */
     remove(key: string) {
         if (!this.records.delete(key))
@@ -408,7 +464,7 @@ export class AcpService {
     }
 
     private save() {
-        const data = JSON.stringify({ sessions: [...this.records.values()], hidden: [...this.hidden], importedAt: this.importedAt }, null, 2)
+        const data = JSON.stringify({ sessions: [...this.records.values()], hidden: [...this.hidden], importedAt: this.importedAt, caps: this.caps }, null, 2)
         const file = this.file()
         this.saving = this.saving.then(async () => {
             await mkdir(path.dirname(file), { recursive: true })

@@ -1,4 +1,4 @@
-import type { AgentAvailability, AgentKind } from './agents'
+import type { AcpAgentCaps, AgentAvailability, AgentKind } from './agents'
 import type { ApprovalMode, CapabilityId, Presence } from './capabilities'
 import type { LangPref } from './i18n'
 import type { AgentMessage, PiEvent, RpcResponse } from './pi'
@@ -30,6 +30,8 @@ export interface SessionSummary {
     updatedAt: number
     /** The agent that ran it; absent for pi's own session files. */
     agent?: AgentKind
+    /** What that ACP agent can do, as it last said. */
+    agentCaps?: AcpAgentCaps
 }
 
 /** A message that matched a full-text search. */
@@ -279,7 +281,8 @@ export interface PiBridge {
     listAgents: () => Promise<AgentAvailability[]>
     listSessions: () => Promise<SessionSummary[]>
     readSession: (path: string) => Promise<SessionSnapshot>
-    trashSession: (path: string) => Promise<void>
+    /** pi: the file goes to the Trash. ACP: off the app's list; `history` deletes it in the agent too. */
+    trashSession: (path: string, options?: { history?: boolean }) => Promise<void>
     /** Full-text search of prompts and replies in every session; every word must appear. */
     searchSessions: (query: string) => Promise<SearchResult[]>
     /** Terminal pi sessions (pi-cc-tui's presence extension), and their changes. */

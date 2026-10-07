@@ -8,6 +8,8 @@
 //   - Claude Code and Grok Build are offered too; a Claude thread carries its own label
 //   - a session the agent lists itself (started in a terminal) shows up and opens
 //   - ACP threads are in session search and in the changes panel's edit log
+//   - typing mid-run queues a follow-up; /compact, fork and delete-from-agent go to the agent
+//   - an agent without image prompts hides the image button
 //
 //   bun run build && bun run e2e:acp
 import { execFileSync } from 'node:child_process'
@@ -57,7 +59,11 @@ async function main() {
         // Every ACP agent runs the same scripted one here.
         PI_GUI_ACP_CODEX: JSON.stringify(['node', FAKE, '--agent=codex']),
         PI_GUI_ACP_CLAUDE: JSON.stringify(['node', FAKE, '--agent=claude']),
-        PI_GUI_ACP_GROK: JSON.stringify(['node', FAKE, '--agent=grok']),
+        PI_GUI_ACP_GROK: JSON.stringify(['node', FAKE, '--agent=grok', '--no-images']),
+        PI_GUI_ACP_OPENCODE: JSON.stringify(['node', FAKE, '--agent=opencode']),
+        PI_GUI_ACP_GEMINI: JSON.stringify(['node', FAKE, '--agent=gemini']),
+        PI_GUI_ACP_COPILOT: JSON.stringify(['node', FAKE, '--agent=copilot']),
+        PI_GUI_ACP_CURSOR: JSON.stringify(['node', FAKE, '--agent=cursor']),
         FAKE_ACP_DIR: fakeDir,
     }
     const R = JSON.stringify(repo)
@@ -73,7 +79,7 @@ async function main() {
         const picker = await until('the agent picker lists Codex', () => js<boolean>(`(async () => (await window.pi.listAgents()).some(a => a.id === 'codex' && a.available))()`))
         check(picker, 'Codex is available (fake adapter)')
         const ids = await js<string[]>(`(async () => (await window.pi.listAgents()).map(a => a.id))()`)
-        check(JSON.stringify(ids) === '["codex","claude","grok"]', `the picker offers Codex, Claude Code and Grok Build (${ids.join(', ')})`)
+        check(JSON.stringify(ids) === '["codex","claude","grok","opencode","gemini","copilot","cursor"]', `the picker offers every ACP agent (${ids.join(', ')})`)
         await until('the agent picker shows', () => js<boolean>(`!![...document.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'Agent: pi')`))
         check(true, 'a fresh thread offers the agent picker')
         if (SHOTS) {
@@ -153,6 +159,37 @@ async function main() {
         await until('resumed run', () => js<boolean>(`(() => { const t = window.__app.threads.get(${JSON.stringify(key)}); return !t.running && t.turns.length === ${turnsBefore + 1} && JSON.stringify(t.turns.at(-1).steps).includes('echo: third') })()`), 20_000)
         check(await js<string>(`window.__app.threads.get(${JSON.stringify(key)}).key`) === key, 'the resumed session keeps its key')
 
+        // Typed mid-run: the agent has no steering, so it waits as a follow-up and goes next.
+        const K = `window.__app.threads.get(${JSON.stringify(key)})`
+        await js(`(() => { const t = ${K}; t.draft = 'slow'; void t.send(); return true })()`)
+        await until('slow run', () => js<boolean>(`${K}.running`))
+        await js(`(() => { const t = ${K}; t.draft = 'after slow'; void t.send(); return true })()`)
+        await until('queued', () => js<boolean>(`${K}.queue.followUp.includes('after slow')`))
+        check(await js<boolean>(`document.querySelector('textarea').placeholder.includes('gets it after this run')`), 'mid-run input reads as a follow-up for an agent without steering')
+        await until('the follow-up ran', () => js<boolean>(`(() => { const t = ${K}; return !t.running && !t.queue.followUp.length && JSON.stringify(t.turns.at(-1).steps).includes('echo: after slow') })()`), 20_000)
+        const lastTwo = await js<string[]>(`${K}.turns.slice(-2).map(t => t.user?.text)`)
+        check(JSON.stringify(lastTwo) === '["slow","after slow"]', 'the follow-up went as the next prompt, after the slow one')
+
+        // The agent's own /compact, from the thread menu.
+        check(await js<boolean>(`${K}.features.compaction`), 'Compact context is offered: the agent has /compact')
+        await js(`(() => { void ${K}.compact(); return true })()`)
+        await until('compacted', () => js<boolean>(`(() => { const t = ${K}; return !t.running && JSON.stringify(t.turns.at(-1).steps).includes('Compacted.') })()`), 20_000)
+        check(true, 'Compact context runs the agent\'s /compact')
+
+        // Fork: the agent copies the session; the copy opens in its own tab with the history.
+        check(await js<boolean>(`!!${K}.state.agentCaps.fork`), 'the agent says it can fork')
+        const forkKey = await js<string>(`${K}.forkSession()`)
+        check(!!forkKey && forkKey.startsWith('acp:codex:fork-'), `session/fork makes a new session (${forkKey})`)
+        await js(`window.__app.revealHere(${JSON.stringify(forkKey)})`)
+        await until('the fork opens', () => js<boolean>(`(() => { const t = window.__app.threads.get(${JSON.stringify(forkKey)}); return !!t && t.loaded && JSON.stringify(t.turns).includes('echo: after slow') })()`), 20_000)
+        check(await js<string>(`window.__app.sessions.find(s => s.path === ${JSON.stringify(forkKey)}).name`) === 'Edit notes.txt (fork)', 'the fork is listed under its source\'s name')
+
+        // Delete from the agent: its own record goes too.
+        await js(`(() => { void window.__app.deleteSession(window.__app.sessions.find(s => s.path === ${JSON.stringify(forkKey)}), { history: true }); return true })()`)
+        await until('the fork is gone', () => js<boolean>(`!window.__app.sessions.some(s => s.path === ${JSON.stringify(forkKey)})`))
+        const forkFile = path.join(fakeDir, `${forkKey.slice('acp:codex:'.length)}.jsonl`)
+        check(!(await readFile(forkFile).then(() => true, () => false)), 'Delete from Codex removes the agent\'s own session')
+
         // The terminal session the agent listed: in the sidebar with its agent, and it opens.
         const termKey = 'acp:codex:term-1'
         check(await js<boolean>(`window.__app.sessions.some(s => s.path === '${termKey}' && s.name === 'From the terminal' && s.agent === 'codex')`), 'a session the agent lists itself shows up in the project')
@@ -161,6 +198,15 @@ async function main() {
         check(true, 'it opens with its history from the agent')
         await until('search finds the opened terminal session', () => js<boolean>(`(async () => (await window.pi.searchSessions('from the terminal')).some(r => r.session === '${termKey}'))()`))
         check(true, 'once opened it is in search too')
+
+        // An agent without image prompts: no image button.
+        await js(`(() => { window.__app.newThread(${R}); return true })()`)
+        await until('a thread for Grok', () => js<boolean>(`!!${T} && ${T}.isEmpty && ${T}.agent === 'pi'`))
+        await js(`${T}.setAgent('grok')`)
+        await until('Grok ready', () => js<boolean>(`${T}.agent === 'grok' && ${T}.agentStatus === 'ready'`))
+        await until('Grok\'s capabilities', () => js<boolean>(`${T}.state?.agentCaps?.images === false`))
+        check(await js<boolean>(`!${T}.features.images && !document.querySelector('button[aria-label="Add image"]')`), 'Grok Build (no image prompts) has no image button')
+        await js(`window.__app.closeTab(${T}.key)`)
 
         // Another agent in a second thread: its own label everywhere.
         await js(`(() => { window.__app.newThread(${R}); return true })()`)
@@ -173,6 +219,15 @@ async function main() {
         check(true, 'a Claude Code session runs and is keyed acp:claude:…')
         await until('Claude listed', () => js<boolean>(`[...document.querySelectorAll('[role=treeitem]')].some(r => r.textContent.includes('hi claude') && r.textContent.includes('Claude Code'))`))
         check(true, 'its sidebar row says Claude Code')
+
+        // Settings → Agents lists every agent with how it runs.
+        await js(`(() => { window.__app.setSettingsPage('agents'); window.__app.setSettingsOpen(true); return true })()`)
+        await until('the Agents page', () => js<boolean>(`(() => { const p = document.querySelector('section[aria-label="Agents"]'); return !!p && p.textContent.includes('Grok Build') && !p.textContent.includes('Checking') })()`))
+        const page2 = await js<string>(`document.querySelector('section[aria-label="Agents"]').textContent`)
+        check(['pi', 'Codex', 'Claude Code', 'OpenCode', 'Gemini CLI', 'GitHub Copilot', 'Cursor', 'Sign in:'].every(t => page2.includes(t)), 'Settings → Agents lists every agent and how to sign in')
+        if (SHOTS)
+            await page.screenshot(path.join(SHOTS, 'acp-settings.png'))
+        await js(`(() => { window.__app.setSettingsOpen(false); return true })()`)
         console.log('all ACP checks passed')
     }
     finally {

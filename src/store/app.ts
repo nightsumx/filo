@@ -43,7 +43,7 @@ const IDLE_SWEEP_MS = 60_000
 export const MIN_PANE_WIDTH = 520
 export const MAX_PANES = 3
 
-export type SettingsPageId = 'appearance' | 'providers' | 'capabilities' | 'compaction'
+export type SettingsPageId = 'appearance' | 'providers' | 'agents' | 'capabilities' | 'compaction'
 
 export interface Project {
     cwd: string
@@ -1011,10 +1011,10 @@ class AppStore implements ThreadHost {
         this.persist()
     }
 
-    async deleteSession(session: SessionSummary) {
+    async deleteSession(session: SessionSummary, options?: { history?: boolean }) {
         await this.closeTab(session.path)
         try {
-            await api().trashSession(session.path)
+            await api().trashSession(session.path, options)
         }
         catch (error: any) {
             toast.error(`${tr('删除失败：', 'Delete failed: ')}${error.message}`)

@@ -31,6 +31,10 @@ function readImage(file: File): Promise<ImageContent> {
 
 async function addImages(thread: Thread, files: File[]) {
     const images = files.filter(f => f.type.startsWith('image/'))
+    if (images.length && !thread.features.images) {
+        toast.error(tr(`${thread.agentLabel} 不接受图片`, `${thread.agentLabel} does not take images`))
+        return
+    }
     for (const file of images) {
         if (file.size > MAX_IMAGE_BYTES) {
             toast.error(tr(`${file.name} 超过 8MB`, `${file.name} is larger than 8MB`))
@@ -40,6 +44,9 @@ async function addImages(thread: Thread, files: File[]) {
         thread.images = [...thread.images, image]
     }
 }
+
+/** ACP agents without steering take mid-run input as the next prompt. */
+const queuesInput = (thread: Thread) => thread.agent !== 'pi' && !thread.state?.agentCaps?.steering
 
 const SOURCE_LABEL: Record<SlashCommand['source'], Localized> = {
     extension: { zh: '扩展', en: 'extension' },
@@ -222,7 +229,7 @@ export const Composer = observer(({ thread }: { thread: Thread }) => {
                         value={thread.draft}
                         rows={2}
                         aria-label={tr(`给 ${agent} 发消息`, `Message ${agent}`)}
-                        placeholder={thread.running ? tr(`继续输入以引导 ${agent}（Esc 中断）`, `Type to steer ${agent} (Esc to stop)`) : thread.planMode ? tr(`描述要做的事，${agent} 先写出计划给你审阅`, `Describe the task; ${agent} writes a plan for you to review first`) : tr(`让 ${agent} 做点什么，输入 / 查看命令`, `Ask ${agent} to do something, or type / for commands`)}
+                        placeholder={thread.running ? (queuesInput(thread) ? tr(`继续输入，${agent} 这轮结束后接着发送（Esc 中断）`, `Type a follow-up; ${agent} gets it after this run (Esc to stop)`) : tr(`继续输入以引导 ${agent}（Esc 中断）`, `Type to steer ${agent} (Esc to stop)`)) : thread.planMode ? tr(`描述要做的事，${agent} 先写出计划给你审阅`, `Describe the task; ${agent} writes a plan for you to review first`) : tr(`让 ${agent} 做点什么，输入 / 查看命令`, `Ask ${agent} to do something, or type / for commands`)}
                         onChange={(e) => {
                             thread.draft = e.target.value
                             setSlashDismissed(false)
@@ -238,15 +245,17 @@ export const Composer = observer(({ thread }: { thread: Thread }) => {
                         className="block w-full resize-none bg-transparent px-3 pt-2.5 pb-1 text-[length:var(--app-font-size)] leading-relaxed text-gray-900 outline-none placeholder:text-gray-400 select-text"
                     />
                     <div className="flex items-center gap-0.5 px-1.5 pb-1.5">
-                        <button
-                            type="button"
-                            aria-label={tr('添加图片', 'Add image')}
-                            title={tr('添加图片', 'Add image')}
-                            onClick={() => fileRef.current?.click()}
-                            className="flex h-6 w-6 items-center justify-center rounded-md text-gray-500 hover:bg-black/[0.06] hover:text-gray-800"
-                        >
-                            <ImagePlus size={14} />
-                        </button>
+                        {thread.features.images && (
+                            <button
+                                type="button"
+                                aria-label={tr('添加图片', 'Add image')}
+                                title={tr('添加图片', 'Add image')}
+                                onClick={() => fileRef.current?.click()}
+                                className="flex h-6 w-6 items-center justify-center rounded-md text-gray-500 hover:bg-black/[0.06] hover:text-gray-800"
+                            >
+                                <ImagePlus size={14} />
+                            </button>
+                        )}
                         <input
                             ref={fileRef}
                             type="file"

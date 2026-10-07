@@ -1,7 +1,7 @@
 // Minimal structural mirrors of pi's wire types (docs/message-types.md, docs/json.md, docs/rpc-commands.md).
 // Kept loose on purpose: extensions can add roles and fields, and the GUI must tolerate unknown shapes.
 
-import type { AcpConfigOption } from './agents'
+import type { AcpAgentCaps, AcpConfigOption } from './agents'
 
 export interface TextContent { type: 'text', text: string }
 export interface ImageContent { type: 'image', data: string, mimeType: string }
@@ -88,6 +88,8 @@ export interface RpcSessionState {
     pendingMessageCount?: number
     /** Not pi's: the ACP bridge reports the agent's session settings here. */
     configOptions?: AcpConfigOption[]
+    /** Not pi's: what the ACP agent can do. */
+    agentCaps?: AcpAgentCaps
 }
 
 export interface SessionStats {
