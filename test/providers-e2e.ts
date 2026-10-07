@@ -5,6 +5,7 @@
 //   - a custom endpoint is added through the form (model list fetched from the endpoint), the idle
 //     thread restarts pi, picks up the model, and a prompt goes through it
 //   - sign out and endpoint removal leave the files as they were
+//   - Appearance: the theme control follows the choice and the page turns light
 //
 //   bun run build && bun run e2e:providers
 import { execFileSync } from 'node:child_process'
@@ -116,6 +117,13 @@ async function main() {
 
         await until('thread has the endpoint model', () => js(`window.__app.active.agentStatus === 'ready' && window.__app.active.models.some(m => m.provider === 'mock-llm')`), 30_000)
         check(!(await js(`!!document.querySelector('[role="status"]')?.textContent.includes('pi has no model to use yet')`)), 'the no-model notice is gone')
+        // ---------------------------------------------------------------- Appearance → Theme
+        await js(`window.__app.setSettingsPage('appearance')`)
+        const themeGroup = `[...document.querySelectorAll('[role="dialog"] [role="radiogroup"]')].find(g => document.getElementById(g.getAttribute('aria-labelledby'))?.textContent === 'Theme')`
+        await until('theme control', () => js(`!!${themeGroup}`))
+        check(await clickButton('Light', themeGroup), 'Light can be picked')
+        await until('light theme', () => js(`window.__app.themePref === 'light' && !document.documentElement.classList.contains('dark')`), 5_000)
+        check(await js(`${themeGroup}.querySelector('[aria-checked="true"]')?.textContent`) === 'Light', 'the theme control shows Light as chosen')
         await js(`window.__app.setSettingsOpen(false)`)
         await until('model chosen', () => js(`window.__app.active.state?.model?.provider === 'mock-llm'`), 10_000)
         await js(`(() => { const t = window.__app.active; t.draft = 'hi'; void t.send(); return true })()`)

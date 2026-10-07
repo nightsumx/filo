@@ -18,7 +18,7 @@ function answerText(a?: AskAnswer): string {
     return parts.join('；')
 }
 
-function QuestionField({ index, question, answer, onChange }: { index: number, question: AskQuestion, answer: AskAnswer, onChange: (a: AskAnswer) => void }) {
+const QuestionField = observer(function QuestionField({ index, question, answer, onChange }: { index: number, question: AskQuestion, answer: AskAnswer, onChange: (a: AskAnswer) => void }) {
     const id = useId()
     const toggle = (option: string) => {
         if (!question.multiple)
@@ -55,7 +55,7 @@ function QuestionField({ index, question, answer, onChange }: { index: number, q
             </div>
         </fieldset>
     )
-}
+})
 
 const AskForm = observer(({ toolCallId, questions }: { toolCallId: string, questions: AskQuestion[] }) => {
     const thread = useThread()

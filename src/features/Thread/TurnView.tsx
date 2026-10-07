@@ -41,7 +41,7 @@ function CopyAction({ text }: { text: string }) {
 const forkable = (entryId: string | undefined) => !!entryId && !entryId.startsWith('live-') && entryId !== 'pending'
 
 /** Review feedback the user sent back: the picked items and the note, no fork or edit. */
-function ReviewFeedbackBubble({ user, review }: { user: UserPrompt, review: NonNullable<UserPrompt['review']> }) {
+const ReviewFeedbackBubble = observer(function ReviewFeedbackBubble({ user, review }: { user: UserPrompt, review: NonNullable<UserPrompt['review']> }) {
     const t = useT()
     const n = review.items.length
     const head = n ? tr(`交回 ${n} 条审查意见`, `Sent back ${n} review item${n === 1 ? '' : 's'}`) : tr('交回审查补充说明', 'Sent a review note')
@@ -59,7 +59,7 @@ function ReviewFeedbackBubble({ user, review }: { user: UserPrompt, review: NonN
             </div>
         </div>
     )
-}
+})
 
 // User prompt: a right-aligned chat bubble; copy, fork and edit sit to its left on hover.
 const UserBubble = observer(({ user, thread, entryId }: { user: UserPrompt, thread?: Thread, entryId?: string }) => {

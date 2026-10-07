@@ -12,7 +12,7 @@ import { MessageList } from './MessageList'
 import { newThreadLabel, tr } from '@/lib/i18n'
 
 /** Shortcut hints shown on empty editors, like WebStorm's empty editor area. */
-export function ShortcutHints({ className }: { className?: string }) {
+export const ShortcutHints = observer(function ShortcutHints({ className }: { className?: string }) {
     const rows: [string, string][] = [
         [newThreadLabel(), '⌘T'],
         [tr('切换项目', 'Switch project'), '⌘P'],
@@ -30,7 +30,7 @@ export function ShortcutHints({ className }: { className?: string }) {
             ))}
         </dl>
     )
-}
+})
 
 /** Empty state for a fresh thread: the project it runs in plus a few recent threads to reopen. */
 const Hero = observer(({ thread }: { thread: Thread }) => {

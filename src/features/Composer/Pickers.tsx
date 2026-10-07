@@ -94,7 +94,7 @@ export const ModelPicker = observer(({ thread }: { thread: Thread }) => {
  * Thinking effort as a stepped slider, like the Codex app: drag the knob or click a stop; with focus,
  * arrows / Home / End step through levels. Only the released position is sent to pi.
  */
-function EffortSlider({ levels, value, onChange }: { levels: ThinkingLevel[], value?: ThinkingLevel, onChange: (level: ThinkingLevel) => Promise<void> }) {
+const EffortSlider = observer(function EffortSlider({ levels, value, onChange }: { levels: ThinkingLevel[], value?: ThinkingLevel, onChange: (level: ThinkingLevel) => Promise<void> }) {
     const trackRef = useRef<HTMLDivElement>(null)
     const [drag, setDrag] = useState<number | null>(null)
     // Holds the released stop until pi confirms, so the knob does not jump back meanwhile.
@@ -174,7 +174,7 @@ function EffortSlider({ levels, value, onChange }: { levels: ThinkingLevel[], va
             </div>
         </div>
     )
-}
+})
 
 export const ThinkingPicker = observer(({ thread }: { thread: Thread }) => {
     const levels = thread.thinkingLevels

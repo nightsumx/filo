@@ -61,7 +61,7 @@ function tearOff(thread: Thread, e: React.DragEvent) {
 const dropdownParts = { Item: DropdownMenuItem, Separator: DropdownMenuSeparator }
 
 /** In-place title editor: same text, no chrome. Enter / blur saves, Esc cancels. */
-function TitleEditor({ thread }: { thread: Thread }) {
+const TitleEditor = observer(function TitleEditor({ thread }: { thread: Thread }) {
     const ref = useRef<HTMLInputElement>(null)
     const done = useRef(false)
     useEffect(() => {
@@ -99,7 +99,7 @@ function TitleEditor({ thread }: { thread: Thread }) {
             className="min-w-0 flex-1 bg-transparent p-0 text-inherit outline-none selection:bg-ide-accent/25"
         />
     )
-}
+})
 
 const Tab = observer(({ thread, index, visible }: { thread: Thread, index: number, visible: boolean }) => {
     const active = appStore.activeKey === thread.key

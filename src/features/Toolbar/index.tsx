@@ -18,7 +18,7 @@ const iconBtn = cn(toolbarBtn, 'w-7 justify-center px-0 text-gray-600')
 const rowAction = 'flex h-5 w-5 items-center justify-center rounded text-gray-500 hover:bg-black/[0.08] hover:text-gray-900'
 
 /** One project in the popup: badge, name, path and branch on three lines, like WebStorm's widget. */
-export function ProjectItem({ project, branch, active, current, shortcut, onPick, onHover, onRemove, onAttach }: {
+export const ProjectItem = observer(function ProjectItem({ project, branch, active, current, shortcut, onPick, onHover, onRemove, onAttach }: {
     project: Project
     branch: string | null | undefined
     active: boolean
@@ -89,7 +89,7 @@ export function ProjectItem({ project, branch, active, current, shortcut, onPick
             )}
         </div>
     )
-}
+})
 
 function SectionTitle({ children }: { children: React.ReactNode }) {
     return <div className="px-2 pb-1 pt-2 text-[12.5px] font-semibold text-gray-500">{children}</div>

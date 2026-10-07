@@ -1,6 +1,7 @@
 // Flat form controls: answer chips, filled text field, switch, segmented choice, and the setting
 // row / group used by the Settings dialog. Colours come from the --jb-* variables in index.css.
 import { cn } from '@/lib/utils'
+import { observer } from 'mobx-react-lite'
 import * as React from 'react'
 
 /**
@@ -78,8 +79,11 @@ export function Segmented<T extends string>({ value, options, onChange, labelled
     )
 }
 
-/** One setting: title and description on the left, its control on the right. */
-export function SettingRow({ title, description, control, children }: { title: React.ReactNode, description?: React.ReactNode, control: (ids: { labelId: string, descId?: string }) => React.ReactNode, children?: React.ReactNode }) {
+/**
+ * One setting: title and description on the left, its control on the right. An observer because
+ * `control` runs in this render: store values read only inside it would otherwise not re-render.
+ */
+export const SettingRow = observer(({ title, description, control, children }: { title: React.ReactNode, description?: React.ReactNode, control: (ids: { labelId: string, descId?: string }) => React.ReactNode, children?: React.ReactNode }) => {
     const labelId = React.useId()
     const descId = React.useId()
     return (
@@ -94,7 +98,7 @@ export function SettingRow({ title, description, control, children }: { title: R
             {children}
         </div>
     )
-}
+})
 
 /** One settings page: its title (with an optional note on the right) over hairline-separated rows. */
 export function SettingsPage({ title, aside, children }: { title: string, aside?: React.ReactNode, children: React.ReactNode }) {

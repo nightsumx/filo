@@ -2,6 +2,7 @@ import { tr } from '@/lib/i18n'
 import { cn } from '@/lib/utils'
 import * as DialogPrimitive from '@radix-ui/react-dialog'
 import { X } from 'lucide-react'
+import { observer } from 'mobx-react-lite'
 import * as React from 'react'
 
 const Dialog = DialogPrimitive.Root
@@ -33,7 +34,7 @@ const DialogOverlay = React.forwardRef<
 ))
 DialogOverlay.displayName = DialogPrimitive.Overlay.displayName
 
-const DialogContent = React.forwardRef<
+const DialogContent = observer(React.forwardRef<
     React.ElementRef<typeof DialogPrimitive.Content>,
     React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content> & { fullscreen?: boolean, hideClose?: boolean }
 >(({ className, children, fullscreen, hideClose, ...props }, ref) => (
@@ -87,7 +88,7 @@ const DialogContent = React.forwardRef<
                     </div>
                 )}
     </DialogPortal>
-))
+)))
 DialogContent.displayName = DialogPrimitive.Content.displayName
 
 function DialogHeader({

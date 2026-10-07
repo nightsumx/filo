@@ -1,5 +1,6 @@
 // Current UI language for the renderer. `tr` reads an observable, so observer components re-render
-// when the language changes; plain components get it through their observer parent.
+// when the language changes. Any component that calls `tr` (or reads a store) while rendering must
+// be an observer itself: a plain child is not tracked and only updates if its parent happens to.
 import type { Lang, LangPref, Localized } from '@shared/i18n'
 import { resolveLang } from '@shared/i18n'
 import { observable, runInAction } from 'mobx'

@@ -34,7 +34,7 @@ const RECHECK: Record<ReviewRecheck['outcome'], { label: Localized, className: s
 
 const where = (issue: ReviewIssue) => issue.file ? `${issue.file}${issue.line ? `:${issue.line}` : ''}` : ''
 
-function Evidence({ issue }: { issue: ReviewIssue }) {
+const Evidence = observer(function Evidence({ issue }: { issue: ReviewIssue }) {
     const t = useT()
     const evidence = issue.evidence!
     return (
@@ -48,10 +48,10 @@ function Evidence({ issue }: { issue: ReviewIssue }) {
             {evidence.output && <pre className="mt-1 max-h-[240px] overflow-y-auto whitespace-pre-wrap break-all text-gray-700 select-text">{evidence.output}</pre>}
         </div>
     )
-}
+})
 
 /** One pickable item: check box, id, tags and title; the body opens under it. */
-function Item({ id, checked, onToggle, applied, tags, title, location, children }: {
+const Item = observer(function Item({ id, checked, onToggle, applied, tags, title, location, children }: {
     id: string
     checked: boolean
     onToggle: () => void
@@ -84,7 +84,7 @@ function Item({ id, checked, onToggle, applied, tags, title, location, children 
             {open && <div className="mb-1 ml-[22px] flex flex-col gap-1 text-[12.5px] leading-5 text-gray-700">{children}</div>}
         </li>
     )
-}
+})
 
 const Prose = ({ text }: { text: string }) => <Markdown content={text} className="text-[12.5px] [&>*:first-child]:mt-0 [&>*:last-child]:mb-0" />
 

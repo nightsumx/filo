@@ -29,7 +29,7 @@ function useChildTurns(details: SubagentDetails, running: boolean) {
     }, [details, running])
 }
 
-export function Transcript({ details, running }: { details: SubagentDetails, running: boolean }) {
+export const Transcript = observer(function Transcript({ details, running }: { details: SubagentDetails, running: boolean }) {
     const turns = useChildTurns(details, running)
     const scrollRef = useRef<HTMLDivElement>(null)
     const stick = useRef(true)
@@ -65,7 +65,7 @@ export function Transcript({ details, running }: { details: SubagentDetails, run
             ))}
         </div>
     )
-}
+})
 
 const Controls = observer(({ toolCallId, steering }: { toolCallId: string, steering: string[] }) => {
     const thread = useThread()

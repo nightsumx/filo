@@ -221,7 +221,7 @@ const ModelExceptions = observer(({ info, at, minK, onError }: { info: GlobalCom
     )
 })
 
-function ExceptionRow({ name, meta, detail, field, onRemove }: {
+const ExceptionRow = observer(function ExceptionRow({ name, meta, detail, field, onRemove }: {
     name: string
     meta: string
     detail: string
@@ -243,13 +243,13 @@ function ExceptionRow({ name, meta, detail, field, onRemove }: {
             <Button variant="ghost" size="sm" className="shrink-0 px-2 text-gray-600" aria-label={tr(`移除 ${name}`, `Remove ${name}`)} onClick={onRemove}>{tr('移除', 'Remove')}</Button>
         </div>
     )
-}
+})
 
 /**
  * "用到 [ N ] k 时压缩". Commits on Enter or blur; an empty field commits null. Out-of-range input
  * stays in the field with the allowed range under it instead of being clamped silently.
  */
-function PointField({ value, min, max, placeholder, autoFocus, labelledBy, describedBy, onCommit }: {
+const PointField = observer(function PointField({ value, min, max, placeholder, autoFocus, labelledBy, describedBy, onCommit }: {
     value: number | null
     min: number
     max: number
@@ -312,4 +312,4 @@ function PointField({ value, min, max, placeholder, autoFocus, labelledBy, descr
             {error && <span id={errorId} role="alert" className="absolute top-full right-[60px] mt-0.5 whitespace-nowrap text-[11px] text-red-600 dark:text-red-400">{error}</span>}
         </div>
     )
-}
+})

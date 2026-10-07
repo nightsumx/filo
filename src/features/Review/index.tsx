@@ -95,7 +95,7 @@ function othersTitle(others: FileEditor[]): string {
  * in the tree (`depth` set) the row is indented under its folder instead. The diff always spans the
  * full panel width, since the panel is narrow.
  */
-function FileDiff({ file, ctx, defaultOpen, depth }: { file: GitFileChange, ctx: RowContext, defaultOpen: boolean, depth?: number }) {
+const FileDiff = observer(function FileDiff({ file, ctx, defaultOpen, depth }: { file: GitFileChange, ctx: RowContext, defaultOpen: boolean, depth?: number }) {
     const { cwd, tick, mode } = ctx
     const [open, setOpen] = useState(defaultOpen)
     const [diff, setDiff] = useState<GitFileDiff | null>(null)
@@ -185,14 +185,14 @@ function FileDiff({ file, ctx, defaultOpen, depth }: { file: GitFileChange, ctx:
             )}
         </div>
     )
-}
+})
 
 function filesUnder(dir: ChangeDir): GitFileChange[] {
     return dir.children.flatMap(n => (n.kind === 'file' ? [n.file] : filesUnder(n)))
 }
 
 /** Changed files by folder, like the JetBrains Commit tool window; a file row unfolds its diff in place. */
-function ChangeTree({ nodes, depth, collapsed, onToggle, ctx, generation }: {
+const ChangeTree = observer(function ChangeTree({ nodes, depth, collapsed, onToggle, ctx, generation }: {
     nodes: ChangeNode[]
     depth: number
     collapsed: ReadonlySet<string>
@@ -253,7 +253,7 @@ function ChangeTree({ nodes, depth, collapsed, onToggle, ctx, generation }: {
             </div>
         )
     })
-}
+})
 
 /** Rollback asks first: tracked changes are gone for good, new files go to the Trash. */
 async function confirmDiscard(files: GitFileChange[]): Promise<boolean> {

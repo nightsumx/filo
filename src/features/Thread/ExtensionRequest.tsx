@@ -13,7 +13,7 @@ import { tr } from '@/lib/i18n'
 
 type Payload = { value?: string, confirmed?: boolean, cancelled?: boolean }
 
-function RequestForm({ request, onRespond }: { request: UiRequest, onRespond: (payload: Payload) => void }) {
+const RequestForm = observer(function RequestForm({ request, onRespond }: { request: UiRequest, onRespond: (payload: Payload) => void }) {
     const [value, setValue] = useState(request.prefill ?? '')
     const cancel = () => onRespond({ cancelled: true })
     const onKeyDown = (e: React.KeyboardEvent) => {
@@ -93,13 +93,13 @@ function RequestForm({ request, onRespond }: { request: UiRequest, onRespond: (p
             </div>
         </form>
     )
-}
+})
 
 /**
  * An approval capability prompt: the call it is about, then allow / always / deny. It sits right
  * under the waiting tool row (pi runs one approval at a time), so the call itself stays in view.
  */
-function ApprovalPrompt({ thread, request }: { thread: Thread, request: UiRequest }) {
+const ApprovalPrompt = observer(function ApprovalPrompt({ thread, request }: { thread: Thread, request: UiRequest }) {
     const cwd = useContext(CwdContext)
     const approval = request.approval!
     const options = request.options ?? []
@@ -150,7 +150,7 @@ function ApprovalPrompt({ thread, request }: { thread: Thread, request: UiReques
             </div>
         </Gutter>
     )
-}
+})
 
 /** The oldest pending extension request of a thread, answered in place. */
 export const ExtensionRequest = observer(({ thread }: { thread: Thread }) => {

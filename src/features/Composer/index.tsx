@@ -47,7 +47,7 @@ const SOURCE_LABEL: Record<SlashCommand['source'], Localized> = {
     skill: { zh: '技能', en: 'skill' },
 }
 
-function SlashMenu({ commands, active, onPick }: { commands: SlashCommand[], active: number, onPick: (c: SlashCommand) => void }) {
+const SlashMenu = observer(function SlashMenu({ commands, active, onPick }: { commands: SlashCommand[], active: number, onPick: (c: SlashCommand) => void }) {
     const listRef = useRef<HTMLDivElement>(null)
     useEffect(() => {
         listRef.current?.querySelector('[data-active="true"]')?.scrollIntoView({ block: 'nearest' })
@@ -74,7 +74,7 @@ function SlashMenu({ commands, active, onPick }: { commands: SlashCommand[], act
             ))}
         </div>
     )
-}
+})
 
 export const Composer = observer(({ thread }: { thread: Thread }) => {
     const textareaRef = useRef<HTMLTextAreaElement>(null)

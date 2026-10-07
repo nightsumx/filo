@@ -247,7 +247,7 @@ function GroupLabel({ children }: { children: React.ReactNode }) {
     return <div className="pb-1 pt-4 text-[12px] font-medium text-[var(--jb-comment)]">{children}</div>
 }
 
-function ProviderRow({ provider: p, endpoint, onLogin, onEdit, onLogout, onRemove, children }: {
+const ProviderRow = observer(function ProviderRow({ provider: p, endpoint, onLogin, onEdit, onLogout, onRemove, children }: {
     provider: ProviderInfo
     endpoint?: Endpoint
     onLogin: (method: AuthMethod) => void
@@ -298,10 +298,10 @@ function ProviderRow({ provider: p, endpoint, onLogin, onEdit, onLogout, onRemov
             {children}
         </div>
     )
-}
+})
 
 /** A sign-in in progress: what pi reports (browser link, device code, progress) and what it asks. */
-function LoginPanel({ login, onClose, onRetry }: { login: LoginView, onClose: () => void, onRetry: () => void }) {
+const LoginPanel = observer(function LoginPanel({ login, onClose, onRetry }: { login: LoginView, onClose: () => void, onRetry: () => void }) {
     const progress = [...login.notices].reverse().find(n => n.type === 'progress')
     const notices = login.notices.filter(n => n.type !== 'progress')
     const waiting = !login.prompt && !login.error
@@ -323,9 +323,9 @@ function LoginPanel({ login, onClose, onRetry }: { login: LoginView, onClose: ()
             </div>
         </div>
     )
-}
+})
 
-function CopyButton({ text, label }: { text: string, label: string }) {
+const CopyButton = observer(function CopyButton({ text, label }: { text: string, label: string }) {
     const [copied, setCopied] = useState(false)
     return (
         <Button
@@ -341,9 +341,9 @@ function CopyButton({ text, label }: { text: string, label: string }) {
             {copied ? tr('已复制', 'Copied') : label}
         </Button>
     )
-}
+})
 
-function NoticeView({ notice }: { notice: LoginNotice }) {
+const NoticeView = observer(function NoticeView({ notice }: { notice: LoginNotice }) {
     const opened = useRef(false)
     // The user just asked to sign in, so the browser opens right away, as in the terminal pi.
     useEffect(() => {
@@ -398,9 +398,9 @@ function NoticeView({ notice }: { notice: LoginNotice }) {
         )
     }
     return null
-}
+})
 
-function PromptView({ login, promptId, prompt }: { login: string, promptId: string, prompt: LoginPrompt }) {
+const PromptView = observer(function PromptView({ login, promptId, prompt }: { login: string, promptId: string, prompt: LoginPrompt }) {
     const [value, setValue] = useState('')
     const [sent, setSent] = useState(false)
     const id = useId()
@@ -457,7 +457,7 @@ function PromptView({ login, promptId, prompt }: { login: string, promptId: stri
             </div>
         </form>
     )
-}
+})
 
 interface ModelDraft {
     id: string
@@ -482,7 +482,7 @@ const draftOf = (m: EndpointModel): ModelDraft => ({
  * A models.json entry. For a built-in provider only its base URL (a proxy or regional address); for
  * a custom one the API, key and models too. pi validates the result before it is kept.
  */
-function EndpointForm({ provider, endpoint, onDone }: { provider?: ProviderInfo, endpoint?: Endpoint, onDone: () => void }) {
+const EndpointForm = observer(function EndpointForm({ provider, endpoint, onDone }: { provider?: ProviderInfo, endpoint?: Endpoint, onDone: () => void }) {
     const isNew = !provider
     const builtIn = !!provider?.builtIn
     const [name, setName] = useState(endpoint?.name ?? (provider && !builtIn ? provider.name : ''))
@@ -693,9 +693,9 @@ function EndpointForm({ provider, endpoint, onDone }: { provider?: ProviderInfo,
             </div>
         </form>
     )
-}
+})
 
-function ModelRow({ model, onChange, onRemove }: { model: ModelDraft, onChange: (m: ModelDraft) => void, onRemove: () => void }) {
+const ModelRow = observer(function ModelRow({ model, onChange, onRemove }: { model: ModelDraft, onChange: (m: ModelDraft) => void, onRemove: () => void }) {
     const imagesId = useId()
     const field = cn(flatFieldClass, 'h-7 min-w-0 bg-[var(--jb-dialog-bg)] px-2')
     return (
@@ -718,4 +718,4 @@ function ModelRow({ model, onChange, onRemove }: { model: ModelDraft, onChange: 
             </Button>
         </div>
     )
-}
+})
