@@ -92,6 +92,13 @@ Approval, plan mode, questions, todos, subagents and review come from `pi-capabi
 
 **Themes `claude-code` and `claude-code-light`** — Claude Code's dark and light palettes. Body text uses the terminal's default foreground and inline code / links use the same 256-color indexes as Claude Code (153 / 12), so both apps render identically in the same terminal. Code blocks use the 16-color ANSI palette and diffs use Monokai, like Claude Code dark. The light theme uses Claude Code's light colors.
 
+## With the Pi desktop app
+
+pi-cc-tui lets the [Pi desktop app](https://github.com/nightsumx/pi-kit) see and join the pi running in your terminal. Nothing changes in the terminal without the app.
+
+- **Presence** — the app lists this pi in its project tree as working, waiting for you, or idle, from a small file at `~/.pi/agent/pi-kit-presence/<pid>.json`.
+- **Bridge** — open the same session in the app and it joins this pi instead of starting a second one on the same file, which would fork the conversation. A run typed here streams into the app as it happens, including thinking; a prompt, stop or model change from the app runs here. Approval prompts, questions and plan sign-off open on both sides, and whichever side answers first closes the other. The app connects over a unix socket, `~/.pi/agent/pi-kit-presence/<pid>.sock`, that only your user can open, and speaks pi's RPC protocol on it. Quitting pi (or `/new`, `/resume`) disconnects the app, which keeps the transcript. While joined, forking and clearing queued messages only work from the terminal.
+
 ## Pairs well with
 
 [pi-cc-extensions](https://github.com/minuque/pi-cc-extensions) draws tool calls and diffs. Its footer, working message and turn summary overlap with this package, so turn them off in `~/.pi/agent/pi-cc-extensions.json`:

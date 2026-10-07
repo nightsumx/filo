@@ -94,6 +94,13 @@ pi install npm:pi-cc-tui
 
 **主题 `claude-code` 和 `claude-code-light`**：Claude Code 的暗色和亮色配色。正文用终端默认前景色，行内代码和链接用和 Claude Code 相同的 256 色号（153 / 12），同一个终端里两边渲染完全一致。代码块用 16 色 ANSI 调色板，diff 用 Monokai，和 Claude Code 暗色一样。亮色主题用 Claude Code 亮色的配色。
 
+## 配合 Pi 桌面版
+
+pi-cc-tui 让 [Pi 桌面版](https://github.com/nightsumx/pi-kit)看得见、也能连上终端里的 pi。不用桌面版的话，终端里什么都不变。
+
+- **状态同步**：桌面版的项目树里会列出这个 pi，显示在跑、等你回答还是空闲，读的是 `~/.pi/agent/pi-kit-presence/<pid>.json` 这个小文件。
+- **直连**：在桌面版打开同一个会话时，它会直接连上这个 pi，不再在同一个文件上另起一个（那样对话会分叉）。终端里打的字实时显示在桌面版，思考过程也有；桌面版发的消息、停止、切模型都在这里执行。审批、提问、计划确认两边都会弹出，哪边先回答，另一边的就关掉。连接走 unix socket `~/.pi/agent/pi-kit-presence/<pid>.sock`，只有你自己的用户能打开，上面跑的是 pi 的 RPC 协议。退出 pi（或 `/new`、`/resume`）后桌面版自动断开，对话内容保留。连接期间，分叉和清空排队消息只能在终端里做。
+
 ## 推荐搭配
 
 工具调用和 diff 由 [pi-cc-extensions](https://github.com/minuque/pi-cc-extensions) 画。它的底栏、进度文字、回合摘要和本插件重叠，在 `~/.pi/agent/pi-cc-extensions.json` 里关掉：
