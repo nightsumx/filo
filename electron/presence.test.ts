@@ -6,7 +6,7 @@ import path from 'node:path'
 import process from 'node:process'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import presenceExtension from '../packages/pi-cc-tui/extensions/cc-presence'
-import { PresenceWatcher, readPresence } from './presence'
+import { PresenceWatcher, readPresence, SWEEP_MS } from './presence'
 
 let dir: string
 beforeEach(async () => {
@@ -30,10 +30,17 @@ describe('readPresence', () => {
         const dead = await deadPid()
         await writeFile(path.join(dir, `${process.pid}.json`), JSON.stringify(entry(process.pid, 'running')))
         await writeFile(path.join(dir, `${dead}.json`), JSON.stringify(entry(dead)))
-        await writeFile(path.join(dir, '12.json'), '{"half')
         await writeFile(path.join(dir, 'notes.txt'), 'not ours')
         expect(await readPresence(dir)).toEqual([entry(process.pid, 'running')])
         expect((await readdir(dir)).sort()).toEqual([`${process.pid}.json`, 'notes.txt'])
+    })
+
+    it('a garbled file is deleted only once its process is gone (a live one may be mid-write)', async () => {
+        const dead = await deadPid()
+        await writeFile(path.join(dir, `${dead}.json`), '{"half')
+        await writeFile(path.join(dir, `${process.pid}.json`), '')
+        expect(await readPresence(dir)).toEqual([])
+        expect(await readdir(dir)).toEqual([`${process.pid}.json`])
     })
 
     it('a missing dir is no sessions', async () => {
@@ -47,8 +54,10 @@ describe('PresenceWatcher', () => {
         const watcher = new PresenceWatcher(dir, list => seen.push(list))
         await watcher.start()
         const file = path.join(dir, `${process.pid}.json`)
+        // fs.watch is the fast path, the sweep the guarantee: in loaded full test runs a rewrite was
+        // sometimes not seen within 3s, so allow up to one sweep.
         const until = async (check: () => boolean) => {
-            const end = Date.now() + 3000
+            const end = Date.now() + SWEEP_MS + 2000
             while (!check() && Date.now() < end)
                 await new Promise(r => setTimeout(r, 20))
             expect(check()).toBe(true)
@@ -64,7 +73,7 @@ describe('PresenceWatcher', () => {
         finally {
             watcher.stop()
         }
-    })
+    }, 3 * (SWEEP_MS + 2000))
 })
 
 describe('cc-presence extension', () => {

@@ -51,18 +51,22 @@ export async function readPresence(dir: string): Promise<Presence[]> {
     for (const name of names) {
         if (!/^\d+\.json$/.test(name))
             continue
+        const pid = Number.parseInt(name)
         const file = path.join(dir, name)
-        const p = parsePresence(await readFile(file, 'utf8').catch(() => ''))
-        if (p && p.pid === Number.parseInt(name) && alive(p.pid))
-            out.push(p)
-        else if (!p || !alive(Number.parseInt(name)))
+        // A garbled file of a live process may be mid-write: skip it this time, never delete it.
+        if (!alive(pid)) {
             await rm(file, { force: true }).catch(() => {})
+            continue
+        }
+        const p = parsePresence(await readFile(file, 'utf8').catch(() => ''))
+        if (p && p.pid === pid)
+            out.push(p)
     }
     return out.sort((a, b) => a.pid - b.pid)
 }
 
 /** Killed processes leave no event behind: re-check pids on this interval. */
-const SWEEP_MS = 5000
+export const SWEEP_MS = 5000
 const DEBOUNCE_MS = 100
 
 /** Watches the presence dir and calls `onChange` with the full list whenever it changes. */
