@@ -73,7 +73,9 @@ pi install npm:pi-cc-tui
 
 **子代理**：`subagent` 工具在单独的 pi 里跑一个任务，显示成 Claude Code 的 Task：运行中列出最近的工具调用，结束后是 `⎿  Done (3 tool uses · 12.4k tokens · 41s)`；ctrl+o 展开它的回复。它的审批请求会弹到你的会话里，并标上它的名字。
 
-审批、Plan 模式、提问、Todo 和子代理来自 `pi-capabilities`，和 Pi 桌面版用的是同一套扩展，打包在本插件里。在桌面版里这些会自动关闭，由桌面版自己加载。
+**审查**：`/review [重点]` 在后台另起一个只读的 pi 审查本会话的改动。它拿到你的消息、diff 和 Agent 的说法（不含推理过程），自己跑命令去核实，问题分为「已复现」（附命令的退出码和输出）和「推测」。`/review-apply [R1 S2 …] [备注]` 把选中的条目交回给 Agent，不写编号就交回全部问题。
+
+审批、Plan 模式、提问、Todo、子代理和审查来自 `pi-capabilities`，和 Pi 桌面版用的是同一套扩展，打包在本插件里。在桌面版里这些会自动关闭，由桌面版自己加载。
 
 **压缩进度**：`/compact` 和自动压缩时显示 `· Compacting conversation… (1m 37s · ↓ 2.1k tokens · esc to cancel)`，下面一行 `▰▰▰▱▱▱ 60%` 进度条。仍然走 pi 默认的摘要逻辑；摘要最终长度事先未知，进度按已流出的 token 估算，逐渐逼近 99%，不是精确完成度。
 
