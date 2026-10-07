@@ -6,3 +6,4 @@ dist-electron
 release
 site/public/install.sh
 .wrangler
+.idea/
