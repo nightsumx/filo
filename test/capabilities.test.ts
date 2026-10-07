@@ -1,7 +1,8 @@
-import type { ApprovalMode, ApprovalRequest, AskDetails, AskResponse, CapabilityId, PlanDetails, SubagentDetails, TodoDetails } from '@shared/capabilities'
+import type { ApprovalMode, ApprovalRequest, AskDetails, AskResponse, CapabilityId, PlanDetails, ReviewDetails, ReviewProgress, SubagentDetails, TodoDetails } from '@shared/capabilities'
 import type { PiEnv } from '@shared/ipc'
 import type { MockLlm, MockReply, MockRequest, PiSession } from './harness'
 import { APPROVAL_TITLE_PREFIX, CAPABILITIES } from '@shared/capabilities'
+import { execFileSync } from 'node:child_process'
 import { afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { findPi, startMockLlm, startPi } from './harness'
 
@@ -389,6 +390,143 @@ describe.runIf(process.env.PI_GUI_SKIP_E2E !== '1')('capability extensions (real
         expect(JSON.stringify(details.messages)).toContain('approved')
         expect(pi.events.filter(approvalPrompt)).toHaveLength(1)
     }, 40_000)
+
+    /**
+     * Parent and reviewer share the mock: requests offering submit_review are the reviewer's. The
+     * parent writes a file once, then answers; the reviewer follows `reviewer` by its own request count.
+     */
+    const reviewed = (reviewer: MockReply[]) => {
+        let reviewerRequests = 0
+        let parentRequests = 0
+        return (r: MockRequest): MockReply => {
+            if (toolNames(r).includes('submit_review'))
+                return reviewer[reviewerRequests++] ?? { text: 'reviewer idle' }
+            if (parentRequests++ === 0)
+                return { toolCalls: [{ name: 'write', arguments: { path: 'greet.txt', content: 'hello\n' } }] }
+            return { text: `Parent reply ${parentRequests}: wrote greet.txt and verified it.` }
+        }
+    }
+    const isReviewer = (r: MockRequest) => toolNames(r).includes('submit_review')
+    const reportAppended = (pi: PiSession, after = 0) => pi.waitFor(e => e.type === 'entry_appended' && e.entry?.customType === 'pi-kit-review' && pi.events.indexOf(e) >= after, 30_000)
+    const gitProject = (cwd: string) => {
+        const git = (...args: string[]) => execFileSync('git', args, { cwd, stdio: 'ignore' })
+        git('init', '-q')
+        git('-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-q', '--allow-empty', '-m', 'init')
+    }
+
+    it('review: a read-only child reviews the thread\'s diff; runtime evidence confirms issues; picked items go back', async ({ skip }) => {
+        if (!env)
+            return skip('pi not installed')
+        const submit = {
+            verdict: 'needs_work',
+            summary: 'Checked greet.txt.',
+            issues: [
+                { title: 'Exit status is wrong', severity: 'high', file: 'greet.txt', line: 1, detail: 'The check fails.', fix: 'Fix it.', repro: 'cat greet.txt;  exit 3' },
+                { title: 'Might break later', severity: 'low', detail: 'A guess.', repro: 'never ran this' },
+            ],
+            suggestions: [{ title: 'Add a test', detail: 'Cover greet.txt.' }],
+        }
+        const { llm, pi } = await setup(['review'], reviewed([
+            // Outlasts one progress interval, so a progress update names it.
+            { toolCalls: [{ name: 'bash', arguments: { command: 'sleep 0.8; cat greet.txt; exit 3' } }] },
+            { toolCalls: [{ name: 'submit_review', arguments: submit }] },
+            // Second round: rechecks R1.
+            { toolCalls: [{ name: 'submit_review', arguments: { verdict: 'pass', summary: 'Fixed.', rechecks: [{ id: 'R1', outcome: 'fixed', note: 'Exit is 0 now.' }, { id: 'R9', outcome: 'fixed', note: 'unknown' }] } }] },
+        ]))
+        gitProject(pi.cwd)
+        await pi.run('create greet.txt')
+
+        const started = pi.events.length
+        const handled = await pi.request({ type: 'prompt', message: '/gui-review look at exit codes' })
+        expect(handled.success).toBe(true)
+        const appended: any = await reportAppended(pi)
+        const report = appended.entry.data as ReviewDetails
+        expect(report).toMatchObject({ kind: 'review', status: 'done', round: 1, verdict: 'needs_work', scope: 'thread', files: ['greet.txt'] })
+        expect(report.issues.map(i => [i.id, i.status])).toEqual([['R1', 'confirmed'], ['R2', 'suspected']])
+        expect(report.issues[0].evidence).toMatchObject({ command: 'sleep 0.8; cat greet.txt; exit 3', exitCode: 3 })
+        expect(report.issues[0].evidence!.output).toContain('hello')
+        expect(report.suggestions).toEqual([{ id: 'S1', title: 'Add a test', detail: 'Cover greet.txt.' }])
+        expect(report.commands).toHaveLength(1)
+        expect(report.run.messages.length).toBeGreaterThan(0)
+
+        // The reviewer was told the facts and nothing else, and could not edit.
+        const first = llm.requests.find(isReviewer)!
+        const told = JSON.stringify(first.messages)
+        expect(told).toContain('create greet.txt')
+        expect(told).toContain('wrote greet.txt and verified it')
+        expect(told).toContain('+hello')
+        expect(told).toContain('look at exit codes')
+        expect(toolNames(first)).toEqual(expect.arrayContaining(['read', 'bash', 'submit_review']))
+        expect(toolNames(first)).not.toContain('write')
+        expect(toolNames(first)).not.toContain('edit')
+        // The parent's context never saw the review.
+        const parentRequests = () => llm.requests.filter(r => !isReviewer(r))
+        expect(parentRequests()).toHaveLength(2)
+
+        // Progress went out as status JSON while it ran, and was cleared after the report.
+        await pi.waitFor(e => e.type === 'extension_ui_request' && e.statusKey === 'gui-review' && e.statusText === undefined && pi.events.indexOf(e) > started)
+        const progress = pi.events.filter(e => e.type === 'extension_ui_request' && e.method === 'setStatus' && e.statusKey === 'gui-review' && pi.events.indexOf(e) >= started)
+        expect(JSON.parse(progress[0].statusText) as ReviewProgress).toMatchObject({ id: report.id, tools: 0 })
+        expect(progress.some(e => e.statusText && JSON.parse(e.statusText).last === 'bash sleep 0.8; cat greet.txt; exit 3')).toBe(true)
+        expect(progress.at(-1)!.statusText).toBeUndefined()
+        expect(pi.events.indexOf(progress.at(-1)!)).toBeGreaterThan(pi.events.indexOf(appended))
+
+        // Apply R1 with a note: the parent gets it as a new turn.
+        const before = pi.events.length
+        await pi.request({ type: 'prompt', message: `/gui-review-apply ${report.id} ${JSON.stringify({ items: ['R1', 'bogus'], note: 'keep it small' })}` })
+        await pi.waitFor(e => e.type === 'agent_settled' && pi.events.indexOf(e) >= before, 20_000)
+        const fed = JSON.stringify(parentRequests().at(-1)!.messages)
+        expect(fed).toContain('R1 [confirmed, high] Exit status is wrong')
+        expect(fed).toContain('exited with 3')
+        expect(fed).toContain('keep it small')
+        expect(fed).not.toContain('Might break later')
+        const sent: any = pi.events.find(e => e.type === 'message_end' && e.message?.customType === 'pi-kit-review-feedback')
+        expect(sent.message.details).toEqual({ reviewId: report.id, items: ['R1'], note: 'keep it small' })
+
+        // Round two hears what was sent back and how the agent answered.
+        const second = pi.events.length
+        await pi.request({ type: 'prompt', message: '/gui-review' })
+        const next = (await reportAppended(pi, second) as any).entry.data as ReviewDetails
+        expect(next).toMatchObject({ status: 'done', round: 2, verdict: 'pass', rechecks: [{ id: 'R1', title: 'Exit status is wrong', outcome: 'fixed', note: 'Exit is 0 now.' }] })
+        const recheckTask = JSON.stringify(llm.requests.filter(isReviewer).at(-1)!.messages)
+        expect(recheckTask).toContain('R1: Exit status is wrong')
+        expect(recheckTask).toContain('Parent reply 3')
+    }, 60_000)
+
+    it('review: falls back to uncommitted changes, nudges once, then reports the failure', async ({ skip }) => {
+        if (!env)
+            return skip('pi not installed')
+        const { llm, pi } = await setup(['review'], (r) => isReviewer(r) ? { text: 'looks fine' } : { text: 'nothing to do' })
+        gitProject(pi.cwd)
+        execFileSync('sh', ['-c', 'printf "draft\n" > notes.md'], { cwd: pi.cwd })
+        await pi.run('hi')
+        await pi.request({ type: 'prompt', message: '/gui-review' })
+        const report = (await reportAppended(pi) as any).entry.data as ReviewDetails
+        expect(report).toMatchObject({ status: 'failed', scope: 'uncommitted', files: ['notes.md'] })
+        expect(report.error).toContain('without submitting')
+        const reviewerRequests = llm.requests.filter(isReviewer)
+        expect(reviewerRequests).toHaveLength(2)
+        expect(JSON.stringify(reviewerRequests[0].messages)).toContain('+draft')
+        expect(JSON.stringify(reviewerRequests[1].messages)).toContain('Call submit_review now')
+    }, 60_000)
+
+    it('review: cancel stops the reviewer without a report; one review at a time', async ({ skip }) => {
+        if (!env)
+            return skip('pi not installed')
+        const { pi } = await setup(['review'], reviewed([{ toolCalls: [{ name: 'bash', arguments: { command: 'sleep 10' } }] }]))
+        await pi.run('create greet.txt')
+        const started = pi.events.length
+        await pi.request({ type: 'prompt', message: '/gui-review' })
+        await pi.waitFor(e => e.type === 'extension_ui_request' && e.statusKey === 'gui-review' && e.statusText && JSON.parse(e.statusText).tools === 1, 20_000)
+        await pi.request({ type: 'prompt', message: '/gui-review' })
+        await pi.waitFor(e => e.type === 'extension_ui_request' && e.method === 'notify' && String(e.message).includes('已经在进行中'))
+        const cancelledAt = Date.now()
+        await pi.request({ type: 'prompt', message: '/gui-review-cancel' })
+        await pi.waitFor(e => e.type === 'extension_ui_request' && e.statusKey === 'gui-review' && e.statusText === undefined && pi.events.indexOf(e) > started)
+        expect(Date.now() - cancelledAt).toBeLessThan(5000)
+        await new Promise(resolve => setTimeout(resolve, 300))
+        expect(pi.events.some(e => e.type === 'entry_appended' && e.entry?.customType === 'pi-kit-review')).toBe(false)
+    }, 60_000)
 
     it('gui- commands are registered as extension commands', async ({ skip }) => {
         if (!env)

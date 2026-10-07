@@ -1,13 +1,14 @@
 // Capabilities are pi extensions from the pi-capabilities workspace package, loaded per project with
 // `-e`. This file is the app's catalog of them (labels, presets); the wire protocol they speak lives
 // in the package and is re-exported here.
-import type { SubagentDetails as SubagentDetailsOf } from 'pi-capabilities/protocol'
+import type { ReviewDetails as ReviewDetailsOf, SubagentDetails as SubagentDetailsOf } from 'pi-capabilities/protocol'
 import type { Localized } from './i18n'
 import type { AgentMessage, AssistantMessage } from './pi'
 import type { CapabilityId } from 'pi-capabilities/protocol'
 
 export * from 'pi-capabilities/protocol'
 export type SubagentDetails = SubagentDetailsOf<AgentMessage, AssistantMessage>
+export type ReviewDetails = ReviewDetailsOf<AgentMessage, AssistantMessage>
 
 export interface Capability {
     id: CapabilityId
@@ -62,6 +63,14 @@ export const CAPABILITIES: readonly Capability[] = [
         tools: ['subagent'],
         contextTokens: 300,
     },
+    {
+        id: 'review',
+        label: { zh: '审查', en: 'Review' },
+        description: { zh: '每轮结束后可点 Review，让一个独立的 pi 进程只读审查改动、跑命令取证，你挑选结果交回给 Agent。', en: 'Click Review after a turn: a separate pi process audits the changes read-only, runs commands for evidence, and you pick what goes back to the agent.' },
+        entry: 'review.ts',
+        tools: [],
+        contextTokens: 0,
+    },
 ]
 
 export interface CapabilityPreset {
@@ -73,8 +82,8 @@ export interface CapabilityPreset {
 
 export const PRESETS: readonly CapabilityPreset[] = [
     { id: 'lean', label: { zh: '精简', en: 'Lean' }, hint: { zh: '只用 pi 本身的能力，上下文最小。', en: 'Only what pi has built in; the smallest context.' }, capabilities: [] },
-    { id: 'standard', label: { zh: '标准', en: 'Standard' }, hint: { zh: '适合日常开发。', en: 'For everyday development.' }, capabilities: ['todo', 'ask', 'approval', 'plan'] },
-    { id: 'full', label: { zh: '完整', en: 'Full' }, hint: { zh: '再加上子 Agent，适合大任务。', en: 'Adds subagents, for large tasks.' }, capabilities: ['todo', 'ask', 'approval', 'plan', 'subagent'] },
+    { id: 'standard', label: { zh: '标准', en: 'Standard' }, hint: { zh: '适合日常开发。', en: 'For everyday development.' }, capabilities: ['todo', 'ask', 'approval', 'plan', 'review'] },
+    { id: 'full', label: { zh: '完整', en: 'Full' }, hint: { zh: '再加上子 Agent，适合大任务。', en: 'Adds subagents, for large tasks.' }, capabilities: ['todo', 'ask', 'approval', 'plan', 'subagent', 'review'] },
 ]
 
 export const DEFAULT_CAPABILITIES: readonly CapabilityId[] = PRESETS.find(p => p.id === 'standard')!.capabilities

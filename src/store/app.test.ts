@@ -101,7 +101,7 @@ describe('capabilities', () => {
             ;(appStore as any).restoreState(state)
             return appStore.enabledCapabilities
         }
-        expect(restore({})).toEqual(['todo', 'ask', 'approval', 'plan'])
+        expect(restore({})).toEqual(['todo', 'ask', 'approval', 'plan', 'review'])
         expect(restore({ capabilities: ['plan', 'todo'] })).toEqual(['todo', 'plan'])
         const old = { capabilities: { '/a': ['todo'], '/b': ['todo', 'ask', 'subagent'] } }
         expect(restore({ ...old, activeProject: '/a' })).toEqual(['todo'])

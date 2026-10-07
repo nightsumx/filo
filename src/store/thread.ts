@@ -1,4 +1,4 @@
-import type { ApprovalChoice, ApprovalMode, ApprovalRequest, AskResponse, CapabilityId, GuiCommands, PlanDecision, TodoDetails } from '@shared/capabilities'
+import type { ApprovalChoice, ApprovalMode, ApprovalRequest, AskResponse, CapabilityId, GuiCommands, PlanDecision, ReviewApply, ReviewProgress, TodoDetails } from '@shared/capabilities'
 import type { AgentExitInfo } from '@shared/ipc'
 import type {
     AgentMessage,
@@ -20,7 +20,7 @@ import { threadActivity } from '@/lib/threadActivity'
 import { blockTimeKey, buildTurns, contentText } from '@/lib/timeline'
 import type { WaitingKind } from '@/lib/threadActivity'
 import { tuiTitle } from '@/lib/toolMeta'
-import { APPROVAL_MODES, APPROVAL_TITLE_PREFIX, GUI_COMMAND_PREFIX, GUI_STATUS } from '@shared/capabilities'
+import { APPROVAL_MODES, APPROVAL_TITLE_PREFIX, GUI_COMMAND_PREFIX, GUI_STATUS, REVIEW_TYPES } from '@shared/capabilities'
 import { readableError } from '@/lib/utils'
 import { makeAutoObservable, observable, runInAction, toJS } from 'mobx'
 import { toast } from 'sonner'
@@ -271,6 +271,37 @@ export class Thread {
 
     get planMode(): boolean {
         return this.statuses[GUI_STATUS.plan] === 'on'
+    }
+
+    /** The review capability is loaded in this thread's pi. */
+    get reviewAvailable(): boolean {
+        return this.guiCommands.includes('gui-review' satisfies GuiCommands['review'])
+    }
+
+    /** The running review, from its status; null when none runs. */
+    get reviewProgress(): ReviewProgress | null {
+        const raw = this.statuses[GUI_STATUS.review]
+        if (!raw)
+            return null
+        try {
+            return JSON.parse(raw) as ReviewProgress
+        }
+        catch {
+            return null
+        }
+    }
+
+    /** The turn whose footer holds Review: the latest finished turn that did work. */
+    get reviewTurnKey(): string | undefined {
+        const turns = this.turns
+        for (let i = turns.length - 1; i >= 0; i--) {
+            const turn = turns[i]
+            if (turn.running)
+                continue
+            if (turn.steps.some(s => s.kind === 'tool' || s.kind === 'text' || s.kind === 'thinking'))
+                return turn.key
+        }
+        return undefined
     }
 
     get mode(): ThreadMode | undefined {
@@ -722,6 +753,37 @@ export class Thread {
         }
     }
 
+    /** Starts a review in pi's background; progress comes back as the gui-review status. */
+    async startReview(focus = '') {
+        try {
+            await this.guiCommand('gui-review', focus)
+        }
+        catch (error: any) {
+            toast.error(error.message)
+        }
+    }
+
+    async cancelReview() {
+        try {
+            await this.guiCommand('gui-review-cancel', '')
+        }
+        catch (error: any) {
+            toast.error(error.message)
+        }
+    }
+
+    /** Sends picked items to the agent: a new turn when idle, a follow-up mid-run. */
+    async applyReview(reviewId: string, apply: ReviewApply): Promise<boolean> {
+        try {
+            await this.guiCommand('gui-review-apply', `${reviewId} ${JSON.stringify(apply)}`)
+            return true
+        }
+        catch (error: any) {
+            toast.error(error.message)
+            return false
+        }
+    }
+
     async cancelSubagent(toolCallId: string) {
         try {
             await this.guiCommand('gui-subagent-cancel', toolCallId)
@@ -813,6 +875,14 @@ export class Thread {
                 break
             case 'extension_ui_request':
                 this.handleUiRequest(event)
+                break
+            // A review report: appended while the agent may be idle, when no settle reloads the session.
+            case 'entry_appended':
+                if (event.entry?.customType === REVIEW_TYPES.report && event.entry.data?.kind === 'review') {
+                    this.pushLive({ role: 'custom', customType: REVIEW_TYPES.report, content: '', display: true, details: event.entry.data, timestamp: Date.now() })
+                    if (!this.running && !this.settling)
+                        void this.load()
+                }
                 break
             case 'extension_error':
                 toast.error(`${tr('扩展出错：', 'Extension error: ')}${event.error}`, { description: event.extensionPath })

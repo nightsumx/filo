@@ -6,12 +6,14 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { USER_BUBBLE_MAX_HEIGHT } from '@/lib/rowEstimate'
 import { useT, verbFor } from '@/lib/transcriptText'
 import { cn, formatCost, formatCount } from '@/lib/utils'
+import { tr } from '@/lib/i18n'
 import copyText from 'copy-to-clipboard'
 import { appStore } from '@/store/app'
 import { Check, ChevronRight, Copy, GitFork, PencilLine } from 'lucide-react'
 import { observer } from 'mobx-react-lite'
 import { turnStats } from '@/lib/turnSummary'
 import { createContext, Fragment, memo, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { ReviewControl } from './capabilities/ReviewStep'
 import { ExtensionRequest } from './ExtensionRequest'
 import { StepView } from './StepView'
 import { Gutter, ToolGroup } from './ToolRow'
@@ -38,8 +40,35 @@ function CopyAction({ text }: { text: string }) {
 /** Saved prompts (keyed by their session entry id) can be forked; live and pending ones not yet. */
 const forkable = (entryId: string | undefined) => !!entryId && !entryId.startsWith('live-') && entryId !== 'pending'
 
+/** Review feedback the user sent back: the picked items and the note, no fork or edit. */
+function ReviewFeedbackBubble({ user, review }: { user: UserPrompt, review: NonNullable<UserPrompt['review']> }) {
+    const t = useT()
+    const n = review.items.length
+    const head = n ? tr(`交回 ${n} 条审查意见`, `Sent back ${n} review item${n === 1 ? '' : 's'}`) : tr('交回审查补充说明', 'Sent a review note')
+    return (
+        <div className="flex flex-col items-end pl-[15%]" title={user.timestamp ? t.dateTime(user.timestamp) : undefined}>
+            <div className="min-w-0 max-w-full rounded-xl bg-ide-prompt px-3 py-1.5 text-[12.5px] leading-5 text-gray-900">
+                <div className="text-gray-500">{review.round && review.round > 1 ? `${head} · Review ${review.round}` : head}</div>
+                {review.items.map(item => (
+                    <div key={item.id} className="flex min-w-0 gap-1.5">
+                        <span className="shrink-0 font-mono text-gray-500">{item.id}</span>
+                        <span className="min-w-0 truncate">{item.title}</span>
+                    </div>
+                ))}
+                {user.text && <div className="mt-0.5 whitespace-pre-wrap break-words select-text">{user.text}</div>}
+            </div>
+        </div>
+    )
+}
+
 // User prompt: a right-aligned chat bubble; copy, fork and edit sit to its left on hover.
 const UserBubble = observer(({ user, thread, entryId }: { user: UserPrompt, thread?: Thread, entryId?: string }) => {
+    if (user.review)
+        return <ReviewFeedbackBubble user={user} review={user.review} />
+    return <PromptBubble user={user} thread={thread} entryId={entryId} />
+})
+
+const PromptBubble = observer(({ user, thread, entryId }: { user: UserPrompt, thread?: Thread, entryId?: string }) => {
     const t = useT()
     const bubbleRef = useRef<HTMLDivElement>(null)
     const [overflowing, setOverflowing] = useState(false)
@@ -348,6 +377,7 @@ export const TranscriptRowView = memo(({ row, thread, top }: { row: TranscriptRo
                                     </TooltipContent>
                                 </Tooltip>
                             </TooltipProvider>
+                            <ReviewControl thread={thread} turnKey={turn.key} />
                             {row.finalText && (
                                 <span className="flex h-6 items-center opacity-0 transition-opacity group-hover/turn:opacity-100">
                                     <CopyAction text={row.finalText} />

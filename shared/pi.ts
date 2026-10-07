@@ -48,7 +48,8 @@ export interface BashExecutionMessage {
     truncated: boolean
     timestamp: number
 }
-export interface CustomMessage { role: 'custom', customType: string, content: string | (TextContent | ImageContent)[], display: boolean, timestamp: number }
+/** Extension message; `details` is the extension's own data (review reports and feedback carry theirs). */
+export interface CustomMessage { role: 'custom', customType: string, content: string | (TextContent | ImageContent)[], display: boolean, details?: unknown, timestamp: number }
 export interface BranchSummaryMessage { role: 'branchSummary', summary: string, timestamp: number }
 export interface CompactionSummaryMessage { role: 'compactionSummary', summary: string, tokensBefore: number, timestamp: number }
 

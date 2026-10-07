@@ -76,6 +76,21 @@ describe('parseSession', () => {
         expect(roles).toEqual(['user', 'compactionSummary', 'custom'])
     })
 
+    it('shows review reports (entries outside the context) and keeps custom message details', () => {
+        const report = { kind: 'review', id: 'rv-1', round: 1, status: 'done', summary: 's', issues: [], suggestions: [], rechecks: [] }
+        const text = lines(
+            header,
+            user('u1', null, 'q'),
+            { type: 'custom', id: 'r', parentId: 'u1', timestamp: header.timestamp, customType: 'pi-kit-review', data: report },
+            { type: 'custom', id: 'other', parentId: 'r', timestamp: header.timestamp, customType: 'pi-kit-review', data: { kind: 'nope' } },
+            { type: 'custom_message', id: 'f', parentId: 'other', timestamp: header.timestamp, customType: 'pi-kit-review-feedback', content: 'fix R1', display: true, details: { reviewId: 'rv-1', items: ['R1'] } },
+        )
+        const items = parseSession(text, '/s/a.jsonl').items
+        expect(items.map(i => i.entryId)).toEqual(['u1', 'r', 'f'])
+        expect(items[1].message).toMatchObject({ role: 'custom', customType: 'pi-kit-review', display: true, details: report })
+        expect(items[2].message).toMatchObject({ role: 'custom', details: { reviewId: 'rv-1', items: ['R1'] } })
+    })
+
     it('stops on a parent cycle instead of looping', () => {
         const text = lines(header, { ...user('a', 'b', 'x') }, { ...user('b', 'a', 'y') })
         expect(parseSession(text, '/s/a.jsonl').items.length).toBe(2)

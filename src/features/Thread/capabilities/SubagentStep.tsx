@@ -29,7 +29,7 @@ function useChildTurns(details: SubagentDetails, running: boolean) {
     }, [details, running])
 }
 
-function Transcript({ details, running }: { details: SubagentDetails, running: boolean }) {
+export function Transcript({ details, running }: { details: SubagentDetails, running: boolean }) {
     const turns = useChildTurns(details, running)
     const scrollRef = useRef<HTMLDivElement>(null)
     const stick = useRef(true)

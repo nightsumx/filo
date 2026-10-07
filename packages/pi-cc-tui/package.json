@@ -37,7 +37,8 @@
       "./extensions/capabilities/ask.ts",
       "./extensions/capabilities/approval.ts",
       "./extensions/capabilities/plan.ts",
-      "./extensions/capabilities/subagent.ts"
+      "./extensions/capabilities/subagent.ts",
+      "./extensions/capabilities/review.ts"
     ],
     "themes": [
       "./themes/claude-code.json",

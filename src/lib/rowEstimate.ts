@@ -125,6 +125,15 @@ function subagentHeight(step: ToolStep, width: number): number {
     return ROW_LINE + 6 + ROW_LINE + Math.min(SUBAGENT_TRANSCRIPT, transcript) + (details ? SUBAGENT_CONTROLS + steering : 0)
 }
 
+/** Header, summary, scope line, one row per recheck and item, the send form and the process toggle. Items start closed. */
+function reviewHeight(step: Extract<Step, { kind: 'review' }>, width: number): number {
+    const r = step.report
+    if (r.status !== 'done')
+        return ROW_LINE + (r.error ? LINE : 0) + ROW_LINE
+    const items = r.issues.length + r.suggestions.length
+    return ROW_LINE + 2 + markdownHeight(r.summary, width - 22).height + 18 + 6 + (r.rechecks.length + items) * ROW_LINE + (items ? 6 + 28 : 0) + 2 + ROW_LINE
+}
+
 /** A pending ask is a form (question, choices, buttons); an answered one lists question → answer. */
 function askHeight(step: ToolStep): number {
     const details = step.result?.details
@@ -146,6 +155,11 @@ function estimate(row: TranscriptRow, listWidth: number): number {
         case 'user': {
             // Bubble: 15% left inset, px-3 padding, leading-relaxed lines.
             const bubble = Math.min(listWidth || 900, MAX_WIDTH) * 0.85 - SIDE_PADDING - 24
+            // Review feedback: a heading, one line per item, then the note.
+            if (row.user.review) {
+                const note = row.user.text ? row.user.text.split('\n').reduce((n, l) => n + Math.max(1, Math.ceil(textWidth(l) / bubble)), 0) : 0
+                return (row.first ? 24 : 12) + 12 + (1 + row.user.review.items.length + note) * 20
+            }
             const lines = row.user.text.split('\n').reduce((n, l) => n + Math.max(1, Math.ceil(textWidth(l) / bubble)), 0)
             return (row.first ? 24 : 12) + Math.min(USER_BUBBLE_MAX_HEIGHT, 12 + lines * 22) + (row.user.images.length ? 86 : 0)
         }
@@ -187,6 +201,8 @@ function estimate(row: TranscriptRow, listWidth: number): number {
                     if (step.call.name === 'edit' && !step.result?.isError)
                         return pad + ROW_LINE + RESULT_LINE + 16 + Math.min(DIFF_ROWS, editLines(step.call.arguments) + 6) * DIFF_ROW
                     return pad + ROW_LINE + RESULT_LINE
+                case 'review':
+                    return pad + reviewHeight(step, width)
                 case 'bash':
                     return pad + ROW_LINE + (step.message.output ? 16 + Math.min(10, step.message.output.split('\n').length) * 18 : 0)
                 default:

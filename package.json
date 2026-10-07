@@ -19,6 +19,7 @@
         "density": "bun --tsconfig-override=tsconfig.node.json test/density.ts",
         "e2e:windows": "bun --tsconfig-override=tsconfig.node.json test/windows.ts",
         "e2e:features": "bun --tsconfig-override=tsconfig.node.json test/features.ts",
+        "e2e:review": "bun --tsconfig-override=tsconfig.node.json test/review-e2e.ts",
         "preview": "vite preview",
         "dist": "bun run build && electron-builder --publish never",
         "dist:dir": "bun run build && electron-builder --dir --publish never"

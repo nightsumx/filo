@@ -116,4 +116,38 @@ describe('readableError', () => {
         expect(readableError('Unexpected {token}')).toBe('Unexpected {token}')
         expect(readableError('{"foo":1}')).toBe('{"foo":1}')
     })
+
+    describe('reviews', () => {
+        const report = (id: string, extra: object = {}) => ({
+            kind: 'review', id, round: 1, status: 'done', verdict: 'needs_work', summary: 'found one',
+            issues: [{ id: 'R1', title: 'Off by one', severity: 'high', detail: 'd', status: 'confirmed' }],
+            suggestions: [{ id: 'S1', title: 'Add a test', detail: 'd' }],
+            rechecks: [], files: [], scope: 'thread', commands: [], run: {}, startedAt: 0, endedAt: 1, ...extra,
+        })
+        const reportMsg = (id: string, timestamp = 3000): AgentMessage => ({ role: 'custom', customType: 'pi-kit-review', content: '', display: true, details: report(id), timestamp })
+        const feedback = (items: string[], note?: string): AgentMessage => ({ role: 'custom', customType: 'pi-kit-review-feedback', content: 'text for the model', display: true, details: { reviewId: 'rv-1', items, ...(note ? { note } : {}) }, timestamp: 4000 })
+        const reply = (text: string, timestamp = 2000): AgentMessage => ({ role: 'assistant', content: [{ type: 'text', text }], stopReason: 'stop', timestamp })
+
+        it('a report stands as its own turn after the reviewed one, with what was sent back', () => {
+            const turns = buildTurns([m(user('fix it')), m(reply('done')), m(reportMsg('rv-1')), m(feedback(['R1'], 'keep it small')), m(reply('fixed', 5000))])
+            expect(turns.map(t => t.steps.map(s => s.kind))).toEqual([['text'], ['review'], ['text']])
+            expect(turns[1].user).toBeUndefined()
+            expect(turns[1].steps[0]).toMatchObject({ kind: 'review', applied: ['R1'] })
+            expect(turns[2].user).toMatchObject({ text: 'keep it small', review: { reviewId: 'rv-1', round: 1, items: [{ id: 'R1', title: 'Off by one' }] } })
+        })
+
+        it('a report landing mid-run waits for the run to end instead of splitting it', () => {
+            const tool = call('c1', 'bash', { command: 'x' })
+            const messages = [
+                m(user('go')),
+                m({ role: 'assistant', content: [tool], stopReason: 'toolUse', timestamp: 2000 }),
+                m(reportMsg('rv-1', 2500)),
+                m({ role: 'toolResult', toolCallId: 'c1', toolName: 'bash', content: [], isError: false, timestamp: 2600 }),
+                m(reply('done', 2700)),
+            ]
+            expect(buildTurns([...messages, m(user('next', 5000))]).map(t => t.steps.map(s => s.kind))).toEqual([['tool', 'text'], ['review'], []])
+            // Still running: it shows in the run's turn for now.
+            expect(buildTurns(messages, { running: true }).map(t => t.steps.map(s => s.kind))).toEqual([['tool', 'text', 'review']])
+        })
+    })
 })

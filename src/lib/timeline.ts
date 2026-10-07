@@ -7,7 +7,8 @@ import type {
     ToolCall,
     ToolResultMessage,
 } from '@shared/pi'
-import { CAPABILITY_TOOLS } from '@shared/capabilities'
+import type { ReviewDetails, ReviewFeedbackDetails } from '@shared/capabilities'
+import { CAPABILITY_TOOLS, REVIEW_TYPES } from '@shared/capabilities'
 import { readableError } from './utils'
 
 /** One message in display order. Snapshot items carry their session entry id. */
@@ -58,12 +59,16 @@ export type Step =
     | { kind: 'note', key: string, variant: 'compaction' | 'branch' | 'custom', title: string, text: string }
     /** text is empty when pi gave no message; the view then says "Aborted" / "Request failed". */
     | { kind: 'error', key: string, text: string, aborted: boolean }
+    /** A review report; `applied` lists its item ids already sent back to the agent. */
+    | { kind: 'review', key: string, report: ReviewDetails, applied: string[] }
 
 export interface UserPrompt {
     text: string
     images: ImageContent[]
     timestamp: number
     pending: boolean
+    /** Set when this prompt is review feedback: the items sent back; `text` is the user's note. */
+    review?: { reviewId: string, round?: number, items: { id: string, title: string }[] }
 }
 
 /** Token usage and cost summed over a turn's model requests. */
@@ -174,12 +179,42 @@ export function buildTurns(messages: TimelineMessage[], options: BuildOptions = 
         ? [...messages, { key: 'streaming', message: options.streaming }]
         : messages
 
+    // Reviews: reports by id, and what feedback already sent back from each.
+    const reports = new Map<string, ReviewDetails>()
+    const applied = new Map<string, Set<string>>()
+    for (const { message } of messages) {
+        if (message.role !== 'custom')
+            continue
+        if (message.customType === REVIEW_TYPES.report && (message.details as ReviewDetails | undefined)?.kind === 'review')
+            reports.set((message.details as ReviewDetails).id, message.details as ReviewDetails)
+        const feedback = message.customType === REVIEW_TYPES.feedback ? message.details as ReviewFeedbackDetails | undefined : undefined
+        if (feedback?.reviewId) {
+            const set = applied.get(feedback.reviewId) ?? new Set()
+            feedback.items.forEach(id => set.add(id))
+            applied.set(feedback.reviewId, set)
+        }
+    }
+
     const turns: Turn[] = []
     let current: Turn | undefined
-    const open = (key: string, user?: UserPrompt, timestamp = 0) => {
+    const start = (key: string, user?: UserPrompt, timestamp = 0) => {
         current = { key, user, steps: [], startedAt: timestamp, endedAt: timestamp, running: false, usage: emptyUsage() }
         turns.push(current)
         return current
+    }
+    // A report can land mid-run; it waits for the run's turn to end and then stands on its own, so
+    // it never splits the run.
+    let reviews: { step: Step, timestamp: number }[] = []
+    const flushReviews = () => {
+        for (const { step, timestamp } of reviews) {
+            start(step.key, undefined, timestamp).steps.push(step)
+            current = undefined
+        }
+        reviews = []
+    }
+    const open = (key: string, user?: UserPrompt, timestamp = 0) => {
+        flushReviews()
+        return start(key, user, timestamp)
     }
     const ensure = (key: string, timestamp: number) => current ?? open(key, undefined, timestamp)
     const touch = (turn: Turn, timestamp: number) => {
@@ -261,14 +296,37 @@ export function buildTurns(messages: TimelineMessage[], options: BuildOptions = 
                 break
             }
             case 'custom': {
-                if (message.display)
+                const details = message.details as any
+                if (message.customType === REVIEW_TYPES.report && details?.kind === 'review') {
+                    reviews.push({ step: { kind: 'review', key, report: details, applied: [...(applied.get(details.id) ?? [])] }, timestamp: message.timestamp })
+                }
+                else if (message.customType === REVIEW_TYPES.feedback && details?.reviewId) {
+                    const feedback = details as ReviewFeedbackDetails
+                    const report = reports.get(feedback.reviewId)
+                    const title = (id: string) => report?.issues.find(i => i.id === id)?.title ?? report?.suggestions.find(s => s.id === id)?.title ?? ''
+                    open(key, {
+                        text: feedback.note ?? '',
+                        images: [],
+                        timestamp: message.timestamp,
+                        pending: false,
+                        review: { reviewId: feedback.reviewId, round: report?.round, items: feedback.items.map(id => ({ id, title: title(id) })) },
+                    }, message.timestamp)
+                }
+                else if (message.display) {
                     ensure(key, message.timestamp).steps.push({ kind: 'note', key, variant: 'custom', title: message.customType, text: contentText(message.content) })
+                }
                 break
             }
             default:
                 break
         }
     }
+    // Still running: the report shows in the run's turn until it ends.
+    if (reviews.length && options.running && current) {
+        current.steps.push(...reviews.map(r => r.step))
+        reviews = []
+    }
+    flushReviews()
 
     if (options.pendingPrompt) {
         const { text, images, timestamp } = options.pendingPrompt

@@ -71,7 +71,9 @@ The prompt is Claude Code's rounded box: ↑/↓ and enter, or press 1–3 direc
 
 **Subagents** — a `subagent` tool that runs a task in a separate pi, drawn like Claude Code's Task: the latest tool calls while it works, then `⎿  Done (3 tool uses · 12.4k tokens · 41s)`; ctrl+o shows its reply. Its approval prompts come up in your session, tagged with its name.
 
-Approval, plan mode, questions, todos and subagents come from `pi-capabilities`, the same extensions the Pi desktop app uses, bundled in this package. Inside the desktop app they stay off here, since it loads its own.
+**Review** — `/review [focus]` has a separate read-only pi audit this session's changes in the background: it gets your messages, the diff and the agent's claims (not its reasoning), runs commands to check them, and reports issues as reproduced (with the command's exit code and output) or suspected. `/review-apply [R1 S2 …] [note]` sends the picked items, every issue by default, back to the agent.
+
+Approval, plan mode, questions, todos, subagents and review come from `pi-capabilities`, the same extensions the Pi desktop app uses, bundled in this package. Inside the desktop app they stay off here, since it loads its own.
 
 **Compaction** — `· Compacting conversation… (1m 37s · ↓ 2.1k tokens · esc to cancel)` with a `▰▰▰▱▱▱ 60%` bar underneath, for both `/compact` and auto-compaction. pi's default summarizer still runs; the bar is an estimate from streamed summary tokens (the final length isn't known up front), so it eases toward 99% instead of tracking exact completion.
 

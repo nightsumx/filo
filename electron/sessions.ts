@@ -1,5 +1,6 @@
 import type { SessionItem, SessionSnapshot, SessionSummary } from '@shared/ipc'
 import type { AgentMessage } from '@shared/pi'
+import { REVIEW_TYPES } from '@shared/capabilities'
 import { open, readdir, readFile, stat } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
@@ -121,7 +122,12 @@ function toMessage(entry: any): AgentMessage | null {
             return { role: 'branchSummary', summary: entry.summary ?? '', timestamp }
         case 'custom_message':
             return entry.display
-                ? { role: 'custom', customType: entry.customType, content: entry.content, display: true, timestamp }
+                ? { role: 'custom', customType: entry.customType, content: entry.content, display: true, details: entry.details, timestamp }
+                : null
+        // Review reports are entries outside the model's context; the transcript shows them as cards.
+        case 'custom':
+            return entry.customType === REVIEW_TYPES.report && entry.data?.kind === 'review'
+                ? { role: 'custom', customType: entry.customType, content: '', display: true, details: entry.data, timestamp }
                 : null
         default:
             return null

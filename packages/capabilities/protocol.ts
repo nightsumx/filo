@@ -5,7 +5,7 @@
 // to other extensions in the same pi as GUI_EVENTS on `pi.events`.
 // Extensions import these with `import type` only; the event names and env vars are repeated there.
 
-export type CapabilityId = 'todo' | 'ask' | 'approval' | 'plan' | 'subagent'
+export type CapabilityId = 'todo' | 'ask' | 'approval' | 'plan' | 'subagent' | 'review'
 
 /** Hidden commands are filtered out of the slash menu. */
 export const GUI_COMMAND_PREFIX = 'gui-'
@@ -23,6 +23,12 @@ export interface GuiCommands {
     subagentSteer: 'gui-subagent-steer'
     /** `/gui-subagent-cancel <toolCallId>` */
     subagentCancel: 'gui-subagent-cancel'
+    /** `/gui-review [focus]`: starts a review in the background; one at a time per session. */
+    review: 'gui-review'
+    /** `/gui-review-apply <reviewId> <ReviewApply JSON>`: sends picked items to the agent. */
+    reviewApply: 'gui-review-apply'
+    /** `/gui-review-cancel` */
+    reviewCancel: 'gui-review-cancel'
 }
 
 /**
@@ -77,6 +83,8 @@ export const GUI_STATUS = {
     approval: 'gui-approval',
     /** `on` while plan mode is on; cleared otherwise. */
     plan: 'gui-plan',
+    /** ReviewProgress JSON while a review runs; cleared when its report is appended. */
+    review: 'gui-review',
 } as const
 
 // ---------------------------------------------------------------- todo
@@ -203,4 +211,98 @@ export interface SubagentDetails<Message = unknown, Streaming = unknown> {
     startedAt: number
     endedAt?: number
     error?: string
+}
+
+// ---------------------------------------------------------------- review
+
+/** Session entry types: the report (`pi.appendEntry`, outside the model's context) and the feedback message. */
+export const REVIEW_TYPES = {
+    report: 'pi-kit-review',
+    feedback: 'pi-kit-review-feedback',
+} as const
+
+export type ReviewSeverity = 'high' | 'medium' | 'low'
+
+/** A command the reviewer ran, as its bash tool returned it. */
+export interface ReviewEvidence {
+    command: string
+    /** Undefined when the command did not finish (timeout, abort). */
+    exitCode?: number
+    /** Tail of the output. */
+    output: string
+}
+
+export interface ReviewIssue {
+    /** `R1`, `R2`… within one report. */
+    id: string
+    title: string
+    file?: string
+    line?: number
+    severity: ReviewSeverity
+    detail: string
+    fix?: string
+    /** confirmed: the reviewer ran `evidence.command`; suspected: read from the code only. */
+    status: 'confirmed' | 'suspected'
+    evidence?: ReviewEvidence
+}
+
+export interface ReviewSuggestion {
+    /** `S1`, `S2`… */
+    id: string
+    title: string
+    detail: string
+}
+
+/** The reviewer's check of an item an earlier report sent back to the agent. */
+export interface ReviewRecheck {
+    /** Item id in the earlier report. */
+    id: string
+    title: string
+    outcome: 'fixed' | 'not_fixed' | 'rebuttal_accepted' | 'rebuttal_rejected'
+    note: string
+}
+
+export interface ReviewDetails<Message = unknown, Streaming = unknown> {
+    kind: 'review'
+    id: string
+    /** 1 for the first review in the thread, counting earlier reports on the branch. */
+    round: number
+    status: 'done' | 'failed' | 'cancelled'
+    verdict?: 'pass' | 'needs_work'
+    summary: string
+    issues: ReviewIssue[]
+    suggestions: ReviewSuggestion[]
+    rechecks: ReviewRecheck[]
+    /** Files reviewed, relative to the project. */
+    files: string[]
+    /** thread: files this thread's edit/write calls touched; uncommitted: none were, so every uncommitted change. */
+    scope: 'thread' | 'uncommitted'
+    /** Every command the reviewer ran. */
+    commands: ReviewEvidence[]
+    /** The reviewer's own run, for the "how it reviewed" view. */
+    run: SubagentDetails<Message, Streaming>
+    startedAt: number
+    endedAt: number
+    error?: string
+}
+
+/** GUI_STATUS.review while a review runs. */
+export interface ReviewProgress {
+    id: string
+    startedAt: number
+    /** Tool calls so far. */
+    tools: number
+    /** The latest one, e.g. `bash npm test`. */
+    last?: string
+}
+
+/** `/gui-review-apply` payload: report item ids (issues and suggestions) and an optional note. */
+export interface ReviewApply {
+    items: string[]
+    note?: string
+}
+
+/** Details of the feedback message sent to the agent. */
+export interface ReviewFeedbackDetails extends ReviewApply {
+    reviewId: string
 }
