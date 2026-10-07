@@ -22,10 +22,15 @@ export interface MockRequest {
     toolResults: string[]
 }
 
-/** thinking streams as reasoning_content before the reply, like llama.cpp / DeepSeek endpoints. */
-export type MockReply =
+/**
+ * thinking streams as reasoning_content before the reply, like llama.cpp / DeepSeek endpoints.
+ * `delayMs` holds the rest of the reply back (after thinking, if any), and `usage` sets the token
+ * counts; both only matter where timings and stats are shown (site screenshots).
+ */
+export type MockReply = { delayMs?: number, usage?: { input: number, output: number } } & (
     | { text: string, thinking?: string }
     | { toolCalls: { name: string, arguments: Record<string, unknown> }[], thinking?: string, text?: string }
+)
 
 export interface MockLlm {
     baseUrl: string
@@ -66,26 +71,33 @@ export async function startMockLlm(reply: (request: MockRequest, index: number) 
             res.writeHead(200, { 'content-type': 'text/event-stream' })
             if (answer.thinking)
                 chunk({ role: 'assistant', reasoning_content: answer.thinking })
-            if ('toolCalls' in answer) {
-                if (answer.text)
+            const finish = () => {
+                if ('toolCalls' in answer) {
+                    if (answer.text)
+                        chunk({ role: 'assistant', content: answer.text })
+                    chunk({
+                        role: 'assistant',
+                        tool_calls: answer.toolCalls.map((c, index) => ({
+                            index,
+                            id: `call_${++callId}`,
+                            type: 'function',
+                            function: { name: c.name, arguments: JSON.stringify(c.arguments) },
+                        })),
+                    })
+                    chunk({}, 'tool_calls')
+                }
+                else {
                     chunk({ role: 'assistant', content: answer.text })
-                chunk({
-                    role: 'assistant',
-                    tool_calls: answer.toolCalls.map((c, index) => ({
-                        index,
-                        id: `call_${++callId}`,
-                        type: 'function',
-                        function: { name: c.name, arguments: JSON.stringify(c.arguments) },
-                    })),
-                })
-                chunk({}, 'tool_calls')
+                    chunk({}, 'stop')
+                }
+                const { input, output } = answer.usage ?? { input: 1, output: 1 }
+                res.write(`data: ${JSON.stringify({ id: 'mock', object: 'chat.completion.chunk', created: 0, model: parsed.model, choices: [], usage: { prompt_tokens: input, completion_tokens: output, total_tokens: input + output } })}\n\n`)
+                res.end('data: [DONE]\n\n')
             }
-            else {
-                chunk({ role: 'assistant', content: answer.text })
-                chunk({}, 'stop')
-            }
-            res.write(`data: ${JSON.stringify({ id: 'mock', object: 'chat.completion.chunk', created: 0, model: parsed.model, choices: [], usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } })}\n\n`)
-            res.end('data: [DONE]\n\n')
+            if (answer.delayMs)
+                setTimeout(finish, answer.delayMs)
+            else
+                finish()
         })
     })
     await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))

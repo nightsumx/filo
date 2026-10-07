@@ -1,0 +1,13 @@
+// The website: static files only, served by a Worker at pi.flowsrun.com.
+//   bun run deploy:site   (copies scripts/install.sh in, then deploys)
+{
+    "name": "pi-kit-www",
+    "account_id": "90a866fd8bf964c3ae839061a40e3e7e",
+    "compatibility_date": "2026-10-01",
+    "assets": {
+        "directory": "./public",
+        "not_found_handling": "404-page"
+    },
+    "routes": [{ "pattern": "pi.flowsrun.com", "custom_domain": true }],
+    "workers_dev": false
+}

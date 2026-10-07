@@ -20,6 +20,8 @@
         "e2e:windows": "bun --tsconfig-override=tsconfig.node.json test/windows.ts",
         "e2e:features": "bun --tsconfig-override=tsconfig.node.json test/features.ts",
         "e2e:review": "bun --tsconfig-override=tsconfig.node.json test/review-e2e.ts",
+        "site:shots": "bun --tsconfig-override=tsconfig.node.json site/shots.ts",
+        "deploy:site": "cp scripts/install.sh site/public/install.sh && wrangler deploy -c site/wrangler.jsonc",
         "preview": "vite preview",
         "dist": "bun run build && electron-builder --publish never",
         "dist:dir": "bun run build && electron-builder --dir --publish never"

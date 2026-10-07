@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="zh-CN" data-lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pi · pi coding agent 的 Mac 桌面端</title>
+<meta name="description" content="Pi is a native Mac app for the pi coding agent: threads side by side, changes tied to the thread that made them, an independent read-only review, and search across every session.">
+<meta name="theme-color" content="#1e1f22">
+<link rel="canonical" href="https://pi.flowsrun.com/">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Pi · the pi coding agent on your Mac">
+<meta property="og:description" content="Threads side by side, changes tied to the thread that made them, an independent review, search across every session.">
+<meta property="og:url" content="https://pi.flowsrun.com/">
+<meta property="og:image" content="https://pi.flowsrun.com/og.png">
+<meta name="twitter:card" content="summary_large_image">
+<script>
+    // Before first paint, so the page never flashes the other language. ?lang= wins, then the last choice, then the browser.
+    (() => {
+        const asked = new URLSearchParams(location.search).get('lang')
+        let saved = null
+        try { saved = localStorage.getItem('lang') } catch {}
+        const lang = ['zh', 'en'].includes(asked) ? asked : ['zh', 'en'].includes(saved) ? saved : navigator.language.toLowerCase().startsWith('zh') ? 'zh' : 'en'
+        document.documentElement.dataset.lang = lang
+        document.documentElement.lang = lang === 'zh' ? 'zh-CN' : 'en'
+    })()
+</script>
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+<header class="bar">
+    <div class="wrap bar-inner">
+        <a class="brand" href="/"><img src="/favicon.svg" alt="" width="22" height="22">Pi</a>
+        <nav>
+            <a href="#features"><span lang="zh">功能</span><span lang="en">Features</span></a>
+            <a href="#install"><span lang="zh">安装</span><span lang="en">Install</span></a>
+            <a href="https://github.com/nightsumx/pi-kit">GitHub</a>
+            <button type="button" class="lang" id="lang" aria-label="Switch language / 切换语言"><span lang="zh">EN</span><span lang="en">中文</span></button>
+        </nav>
+    </div>
+</header>
+
+<main>
+    <section class="hero wrap">
+        <p class="kicker"><span lang="zh">pi coding agent 的 Mac 桌面端</span><span lang="en">A Mac app for the pi coding agent</span></p>
+        <h1><span lang="zh">pi，在桌面上</span><span lang="en">pi, on the desktop</span></h1>
+        <p class="lede">
+            <span lang="zh">多个线程并排跑，每处改动都知道是哪个线程做的，另起一个只读的 pi 审查结果，所有会话都能搜。和终端里的 pi 用同一份会话和配置，随时切回终端。</span>
+            <span lang="en">Run threads side by side, see which thread made each change, have a separate read-only pi review the work, and search every session. It shares sessions and settings with pi in your terminal, so you can switch back any time.</span>
+        </p>
+        <div class="install" role="group" aria-label="Install command">
+            <code id="cmd">curl -fsSL https://pi.flowsrun.com/install.sh | bash</code>
+            <button type="button" class="copy" data-copy="cmd" aria-live="polite"><span class="idle"><span lang="zh">复制</span><span lang="en">Copy</span></span><span class="ok"><span lang="zh">已复制</span><span lang="en">Copied</span></span></button>
+        </div>
+        <p class="meta">
+            <span lang="zh">在终端里运行 · Apple Silicon · macOS 11 及以上 · 再运行一次就是更新</span>
+            <span lang="en">Run it in Terminal · Apple Silicon · macOS 11 or later · run it again to update</span>
+            <span class="sep">·</span>
+            <a href="https://github.com/nightsumx/pi-kit/releases/latest/download/Pi-arm64.dmg"><span lang="zh">下载 .dmg</span><span lang="en">Download .dmg</span></a>
+        </p>
+    </section>
+
+    <figure class="shot hero-shot wrap">
+        <img lang="zh" src="/shots/zh/main.webp" width="2880" height="1800" alt="Pi 的主窗口：左侧项目树，中间是一个线程的对话和改动的 diff，右侧改动面板按文件夹列出这次改的文件">
+        <img lang="en" src="/shots/en/main.webp" width="2880" height="1800" alt="Pi's main window: the project tree on the left, a thread's conversation and its diffs in the middle, the changes panel listing the changed files on the right">
+    </figure>
+
+    <section id="features" class="wrap features">
+        <article>
+            <h3><span lang="zh">一个项目一个窗口</span><span lang="en">One window per project</span></h3>
+            <p><span lang="zh">像 JetBrains 一样按项目分窗口，也能合并到一起。标签可以拖到别的窗口，或者拖出来单开，正在跑的 pi 不会中断。</span><span lang="en">Like JetBrains: each project gets its own window, or merge them. Drag a tab to another window or out into a new one; the pi running in it keeps going.</span></p>
+        </article>
+        <article>
+            <h3><span lang="zh">改动归属到线程</span><span lang="en">Changes know their thread</span></h3>
+            <p><span lang="zh">改动面板知道每个文件是哪个线程改的，可以只看当前线程的。两个线程改了同一个文件会标出来。勾选文件，直接提交或回滚。</span><span lang="en">The changes panel knows which thread changed each file and can show just this thread's. Files two threads both changed are flagged. Check files and commit or roll them back.</span></p>
+        </article>
+        <article>
+            <h3><span lang="zh">独立审查</span><span lang="en">Independent review</span></h3>
+            <p><span lang="zh">一轮结束后点 Review，另起一个只读的 pi 审查改动并跑命令取证。它看得到你的要求和 diff，看不到 Agent 的推理过程。你挑好条目再交回。</span><span lang="en">Click Review after a turn: a separate read-only pi audits the changes and runs commands for evidence. It sees your requests and the diff, not the agent's reasoning. You pick what goes back.</span></p>
+        </article>
+        <article>
+            <h3><span lang="zh">搜索所有会话</span><span lang="en">Search every session</span></h3>
+            <p><span lang="zh">⌘⇧F 搜所有项目里的提问和回复，终端里跑过的会话也在内。回车直接打开那个线程，并定位到那条消息。</span><span lang="en">⌘⇧F searches prompts and replies in every project, sessions from the terminal included. Enter opens the thread at that message.</span></p>
+        </article>
+        <article>
+            <h3><span lang="zh">分叉与重发</span><span lang="en">Fork and resend</span></h3>
+            <p><span lang="zh">从任意一次提问分叉出新标签，换个方向试；或者改写这次提问后重发。原来的线程不受影响。</span><span lang="en">Fork any earlier prompt into a new tab to try another direction, or edit it and resend. The original thread stays as it was.</span></p>
+        </article>
+        <article>
+            <h3><span lang="zh">终端里的 pi 也看得见</span><span lang="en">Terminal pi, visible too</span></h3>
+            <p><span lang="zh">终端里运行的 pi 会出现在项目树里：在跑、在等你回答，还是空闲。如果你在桌面端打开同一个会话，它会先提醒你。</span><span lang="en">pi sessions running in a terminal show up in the project tree: working, waiting for you, or idle. Open the same session here and you get a warning first.</span></p>
+        </article>
+        <article>
+            <h3><span lang="zh">不弹窗</span><span lang="en">No pop-ups</span></h3>
+            <p><span lang="zh">工具审批、Agent 的提问、计划确认都在对话里原地处理，不打断你正在看的内容。</span><span lang="en">Tool approvals, the agent's questions and plan sign-off are handled inline in the conversation, so nothing interrupts what you're reading.</span></p>
+        </article>
+        <article>
+            <h3><span lang="zh">保留终端的信息密度</span><span lang="en">Terminal density</span></h3>
+            <p><span lang="zh">工具调用、diff、耗时、token 用量和终端里一样紧凑。深色扁平，没有多余的边框。</span><span lang="en">Tool calls, diffs, timings and token use are as compact as in the terminal. Dark, flat, no extra chrome.</span></p>
+        </article>
+    </section>
+
+    <section class="wrap showcase">
+        <div class="showcase-copy">
+            <h2><span lang="zh">审查结论附带证据</span><span lang="en">Review findings come with evidence</span></h2>
+            <p><span lang="zh">审查者跑过的每条命令都会记下退出码和输出。只有真正复现出来的问题才标“已复现”，只靠读代码推断的标“推测”。第二次审查会逐条核对上次交回的问题有没有修好。</span><span lang="en">Every command the reviewer runs is kept with its exit code and output. An issue is marked "reproduced" only when it was actually reproduced; anything based only on reading the code is "suspected". A second review checks each item sent back last time.</span></p>
+        </div>
+        <figure class="shot">
+            <img lang="zh" src="/shots/zh/review.webp" width="2880" height="1800" loading="lazy" alt="审查报告卡片：一个已复现的问题，附带命令、退出码 1 和报错输出，下面是一条建议和交给 Agent 的按钮">
+            <img lang="en" src="/shots/en/review.webp" width="2880" height="1800" loading="lazy" alt="A review report card: one reproduced issue with its command, exit code 1 and error output, then a suggestion and the Send to agent button">
+        </figure>
+    </section>
+
+    <section class="wrap showcase">
+        <div class="showcase-copy">
+            <h2><span lang="zh">上周那次对话，几秒找到</span><span lang="en">Find last week's conversation in seconds</span></h2>
+            <p><span lang="zh">索引在后台建好并保存在本机，重启后只读新增的会话。所有词都要出现才算命中，不区分大小写。工具输出不进索引，结果里只有对话本身。</span><span lang="en">The index is built in the background and kept on your Mac; after a restart only new sessions are read. A hit needs every word, case-insensitive. Tool output isn't indexed, so results are the conversation itself.</span></p>
+        </div>
+        <figure class="shot">
+            <img lang="zh" src="/shots/zh/search.webp" width="2880" height="1800" loading="lazy" alt="⌘⇧F 搜索框：搜“小时”，结果按线程分组，命中的词高亮">
+            <img lang="en" src="/shots/en/search.webp" width="2880" height="1800" loading="lazy" alt="The ⌘⇧F search popup: results grouped by thread, with the matching words highlighted">
+        </figure>
+    </section>
+
+    <section id="install" class="wrap install-section">
+        <h2><span lang="zh">安装</span><span lang="en">Install</span></h2>
+        <div class="steps">
+            <div>
+                <h3><span lang="zh">一行命令（推荐）</span><span lang="en">One command (recommended)</span></h3>
+                <div class="install">
+                    <code id="cmd2">curl -fsSL https://pi.flowsrun.com/install.sh | bash</code>
+                    <button type="button" class="copy" data-copy="cmd2" aria-live="polite"><span class="idle"><span lang="zh">复制</span><span lang="en">Copy</span></span><span class="ok"><span lang="zh">已复制</span><span lang="en">Copied</span></span></button>
+                </div>
+                <ul>
+                    <li><span lang="zh">从 GitHub 下载最新版，先校验签名，再装到 /Applications。没有管理员权限的话装到 ~/Applications。</span><span lang="en">Downloads the latest release from GitHub, checks its signature, and installs to /Applications (or ~/Applications without admin rights).</span></li>
+                    <li><span lang="zh">如果还没装 pi 命令行，会用 npm 顺带装上，所以需要 Node.js 22.19 或以上。</span><span lang="en">If the pi CLI isn't installed yet, it installs it with npm, so you need Node.js 22.19 or later.</span></li>
+                    <li><span lang="zh">要更新，再运行一次同样的命令。运行前请先退出 Pi。</span><span lang="en">To update, run the same command again. Quit Pi first.</span></li>
+                    <li><a href="/install.sh"><span lang="zh">先看看脚本内容</span><span lang="en">Read the script first</span></a></li>
+                </ul>
+            </div>
+            <div>
+                <h3><span lang="zh">手动下载</span><span lang="en">Manual download</span></h3>
+                <p><a class="button" href="https://github.com/nightsumx/pi-kit/releases/latest/download/Pi-arm64.dmg"><span lang="zh">下载 Pi-arm64.dmg</span><span lang="en">Download Pi-arm64.dmg</span></a></p>
+                <ul>
+                    <li><span lang="zh">应用没有经过 Apple 公证，第一次打开会被拦下。先双击打开一次，再到「系统设置 → 隐私与安全性」，点「仍要打开」。</span><span lang="en">The app isn't notarized by Apple, so macOS blocks the first launch. Open it once, then go to System Settings → Privacy &amp; Security and click Open Anyway.</span></li>
+                    <li><span lang="zh">pi 命令行需要另外装：</span><span lang="en">Install the pi CLI separately:</span><code class="block">npm install -g @earendil-works/pi-coding-agent</code></li>
+                </ul>
+            </div>
+        </div>
+        <p class="note"><span lang="zh">模型和 API key 沿用 pi 自己的配置（~/.pi/agent），终端里能用，这里就能用。</span><span lang="en">Models and API keys come from pi's own settings (~/.pi/agent): if pi works in your terminal, it works here.</span></p>
+    </section>
+</main>
+
+<footer class="wrap foot">
+    <span><span lang="zh">开源，代码在</span><span lang="en">Open source on</span> <a href="https://github.com/nightsumx/pi-kit">GitHub</a></span>
+    <span><span lang="zh">基于</span><span lang="en">Built on</span> <a href="https://github.com/earendil-works/pi">pi</a></span>
+</footer>
+
+<script>
+    document.getElementById('lang').addEventListener('click', () => {
+        const lang = document.documentElement.dataset.lang === 'zh' ? 'en' : 'zh'
+        document.documentElement.dataset.lang = lang
+        document.documentElement.lang = lang === 'zh' ? 'zh-CN' : 'en'
+        try { localStorage.setItem('lang', lang) } catch {}
+    })
+    for (const button of document.querySelectorAll('[data-copy]')) {
+        button.addEventListener('click', async () => {
+            const text = document.getElementById(button.dataset.copy).textContent
+            try {
+                await navigator.clipboard.writeText(text)
+            }
+            catch {
+                // Clipboard API refused (insecure context, permissions): select it for ⌘C instead.
+                getSelection().selectAllChildren(document.getElementById(button.dataset.copy))
+                return
+            }
+            button.classList.add('done')
+            setTimeout(() => button.classList.remove('done'), 1500)
+        })
+    }
+</script>
+</body>
+</html>

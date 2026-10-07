@@ -48,8 +48,10 @@ notes="$(cat <<EOF
 Install or update (Apple Silicon):
 
 \`\`\`
-curl -fsSL https://github.com/$repo/releases/latest/download/install.sh | bash
+curl -fsSL https://pi.flowsrun.com/install.sh | bash
 \`\`\`
+
+More at https://pi.flowsrun.com.
 
 The app is not notarized. Opening the .dmg or .zip downloaded with a browser needs one extra step: open it once, then System Settings → Privacy & Security → Open Anyway.
 EOF
