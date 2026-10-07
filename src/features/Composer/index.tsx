@@ -10,7 +10,7 @@ import { observer } from 'mobx-react-lite'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { StatusLine } from '../Thread/StatusLine'
-import { ModelPicker, ModePicker, ThinkingPicker } from './Pickers'
+import { ModelPicker, ModePicker, NoModelNotice, ThinkingPicker } from './Pickers'
 import { TodoBar } from './TodoBar'
 import { tr } from '@/lib/i18n'
 import type { Localized } from '@shared/i18n'
@@ -176,6 +176,7 @@ export const Composer = observer(({ thread }: { thread: Thread }) => {
                 <pre key={key} className="mb-2 rounded-md bg-ide-block px-3 py-2 font-mono text-[12px] text-gray-600 whitespace-pre-wrap">{w.lines.join('\n')}</pre>
             ))}
             <TodoBar thread={thread} />
+            <NoModelNotice thread={thread} />
             {queued.length > 0 && (
                 <div className="mb-2 flex flex-col gap-1">
                     {queued.map((text, i) => (

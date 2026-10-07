@@ -1,4 +1,5 @@
 import type { AgentStartOptions, GlobalCompactionPatch, SearchResult, StateSave, TabMove, ThemePref, WindowBounds, WindowReport } from '@shared/ipc'
+import type { LoginUpdate } from '@shared/providers'
 import { APP_INFO } from '@shared/app'
 import { resolveLang } from '@shared/i18n'
 import { stat } from 'node:fs/promises'
@@ -8,13 +9,14 @@ import { fileURLToPath } from 'node:url'
 import { Worker } from 'node:worker_threads'
 import { PresenceWatcher, presenceDir } from './presence'
 import { DEFAULT_THEME, IPC, THEME_PREFS } from '@shared/ipc'
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, Notification, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, net, Notification, shell } from 'electron'
 import { AgentManager } from './agents'
 import { applySave, savedWindows, StateFile } from './appState'
 import { repoEdits } from './edits'
 import { gitBranch, gitCommit, gitDiscard, gitFileDiff, gitStatus } from './git'
 import { mainLang, setMainLang, tr } from './i18n'
 import { compactionInfo, globalCompaction, setGlobalCompaction } from './piSettings'
+import { endpointSaveOf, helperLaunch, ProviderHelper, ProviderService } from './providers'
 import { resolvePiEnv } from './pi-env'
 import { assertInSessionsDir, listSessions, readSession } from './sessions'
 import { Windows } from './windows'
@@ -38,6 +40,41 @@ const agents = new AgentManager({
 }, extensionsDir)
 
 const windows = new Windows({ store, create: createWindow, stopAgent: id => agents.stop(id) })
+
+/**
+ * Settings → 模型供应商. The helper runs with the user's node and pi, so it is a real file outside the
+ * asar (Resources/providerHelper.mts). A login's updates go to the window that started it.
+ */
+const providers = (() => {
+    const script = app.isPackaged ? path.join(process.resourcesPath, 'providerHelper.mts') : path.join(__dirname, '../../electron/providerHelper.mts')
+    const owners = new Map<string, Electron.WebContents>()
+    const deliver = (update: LoginUpdate) => {
+        const owner = owners.get(update.login)
+        if (owner && !owner.isDestroyed())
+            owner.send(IPC.providerLoginUpdate, update)
+        if ('done' in update || 'error' in update)
+            owners.delete(update.login)
+        if ('done' in update)
+            windows.broadcast(null, IPC.providersChanged)
+    }
+    const helper = new ProviderHelper(async () => {
+        const env = await resolvePiEnv()
+        if (!env.ok)
+            throw new Error(env.error)
+        return helperLaunch(env.env, script)
+    }, deliver)
+    const service = new ProviderService(helper, () => windows.broadcast(null, IPC.providersChanged), (input, init) => net.fetch(String(input), init))
+    return {
+        service,
+        login(owner: Electron.WebContents, provider: string, method: 'api_key' | 'oauth') {
+            const login = helper.login(provider, method)
+            owners.set(login, owner)
+            // A window closed mid-login leaves nobody to answer its prompts.
+            owner.once('destroyed', () => owners.has(login) && helper.cancel(login))
+            return login
+        },
+    }
+})()
 
 /** Terminal pi sessions; every window gets the list when it changes. */
 const presence = new PresenceWatcher(presenceDir(), list => windows.broadcast(null, IPC.presence, list))
@@ -303,6 +340,19 @@ function registerIpc() {
         if (isSafeExternalUrl(url))
             await shell.openExternal(url)
     })
+
+    const id = (v: unknown) => (typeof v === 'string' && v.length > 0 && v.length <= 200 ? v : '')
+    ipcMain.handle(IPC.providers, () => providers.service.state())
+    ipcMain.handle(IPC.providerLogin, (e, provider: unknown, method: unknown) => providers.login(e.sender, id(provider), method === 'oauth' ? 'oauth' : 'api_key'))
+    ipcMain.handle(IPC.providerAnswer, (_e, login: unknown, promptId: unknown, value: unknown) => {
+        providers.service.helper.answer(id(login), id(promptId), typeof value === 'string' ? value.slice(0, 8192) : '')
+    })
+    ipcMain.handle(IPC.providerCancel, (_e, login: unknown) => providers.service.helper.cancel(id(login)))
+    ipcMain.handle(IPC.providerLogout, (_e, provider: unknown) => providers.service.logout(id(provider)))
+    ipcMain.handle(IPC.saveEndpoint, (_e, save: unknown) => providers.service.saveEndpoint(endpointSaveOf(save)))
+    ipcMain.handle(IPC.removeEndpoint, (_e, endpoint: unknown) => providers.service.removeEndpoint(id(endpoint)))
+    ipcMain.handle(IPC.endpointModels, (_e, baseUrl: unknown, api: unknown, apiKey: unknown, provider: unknown) =>
+        providers.service.endpointModels(typeof baseUrl === 'string' ? baseUrl : '', typeof api === 'string' ? api : '', typeof apiKey === 'string' ? apiKey : undefined, id(provider) || undefined))
 }
 
 /**
@@ -401,6 +451,7 @@ app.on('before-quit', (event) => {
     quitting = true
     event.preventDefault()
     presence.stop()
+    providers.service.helper.stop()
     void Promise.all([windows.prepareQuit(), agents.stopAll()]).finally(() => app.quit())
 })
 

@@ -94,6 +94,17 @@ const bridge: PiBridge = {
     setLang: lang => ipcRenderer.invoke(IPC.setLang, lang),
     openExternal: url => ipcRenderer.invoke(IPC.openExternal, url),
 
+    providers: () => ipcRenderer.invoke(IPC.providers),
+    providerLogin: (provider, method) => ipcRenderer.invoke(IPC.providerLogin, provider, method),
+    providerAnswer: (login, promptId, value) => ipcRenderer.invoke(IPC.providerAnswer, login, promptId, value),
+    providerCancel: login => ipcRenderer.invoke(IPC.providerCancel, login),
+    providerLogout: provider => ipcRenderer.invoke(IPC.providerLogout, provider),
+    saveEndpoint: save => ipcRenderer.invoke(IPC.saveEndpoint, save),
+    removeEndpoint: id => ipcRenderer.invoke(IPC.removeEndpoint, id),
+    endpointModels: (baseUrl, api, apiKey, provider) => ipcRenderer.invoke(IPC.endpointModels, baseUrl, api, apiKey, provider),
+    onProviderLogin: listener => listen(IPC.providerLoginUpdate, listener),
+    onProvidersChanged: listener => listen(IPC.providersChanged, listener),
+
     notify: notice => ipcRenderer.invoke(IPC.notify, notice),
     onNotificationClick: (listener) => {
         const handler = (_e: unknown, key: string) => listener(key)

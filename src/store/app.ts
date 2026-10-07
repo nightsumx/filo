@@ -43,7 +43,7 @@ const IDLE_SWEEP_MS = 60_000
 export const MIN_PANE_WIDTH = 520
 export const MAX_PANES = 3
 
-export type SettingsPageId = 'appearance' | 'capabilities' | 'compaction'
+export type SettingsPageId = 'appearance' | 'providers' | 'capabilities' | 'compaction'
 
 export interface Project {
     cwd: string
@@ -106,6 +106,8 @@ class AppStore implements ThreadHost {
     piSettingsEpoch = 0
     /** Bumps on every compaction write, including ones no running thread needs a restart for. */
     compactionRevision = 0
+    /** Bumps when credentials or endpoints change in any window (Settings → 模型供应商 reloads). */
+    providersRevision = 0
     /** Tokens at which every model compacts (lib/compactAt); null: none, undefined: not decided yet. */
     compactAt: number | null | undefined = undefined
     private reconciling = false
@@ -302,6 +304,7 @@ class AppStore implements ThreadHost {
         })
         api().onPrefsChanged(prefs => runInAction(() => this.applyPrefs(prefs, true)))
         api().onPiSettingsChanged(patch => runInAction(() => this.piSettingsChanged(patch)))
+        api().onProvidersChanged(() => runInAction(() => this.providersChanged()))
         api().onWindowProjects(projects => runInAction(() => this.setWindowProjects(projects)))
         api().onOpenProjects(projects => runInAction(() => (this.openProjects = projects)))
         api().onSelectProject(cwd => runInAction(() => this.windowProjects.includes(cwd) && this.showProject(cwd)))
@@ -523,6 +526,17 @@ class AppStore implements ThreadHost {
         const affected = global || [...this.threads.values()].some(t => t.state?.model && models.includes(`${t.state.model.provider}/${t.state.model.id}`))
         if (!affected)
             return
+        this.piSettingsEpoch++
+        for (const thread of this.threads.values())
+            void thread.applyConfig()
+    }
+
+    /**
+     * pi reads auth.json and models.json only at startup, so every process restarts once idle (resuming
+     * its session) to see the new providers; threads with no model yet need it most.
+     */
+    private providersChanged() {
+        this.providersRevision++
         this.piSettingsEpoch++
         for (const thread of this.threads.values())
             void thread.applyConfig()
@@ -968,6 +982,12 @@ class AppStore implements ThreadHost {
 
     setSettingsOpen(open: boolean) {
         this.settingsOpen = open
+    }
+
+    /** Settings → 模型供应商, from places that find no usable model. */
+    openProviders() {
+        this.settingsPage = 'providers'
+        this.settingsOpen = true
     }
 
     setSettingsPage(page: SettingsPageId) {

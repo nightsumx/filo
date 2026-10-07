@@ -51,6 +51,12 @@ export async function startMockLlm(reply: (request: MockRequest, index: number) 
             body += chunk
         })
         req.on('end', () => {
+            // The model list an endpoint form fetches (OpenAI's GET /models).
+            if (req.method === 'GET' && req.url === '/v1/models') {
+                res.writeHead(200, { 'content-type': 'application/json' })
+                res.end(JSON.stringify({ object: 'list', data: [{ id: 'mock-1', object: 'model' }] }))
+                return
+            }
             const parsed = JSON.parse(body || '{}')
             const messages: any[] = parsed.messages ?? []
             const request: MockRequest = {

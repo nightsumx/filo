@@ -4,10 +4,11 @@ import type { Thread, ThreadMode } from '@/store/thread'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { cn, formatTokens } from '@/lib/utils'
-import { Brain, Check, ChevronDown, ClipboardList, Cpu, FilePen, ShieldCheck, Zap } from 'lucide-react'
+import { Brain, Check, ChevronDown, ClipboardList, Cpu, FilePen, KeyRound, ShieldCheck, Zap } from 'lucide-react'
 import { observer } from 'mobx-react-lite'
 import { useRef, useState } from 'react'
 import { tr } from '@/lib/i18n'
+import { appStore } from '@/store/app'
 import type { Localized } from '@shared/i18n'
 
 const pill = 'flex h-6 items-center gap-1 rounded-md px-1.5 text-[12px] text-gray-600 outline-none transition-colors hover:bg-black/[0.06] hover:text-gray-900 data-[state=open]:bg-black/[0.08] disabled:opacity-50'
@@ -24,7 +25,39 @@ const LEVEL_LABEL: Record<ThinkingLevel, Localized> = {
 
 const levelLabel = (level: ThinkingLevel): string => (LEVEL_LABEL[level] ? tr(LEVEL_LABEL[level]) : level)
 
+/** pi started but has no provider to take a model from: nothing in the thread can run yet. */
+const lacksModels = (thread: Thread) => thread.agentStatus === 'ready' && !thread.models.length
+
+/** Above the composer while no model is usable, with the way to fix it. */
+export const NoModelNotice = observer(({ thread }: { thread: Thread }) => {
+    if (!lacksModels(thread))
+        return null
+    return (
+        <div role="status" className="mb-2 flex items-center gap-3 rounded-md bg-ide-block px-3 py-2 text-[12.5px] text-gray-700">
+            <KeyRound size={14} className="shrink-0 text-gray-500" />
+            <span className="min-w-0 flex-1">
+                {tr('pi 还没有可用的模型。登录一个模型供应商、填写 API key，或者接入本地模型。', 'pi has no model to use yet. Sign in to a model provider, enter an API key, or connect a local model.')}
+            </span>
+            <button
+                type="button"
+                onClick={() => appStore.openProviders()}
+                className="shrink-0 rounded-md bg-ide-accent px-2.5 py-1 text-[12px] text-always-white outline-none hover:bg-ide-accent-hover focus-visible:ring-2 focus-visible:ring-ide-accent/50"
+            >
+                {tr('配置模型供应商', 'Set up a provider')}
+            </button>
+        </div>
+    )
+})
+
 export const ModelPicker = observer(({ thread }: { thread: Thread }) => {
+    if (lacksModels(thread)) {
+        return (
+            <button type="button" className={cn(pill, 'text-ide-accent hover:text-ide-accent')} onClick={() => appStore.openProviders()}>
+                <KeyRound size={13} />
+                <span>{tr('无可用模型', 'No models')}</span>
+            </button>
+        )
+    }
     const current = thread.state?.model
     const groups = new Map<string, PiModel[]>()
     for (const model of thread.models) {

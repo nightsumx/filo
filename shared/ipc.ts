@@ -1,6 +1,7 @@
 import type { ApprovalMode, CapabilityId, Presence } from './capabilities'
 import type { LangPref } from './i18n'
 import type { AgentMessage, PiEvent, RpcResponse } from './pi'
+import type { AuthMethod, EndpointModel, EndpointSave, LoginUpdate, ProvidersState } from './providers'
 
 export interface PiEnv {
     nodePath: string
@@ -357,6 +358,22 @@ export interface PiBridge {
     /** System notification; clicking it focuses the window and reports `key` back. */
     notify: (notice: AppNotice) => Promise<void>
     onNotificationClick: (listener: (key: string) => void) => () => void
+
+    /** Settings → 模型供应商: pi's providers and the models.json entries the page edits. */
+    providers: () => Promise<ProvidersState>
+    /** Starts a sign-in; its prompts and outcome arrive on onProviderLogin under the returned id. */
+    providerLogin: (provider: string, method: AuthMethod) => Promise<string>
+    providerAnswer: (login: string, promptId: string, value: string) => Promise<void>
+    providerCancel: (login: string) => Promise<void>
+    /** Removes the credential saved in auth.json. */
+    providerLogout: (provider: string) => Promise<void>
+    saveEndpoint: (save: EndpointSave) => Promise<void>
+    removeEndpoint: (id: string) => Promise<void>
+    /** The endpoint's own model list; without apiKey, the key pi has for `provider` is used. */
+    endpointModels: (baseUrl: string, api: string, apiKey?: string, provider?: string) => Promise<EndpointModel[]>
+    onProviderLogin: (listener: (update: LoginUpdate) => void) => () => void
+    /** Credentials or endpoints changed (any window). */
+    onProvidersChanged: (listener: () => void) => () => void
 }
 
 export interface AppNotice {
@@ -422,6 +439,16 @@ export const IPC = {
     importThreads: 'window:import-threads',
     openTabs: 'window:open-tabs',
     importProjects: 'window:import-projects',
+    providers: 'providers:list',
+    providerLogin: 'providers:login',
+    providerAnswer: 'providers:answer',
+    providerCancel: 'providers:cancel',
+    providerLogout: 'providers:logout',
+    saveEndpoint: 'providers:save-endpoint',
+    removeEndpoint: 'providers:remove-endpoint',
+    endpointModels: 'providers:endpoint-models',
+    providerLoginUpdate: 'providers:login-update',
+    providersChanged: 'providers:changed',
     /** Renderer → main answer to a main → renderer request (export/import). */
     reply: 'window:reply',
 } as const

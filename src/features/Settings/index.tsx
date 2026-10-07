@@ -9,10 +9,11 @@ import { systemLang, tr } from '@/lib/i18n'
 import { TRANSCRIPT_TEXT } from '@/lib/transcriptText'
 import { cn } from '@/lib/utils'
 import { appStore } from '@/store/app'
-import { Archive, Palette, Puzzle } from 'lucide-react'
+import { Archive, KeyRound, Palette, Puzzle } from 'lucide-react'
 import { observer } from 'mobx-react-lite'
 import { CapabilitiesPage } from './Capabilities'
 import { CompactionPage } from './Compaction'
+import { ProvidersPage } from './Providers'
 
 /** A few transcript lines in the chosen wording, so the effect is visible before closing. */
 function TranscriptPreview({ lang }: { lang: TranscriptLang }) {
@@ -111,6 +112,7 @@ const TranscriptLangRow = observer(() => (
 
 const PAGES: { id: SettingsPageId, label: Localized, icon: LucideIcon, page: React.FC }[] = [
     { id: 'appearance', label: { zh: '外观', en: 'Appearance' }, icon: Palette, page: AppearancePage },
+    { id: 'providers', label: { zh: '模型供应商', en: 'Model providers' }, icon: KeyRound, page: ProvidersPage },
     { id: 'capabilities', label: { zh: '能力', en: 'Capabilities' }, icon: Puzzle, page: CapabilitiesPage },
     { id: 'compaction', label: { zh: '上下文压缩', en: 'Compaction' }, icon: Archive, page: CompactionPage },
 ]
@@ -163,7 +165,7 @@ export const SettingsDialog = observer(() => {
                 }}
             >
                 <DialogTitle className="absolute left-4 top-0 flex h-12 items-center text-[14px]">{tr('设置', 'Settings')}</DialogTitle>
-                <DialogDescription className="sr-only">{tr('外观、能力和上下文压缩设置，改动立即生效。', 'Appearance, capabilities and compaction settings; changes apply immediately.')}</DialogDescription>
+                <DialogDescription className="sr-only">{tr('外观、模型供应商、能力和上下文压缩设置，改动立即生效。', 'Appearance, model provider, capability and compaction settings; changes apply immediately.')}</DialogDescription>
                 <PageList />
                 <div className="min-w-0 flex-1 overflow-y-auto px-6 pb-5 scrollbar-trigger">
                     <Page />

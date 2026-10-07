@@ -43,7 +43,7 @@ export function resolveCompaction(settings: Record<string, any>, modelKey?: stri
     }
 }
 
-const agentDir = () => process.env.PI_CODING_AGENT_DIR || path.join(os.homedir(), '.pi', 'agent')
+export const agentDir = () => process.env.PI_CODING_AGENT_DIR || path.join(os.homedir(), '.pi', 'agent')
 const globalSettingsPath = () => path.join(agentDir(), 'settings.json')
 
 export async function compactionInfo(cwd: string, modelKey?: string): Promise<CompactionInfo> {
