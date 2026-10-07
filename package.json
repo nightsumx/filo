@@ -2,7 +2,7 @@
     "name": "pi-kit",
     "productName": "Pi",
     "private": true,
-    "version": "0.1.0",
+    "version": "0.2.0",
     "description": "pi 编码 Agent 的桌面客户端：多项目多线程并行，实时状态，对话内提问",
     "author": "sum",
     "homepage": "https://pi.dev",
