@@ -11,7 +11,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSepara
 import { formatElapsed } from '@/lib/threadActivity'
 import { cn, relativeTime, shortPath } from '@/lib/utils'
 import { appStore } from '@/store/app'
-import { AppWindow, ChevronRight, ChevronsDownUp, EyeOff, FolderOpen, FolderPlus, Minus, MoreHorizontal, Plus, X } from 'lucide-react'
+import { AppWindow, ChevronRight, ChevronsDownUp, ChevronsUpDown, EyeOff, FolderOpen, FolderPlus, Minus, MoreHorizontal, Plus, X } from 'lucide-react'
 import { confirm } from '@/lib/confirm'
 import { observer } from 'mobx-react-lite'
 import { useEffect, useState } from 'react'
@@ -300,6 +300,11 @@ export const Sidebar = observer(() => {
         return next
     })
 
+    // One button toggles: collapse all if anything is open, otherwise expand all.
+    const anyExpanded = appStore.windowProjectList.some(p => expanded.has(p.cwd))
+    const toggleAll = () => setExpanded(anyExpanded ? new Set() : new Set(appStore.windowProjectList.map(p => p.cwd)))
+    const toggleAllLabel = anyExpanded ? tr('全部折叠', 'Collapse all') : tr('全部展开', 'Expand all')
+
     return (
         <nav className="ide-island flex w-[272px] shrink-0 flex-col bg-ide-side [--ide-island-edge:none]" aria-label={tr('项目', 'Projects')}>
             <div className="flex h-[34px] shrink-0 items-center gap-0.5 pl-3 pr-1.5">
@@ -307,8 +312,8 @@ export const Sidebar = observer(() => {
                 <button type="button" aria-label={tr('添加项目到此窗口', 'Add project to this window')} title={tr('添加项目到此窗口', 'Add project to this window')} onClick={() => void appStore.addProjectHere()} className={toolBtn}>
                     <FolderPlus size={14} />
                 </button>
-                <button type="button" aria-label={tr('全部折叠', 'Collapse all')} title={tr('全部折叠', 'Collapse all')} onClick={() => setExpanded(new Set())} className={toolBtn}>
-                    <ChevronsDownUp size={14} />
+                <button type="button" aria-label={toggleAllLabel} title={toggleAllLabel} onClick={toggleAll} className={toolBtn}>
+                    {anyExpanded ? <ChevronsDownUp size={14} /> : <ChevronsUpDown size={14} />}
                 </button>
                 <button type="button" aria-label={tr('隐藏项目面板', 'Hide projects panel')} title={tr('隐藏（⌘B）', 'Hide (⌘B)')} onClick={appStore.toggleSidebar} className={toolBtn}>
                     <Minus size={14} />
