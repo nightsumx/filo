@@ -74,6 +74,13 @@ async function main() {
         await until('providers page', () => js(`!!document.querySelector('[role="dialog"] section[aria-label="Model providers"]') && !!(${row('DeepSeek')})`), 15_000)
         check(await js(`window.__app.settingsPage`) === 'providers', 'Settings opens on Model providers')
 
+        // ---------------------------------------------------------------- subscription terms
+        const anthropic = 'Anthropic'
+        check(await openRow(anthropic), 'the Anthropic row opens')
+        await until('Anthropic note', () => js(`!!${row(anthropic)}?.textContent.includes('billed as extra usage')`))
+        check(true, 'the Claude subscription line says how Anthropic bills it in other tools')
+        await js(`(() => { ${row(anthropic)}.querySelector('button[aria-expanded]').click(); return true })()`)
+
         // ---------------------------------------------------------------- API key through pi's prompt
         check(await openRow('DeepSeek'), 'the DeepSeek row opens')
         await until('DeepSeek panel', () => js(`!!${row('DeepSeek')}?.textContent.includes('Not set')`))

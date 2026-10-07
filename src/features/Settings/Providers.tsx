@@ -3,6 +3,7 @@
 // models.json endpoint (a proxy for a built-in, the whole OpenAI/Anthropic-compatible server for a
 // custom one). Everything is pi's own auth.json and models.json, so
 // the terminal pi sees the same setup.
+import type { Localized } from '@shared/i18n'
 import type { AuthMethod, Endpoint, EndpointModel, LoginNotice, LoginPrompt, LoginUpdate, ProviderInfo, ProvidersState } from '@shared/providers'
 import { ENDPOINT_APIS, sortProviders } from '@shared/providers'
 import { Button } from '@/components/ui/button'
@@ -251,6 +252,14 @@ function GroupLabel({ children }: { children: React.ReactNode }) {
 const PANEL = 'ml-8 mt-1 flex flex-col gap-1.5 rounded-[6px] bg-[var(--jb-fill)] px-3 py-2'
 const LINE_LABEL = 'w-20 shrink-0 text-[12px] text-gray-700'
 
+/** What a provider's terms say about using its subscription outside its own app (checked 2026-10). */
+const SUBSCRIPTION_NOTES: Record<string, Localized> = {
+    anthropic: {
+        zh: 'Anthropic 只允许官方 Claude Code 使用订阅额度；在第三方工具里登录 Claude 订阅按额外用量计费，也可能违反其服务条款。长期使用建议填 API key。',
+        en: 'Anthropic only lets its own Claude Code use subscription limits; a Claude sign-in in third-party tools is billed as extra usage and may break its terms. An API key is the safer choice.',
+    },
+}
+
 const ProviderRow = observer(function ProviderRow({ provider: p, endpoint, open, onToggle, login, onLogin, onCloseLogin, onLogout, onRemove, onClose }: {
     provider: ProviderInfo
     endpoint?: Endpoint
@@ -355,6 +364,7 @@ const BuiltInPanel = observer(function BuiltInPanel({ provider: p, endpoint, log
                         )}
                         {signedIn && <Button variant="ghost" size="sm" className="text-gray-600" onClick={onLogout}>{tr('退出', 'Sign out')}</Button>}
                     </div>
+                    {SUBSCRIPTION_NOTES[p.id] && <p className="pb-1 pl-[88px] text-[11.5px] leading-relaxed text-[var(--jb-comment)]">{tr(SUBSCRIPTION_NOTES[p.id])}</p>}
                     {panel('oauth')}
                 </>
             )}
