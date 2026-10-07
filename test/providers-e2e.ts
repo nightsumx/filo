@@ -60,7 +60,9 @@ async function main() {
             el.dispatchEvent(new Event('input', { bubbles: true }))
             return true
         })()`)
-        const row = (name: string) => `[...document.querySelectorAll('[role="dialog"] .py-2')].find(r => r.querySelector('.truncate')?.textContent === ${JSON.stringify(name)})`
+        // A provider row: its header button (which opens it) and the panel under it.
+        const row = (name: string) => `[...document.querySelectorAll('[role="dialog"] button[aria-expanded]')].find(b => b.querySelector('.truncate')?.textContent === ${JSON.stringify(name)})?.parentElement`
+        const openRow = (name: string) => js(`(() => { const b = ${row(name)}?.querySelector('button[aria-expanded]'); if (!b) return false; if (b.getAttribute('aria-expanded') !== 'true') b.click(); return true })()`)
 
         // ---------------------------------------------------------------- no model yet
         await until('thread ready', () => js(`window.__app.active?.agentStatus === 'ready'`), 30_000)
@@ -73,7 +75,13 @@ async function main() {
         check(await js(`window.__app.settingsPage`) === 'providers', 'Settings opens on Model providers')
 
         // ---------------------------------------------------------------- API key through pi's prompt
-        check(await clickButton('Enter API key', row('DeepSeek')), 'DeepSeek offers an API key')
+        check(await openRow('DeepSeek'), 'the DeepSeek row opens')
+        await until('DeepSeek panel', () => js(`!!${row('DeepSeek')}?.textContent.includes('Not set')`))
+        if (SHOTS) {
+            await js(`${row('DeepSeek')}.scrollIntoView({ block: 'center' })`)
+            await page.screenshot(path.join(SHOTS, 'provider-open.png'))
+        }
+        check(await clickButton('Enter', row('DeepSeek')), 'DeepSeek offers an API key')
         await until('key prompt', () => js(`!!document.querySelector('[role="dialog"] input[type="password"]')`))
         await fill('[role="dialog"] input[type="password"]', 'sk-e2e')
         if (SHOTS) {
@@ -82,14 +90,33 @@ async function main() {
         }
         check(await clickButton('OK', row('DeepSeek')), 'the key is submitted')
         await until('DeepSeek configured', () => js(`!!${row('DeepSeek')}?.textContent.includes('API key saved')`), 15_000)
+        check(await js(`!!${row('DeepSeek')}.querySelector('[id]')?.textContent.includes('Saved') && [...${row('DeepSeek')}.querySelectorAll('button')].some(b => b.textContent === 'Replace')`), 'the open row shows the saved key and offers to replace it')
         const auth = JSON.parse(await readFile(path.join(agentDir, 'auth.json'), 'utf8'))
         check(auth.deepseek?.key === 'sk-e2e' && auth.deepseek?.type === 'api_key', 'the key is saved to pi\'s auth.json')
         // The restarted thread now lists DeepSeek's models; sign out again so the endpoint is the only provider.
         await until('DeepSeek models in the thread', () => js(`window.__app.active.agentStatus === 'ready' && window.__app.active.models.some(m => m.provider === 'deepseek')`), 30_000)
         check(true, 'the idle thread restarted pi and sees the new provider')
-        await js(`window.pi.providerLogout('deepseek')`)
+        check(await clickButton('Remove', row('DeepSeek')), 'the saved key can be removed from the row')
         await until('DeepSeek signed out', () => js(`!!${row('DeepSeek')} && !${row('DeepSeek')}.textContent.includes('API key saved')`), 15_000)
         check(!JSON.parse(await readFile(path.join(agentDir, 'auth.json'), 'utf8')).deepseek, 'sign out removes it from auth.json')
+
+        // ---------------------------------------------------------------- base URL in place
+        const baseUrlInput = `${row('DeepSeek')}.querySelector('input.font-mono')`
+        await js(`(() => { const el = ${baseUrlInput}; Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(el, 'https://proxy.example.com/v1/'); el.dispatchEvent(new Event('input', { bubbles: true })); return true })()`)
+        check(await clickButton('Save', row('DeepSeek')), 'a changed base URL offers Save')
+        await until('proxy listed', () => js(`!!${row('DeepSeek')}?.textContent.includes('via https://proxy.example.com/v1')`), 15_000)
+        check(JSON.parse(await readFile(path.join(agentDir, 'models.json'), 'utf8')).providers?.deepseek?.baseUrl === 'https://proxy.example.com/v1', 'the base URL lands in models.json')
+        check(await js(`![...${row('DeepSeek')}.querySelectorAll('button')].some(b => b.textContent === 'Save')`), 'Save goes away once it matches the file')
+        if (SHOTS) {
+            await js(`${row('DeepSeek')}.scrollIntoView({ block: 'center' })`)
+            await page.screenshot(path.join(SHOTS, 'provider-proxy.png'))
+        }
+        await js(`(() => { const el = ${baseUrlInput}; Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(el, ''); el.dispatchEvent(new Event('input', { bubbles: true })); return true })()`)
+        check(await clickButton('Save', row('DeepSeek')), 'clearing the base URL is saved too')
+        await until('proxy gone', () => js(`!!${row('DeepSeek')} && !${row('DeepSeek')}.textContent.includes('via ')`), 15_000)
+        check(!JSON.parse(await readFile(path.join(agentDir, 'models.json'), 'utf8')).providers?.deepseek?.baseUrl, 'an empty base URL goes back to pi\'s own')
+        check(await js(`(() => { ${row('DeepSeek')}.querySelector('button[aria-expanded]').click(); return true })()`), 'the row closes')
+        await until('DeepSeek closed', () => js(`!${row('DeepSeek')}.querySelector('input')`))
 
         // ---------------------------------------------------------------- custom endpoint through the form
         await until('thread back to no models', () => js(`window.__app.active.agentStatus === 'ready' && window.__app.active.models.length === 0`), 30_000)
@@ -131,8 +158,17 @@ async function main() {
         check(llm.requests.length > 0, 'the prompt went to the custom endpoint')
 
         // ---------------------------------------------------------------- removal
-        await js(`window.pi.removeEndpoint('mock-llm')`)
-        check(JSON.stringify(JSON.parse(await readFile(path.join(agentDir, 'models.json'), 'utf8'))) === '{}', 'removing the endpoint empties models.json')
+        await js(`(() => { window.__app.setSettingsPage('providers'); window.__app.setSettingsOpen(true); return true })()`)
+        await until('Mock LLM row', () => js(`!!${row('Mock LLM')}`), 15_000)
+        check(await openRow('Mock LLM'), 'the custom endpoint row opens')
+        await until('endpoint editor', () => js(`!!${row('Mock LLM')}.querySelector('form[aria-label="Mock LLM"]')`))
+        check(await js(`${row('Mock LLM')}.querySelector('input[placeholder="https://example.com/v1"]').value`) === llm.baseUrl, 'the open row edits the endpoint in place')
+        if (SHOTS)
+            await page.screenshot(path.join(SHOTS, 'endpoint-open.png'))
+        check(await clickButton('Remove endpoint', row('Mock LLM')), 'the endpoint can be removed from its row')
+        await until('Mock LLM gone', () => js(`!${row('Mock LLM')}`), 15_000)
+        check(JSON.stringify(JSON.parse(await readFile(path.join(agentDir, 'models.json'), 'utf8'))) === '{"providers":{}}', 'removing the endpoint empties models.json')
+        check(!(await js(`!!document.querySelector('[role="dialog"] section[aria-label="Model providers"]')?.textContent.includes('could not load models.json')`)), 'pi still loads the emptied models.json')
         check(!existsSync(path.join(agentDir, 'settings.json')) || !(await readFile(path.join(agentDir, 'settings.json'), 'utf8')).includes('sk-'), 'no key leaks into settings.json')
     }
     finally {

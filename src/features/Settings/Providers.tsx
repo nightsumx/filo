@@ -1,16 +1,16 @@
-// Settings → 模型供应商: pi's providers with their sign-in state, sign-in flows (API key, OAuth,
-// device code) run inline under the provider, and models.json endpoints (proxies for built-ins,
-// custom OpenAI/Anthropic-compatible servers). Everything is pi's own auth.json and models.json, so
+// Settings → 模型供应商: pi's providers with their sign-in state. A row opens in place to show all of
+// its settings at once: sign-in flows (API key, OAuth, device code) run inline there, next to the
+// models.json endpoint (a proxy for a built-in, the whole OpenAI/Anthropic-compatible server for a
+// custom one). Everything is pi's own auth.json and models.json, so
 // the terminal pi sees the same setup.
 import type { AuthMethod, Endpoint, EndpointModel, LoginNotice, LoginPrompt, LoginUpdate, ProviderInfo, ProvidersState } from '@shared/providers'
 import { ENDPOINT_APIS, sortProviders } from '@shared/providers'
 import { Button } from '@/components/ui/button'
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Comment, flatFieldClass, Segmented, SettingsPage, Switch } from '@/components/ui/form'
 import { tr } from '@/lib/i18n'
 import { cn } from '@/lib/utils'
 import { appStore } from '@/store/app'
-import { Check, Copy, ExternalLink, Loader2, MoreHorizontal, Plus, RefreshCw, Search, X } from 'lucide-react'
+import { Check, ChevronRight, Copy, ExternalLink, Loader2, Plus, RefreshCw, Search, X } from 'lucide-react'
 import { observer } from 'mobx-react-lite'
 import { useEffect, useId, useRef, useState } from 'react'
 import { toast } from 'sonner'
@@ -70,15 +70,14 @@ interface LoginView {
     error?: string
 }
 
-/** Where a row's inline panel is: a sign-in, or editing its models.json entry. */
-type Editing = { kind: 'endpoint', id: string } | { kind: 'new' }
-
 export const ProvidersPage = observer(() => {
     const [state, setState] = useState<ProvidersState | null>(null)
     const [loadError, setLoadError] = useState('')
     const [query, setQuery] = useState('')
     const [login, setLogin] = useState<LoginView | null>(null)
-    const [editing, setEditing] = useState<Editing | null>(null)
+    /** The provider whose row is open; one at a time, like the sign-in it may hold. */
+    const [open, setOpen] = useState<string | null>(null)
+    const [adding, setAdding] = useState(false)
     const revision = appStore.providersRevision
     const loginRef = useRef<LoginView | null>(null)
     loginRef.current = login
@@ -126,7 +125,7 @@ export const ProvidersPage = observer(() => {
     const startLogin = async (provider: string, method: AuthMethod) => {
         if (login && !login.error)
             await window.pi.providerCancel(login.id)
-        setEditing(null)
+        setOpen(provider)
         try {
             const id = await window.pi.providerLogin(provider, method)
             setLogin({ id, provider, method, notices: [] })
@@ -142,10 +141,11 @@ export const ProvidersPage = observer(() => {
         setLogin(null)
     }
 
-    const edit = (next: Editing | null) => {
-        if (next)
+    // A sign-in left running in a closed row would ask questions nobody sees.
+    const toggle = (provider: string) => {
+        if (login && login.provider !== provider || open === provider)
             closeLogin()
-        setEditing(next)
+        setOpen(open === provider ? null : provider)
     }
 
     const logout = async (p: ProviderInfo) => {
@@ -160,8 +160,8 @@ export const ProvidersPage = observer(() => {
     const removeEndpoint = async (p: ProviderInfo) => {
         try {
             await window.pi.removeEndpoint(p.id)
-            if (editing?.kind === 'endpoint' && editing.id === p.id)
-                setEditing(null)
+            if (open === p.id)
+                setOpen(null)
         }
         catch (error) {
             toast.error(tr('没能删除', 'Could not remove it'), { description: messageOf(error) })
@@ -191,16 +191,15 @@ export const ProvidersPage = observer(() => {
             key={p.id}
             provider={p}
             endpoint={endpointOf(p.id)}
+            open={open === p.id}
+            onToggle={() => toggle(p.id)}
+            login={login?.provider === p.id ? login : undefined}
             onLogin={method => void startLogin(p.id, method)}
-            onEdit={() => edit({ kind: 'endpoint', id: p.id })}
+            onCloseLogin={closeLogin}
             onLogout={() => void logout(p)}
             onRemove={() => void removeEndpoint(p)}
-        >
-            {login?.provider === p.id && <LoginPanel login={login} onClose={closeLogin} onRetry={() => void startLogin(p.id, login.method)} />}
-            {editing?.kind === 'endpoint' && editing.id === p.id && (
-                <EndpointForm provider={p} endpoint={endpointOf(p.id)} onDone={() => setEditing(null)} />
-            )}
-        </ProviderRow>
+            onClose={() => setOpen(null)}
+        />
     )
 
     return (
@@ -228,12 +227,12 @@ export const ProvidersPage = observer(() => {
                             className={cn(flatFieldClass, 'w-full pl-8')}
                         />
                     </label>
-                    <Button variant="outline" size="sm" onClick={() => edit(editing?.kind === 'new' ? null : { kind: 'new' })} aria-expanded={editing?.kind === 'new'}>
+                    <Button variant="outline" size="sm" onClick={() => setAdding(v => !v)} aria-expanded={adding}>
                         <Plus size={13} />
                         {tr('自定义端点', 'Custom endpoint')}
                     </Button>
                 </div>
-                {editing?.kind === 'new' && <EndpointForm onDone={() => setEditing(null)} />}
+                {adding && <EndpointForm onDone={() => setAdding(false)} />}
             </div>
             {configured.length > 0 && <GroupLabel>{tr('已配置', 'Configured')}</GroupLabel>}
             {configured.map(row)}
@@ -248,17 +247,24 @@ function GroupLabel({ children }: { children: React.ReactNode }) {
     return <div className="pb-1 pt-4 text-[12px] font-medium text-[var(--jb-comment)]">{children}</div>
 }
 
-const ProviderRow = observer(function ProviderRow({ provider: p, endpoint, onLogin, onEdit, onLogout, onRemove, children }: {
+/** Under an open row, lined up with the provider's name (icon 20px + gap 12px). */
+const PANEL = 'ml-8 mt-1 flex flex-col gap-1.5 rounded-[6px] bg-[var(--jb-fill)] px-3 py-2'
+const LINE_LABEL = 'w-20 shrink-0 text-[12px] text-gray-700'
+
+const ProviderRow = observer(function ProviderRow({ provider: p, endpoint, open, onToggle, login, onLogin, onCloseLogin, onLogout, onRemove, onClose }: {
     provider: ProviderInfo
     endpoint?: Endpoint
+    open: boolean
+    onToggle: () => void
+    /** This provider's sign-in, while one runs. */
+    login?: LoginView
     onLogin: (method: AuthMethod) => void
-    onEdit: () => void
+    onCloseLogin: () => void
     onLogout: () => void
     onRemove: () => void
-    children: React.ReactNode
+    onClose: () => void
 }) {
-    const canKey = !!p.apiKey?.interactive
-    const oauthLabel = p.oauth?.subscription ? tr('订阅登录', 'Subscription sign-in') : tr('账号登录', 'Sign in')
+    const panelId = useId()
     const proxy = p.builtIn && endpoint?.baseUrl
     const details = [
         p.configured ? sourceText(p, endpoint) : '',
@@ -268,8 +274,14 @@ const ProviderRow = observer(function ProviderRow({ provider: p, endpoint, onLog
     ].filter(Boolean).join(' · ')
 
     return (
-        <div className="py-2">
-            <div className="flex items-center gap-3">
+        <div className="py-1">
+            <button
+                type="button"
+                onClick={onToggle}
+                aria-expanded={open}
+                aria-controls={open ? panelId : undefined}
+                className="group/row -mx-2 flex w-[calc(100%+1rem)] items-center gap-3 rounded-[6px] px-2 py-1.5 text-left outline-none hover:bg-ide-hover focus-visible:ring-2 focus-visible:ring-ide-accent/50"
+            >
                 <ProviderIcon id={p.id} name={p.name} size={20} />
                 <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-1.5 text-[13px] leading-5 text-gray-900">
@@ -279,26 +291,138 @@ const ProviderRow = observer(function ProviderRow({ provider: p, endpoint, onLog
                     </div>
                     <Comment className="truncate">{details}</Comment>
                 </div>
-                {!p.configured && canKey && <Button variant="outline" size="sm" onClick={() => onLogin('api_key')}>{tr('填写 API key', 'Enter API key')}</Button>}
-                {!p.configured && p.oauth && <Button variant="outline" size="sm" title={p.oauth.label} onClick={() => onLogin('oauth')}>{oauthLabel}</Button>}
-                <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="sm" className="w-7 px-0 text-gray-600" aria-label={tr(`${p.name} 的更多操作`, `More for ${p.name}`)}>
-                            <MoreHorizontal size={14} />
-                        </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="w-52">
-                        {canKey && <DropdownMenuItem onSelect={() => onLogin('api_key')}>{p.stored === 'api_key' ? tr('更换 API key', 'Replace API key') : tr('填写 API key', 'Enter API key')}</DropdownMenuItem>}
-                        {p.oauth && <DropdownMenuItem onSelect={() => onLogin('oauth')}>{p.stored === 'oauth' ? tr('重新登录', 'Sign in again') : oauthLabel}</DropdownMenuItem>}
-                        <DropdownMenuItem onSelect={onEdit}>{p.builtIn ? tr('修改请求地址…', 'Change base URL…') : tr('编辑端点…', 'Edit endpoint…')}</DropdownMenuItem>
-                        {(p.stored || !p.builtIn) && <DropdownMenuSeparator />}
-                        {p.stored && <DropdownMenuItem onSelect={onLogout}>{p.stored === 'oauth' ? tr('退出登录', 'Sign out') : tr('删除保存的 key', 'Remove saved key')}</DropdownMenuItem>}
-                        {!p.builtIn && <DropdownMenuItem onSelect={onRemove}>{tr('删除端点', 'Remove endpoint')}</DropdownMenuItem>}
-                    </DropdownMenuContent>
-                </DropdownMenu>
-            </div>
-            {children}
+                <ChevronRight aria-hidden size={14} className={cn('shrink-0 text-gray-400 transition-transform duration-150 group-hover/row:text-gray-800', open && 'rotate-90')} />
+            </button>
+            {open && (
+                <div id={panelId}>
+                    {p.builtIn
+                        ? <BuiltInPanel provider={p} endpoint={endpoint} login={login} onLogin={onLogin} onCloseLogin={onCloseLogin} onLogout={onLogout} />
+                        : (
+                            <div className="ml-8">
+                                <EndpointForm provider={p} endpoint={endpoint} onDone={onClose} onRemove={onRemove} />
+                            </div>
+                        )}
+                </div>
+            )}
         </div>
+    )
+})
+
+/** Everything a built-in provider can set, laid out at once: API key, account sign-in, base URL. */
+const BuiltInPanel = observer(function BuiltInPanel({ provider: p, endpoint, login, onLogin, onCloseLogin, onLogout }: {
+    provider: ProviderInfo
+    endpoint?: Endpoint
+    login?: LoginView
+    onLogin: (method: AuthMethod) => void
+    onCloseLogin: () => void
+    onLogout: () => void
+}) {
+    const canKey = !!p.apiKey?.interactive
+    // A stored sign-in wins over the environment, so the key only counts when no account is signed in.
+    const keySet = p.stored === 'api_key' || (p.configured && p.stored !== 'oauth')
+    const keyStatus = p.stored === 'api_key'
+        ? tr('已保存', 'Saved')
+        : keySet ? sourceText(p, endpoint) : canKey ? tr('未设置', 'Not set') : tr('pi 从环境里读取', 'pi reads it from the environment')
+    const signedIn = p.stored === 'oauth'
+    const panel = (method: AuthMethod) => login?.method === method && (
+        <LoginPanel login={login} onClose={onCloseLogin} onRetry={() => onLogin(method)} />
+    )
+
+    return (
+        <div className={PANEL}>
+            {p.apiKey && (
+                <>
+                    <div className="flex min-h-8 items-center gap-2">
+                        <span className={LINE_LABEL}>{canKey ? 'API key' : tr('凭据', 'Credentials')}</span>
+                        <span className={cn('min-w-0 flex-1 truncate text-[12px]', keySet ? 'text-gray-800' : 'text-[var(--jb-comment)]')} title={p.apiKey.label}>{keyStatus}</span>
+                        {canKey && login?.method !== 'api_key' && (
+                            <Button variant="outline" size="sm" onClick={() => onLogin('api_key')}>{p.stored === 'api_key' ? tr('更换', 'Replace') : tr('填写', 'Enter')}</Button>
+                        )}
+                        {p.stored === 'api_key' && <Button variant="ghost" size="sm" className="text-gray-600" onClick={onLogout}>{tr('删除', 'Remove')}</Button>}
+                    </div>
+                    {panel('api_key')}
+                </>
+            )}
+            {p.oauth && (
+                <>
+                    <div className="flex min-h-8 items-center gap-2">
+                        <span className={LINE_LABEL}>{p.oauth.subscription ? tr('订阅', 'Subscription') : tr('账号', 'Account')}</span>
+                        <span className={cn('min-w-0 flex-1 truncate text-[12px]', signedIn ? 'text-gray-800' : 'text-[var(--jb-comment)]')}>
+                            {[signedIn ? tr('已登录', 'Signed in') : tr('未登录', 'Not signed in'), p.oauth.label !== p.name ? p.oauth.label : ''].filter(Boolean).join(' · ')}
+                        </span>
+                        {login?.method !== 'oauth' && (
+                            <Button variant="outline" size="sm" onClick={() => onLogin('oauth')}>{signedIn ? tr('重新登录', 'Sign in again') : tr('登录', 'Sign in')}</Button>
+                        )}
+                        {signedIn && <Button variant="ghost" size="sm" className="text-gray-600" onClick={onLogout}>{tr('退出', 'Sign out')}</Button>}
+                    </div>
+                    {panel('oauth')}
+                </>
+            )}
+            <BaseUrlLine provider={p} endpoint={endpoint} />
+        </div>
+    )
+})
+
+/** A built-in provider's models.json baseUrl: a proxy or regional address, empty for pi's own. */
+const BaseUrlLine = observer(function BaseUrlLine({ provider, endpoint }: { provider: ProviderInfo, endpoint?: Endpoint }) {
+    const saved = endpoint?.baseUrl ?? ''
+    const [value, setValue] = useState(saved)
+    const [error, setError] = useState('')
+    const [busy, setBusy] = useState(false)
+    const id = useId()
+    // Saving rereads models.json, which normalises the address (no trailing slash).
+    useEffect(() => setValue(saved), [saved])
+    const dirty = value.trim() !== saved
+
+    const save = async () => {
+        setBusy(true)
+        setError('')
+        try {
+            await window.pi.saveEndpoint({ endpoint: { id: provider.id, baseUrl: value.trim() } })
+            toast.success(tr('已保存', 'Saved'))
+        }
+        catch (e) {
+            setError(messageOf(e))
+        }
+        finally {
+            setBusy(false)
+        }
+    }
+
+    return (
+        <form
+            className="flex flex-col gap-1"
+            onSubmit={(e) => {
+                e.preventDefault()
+                if (dirty)
+                    void save()
+            }}
+        >
+            <div className="flex min-h-8 items-center gap-2">
+                <label htmlFor={id} className={LINE_LABEL}>{tr('请求地址', 'Base URL')}</label>
+                <input
+                    id={id}
+                    className={cn(flatFieldClass, 'min-w-0 flex-1 bg-[var(--jb-dialog-bg)] font-mono')}
+                    value={value}
+                    spellCheck={false}
+                    placeholder={tr('默认；走代理或区域地址时填写', 'Default; set for a proxy or regional address')}
+                    onChange={(e) => {
+                        setValue(e.target.value)
+                        setError('')
+                    }}
+                />
+                {dirty && (
+                    <>
+                        <Button type="button" variant="ghost" size="sm" onClick={() => setValue(saved)}>{tr('撤销', 'Revert')}</Button>
+                        <Button type="submit" variant="primary" size="sm" disabled={busy}>
+                            {busy && <Loader2 size={13} className="animate-spin" />}
+                            {tr('保存', 'Save')}
+                        </Button>
+                    </>
+                )}
+            </div>
+            {error && <div className={cn('whitespace-pre-wrap pl-[88px] text-[12px]', DANGER)} role="alert">{error}</div>}
+        </form>
     )
 })
 
@@ -309,7 +433,7 @@ const LoginPanel = observer(function LoginPanel({ login, onClose, onRetry }: { l
     const waiting = !login.prompt && !login.error
 
     return (
-        <div className="mt-2 flex flex-col gap-2.5 rounded-[6px] bg-[var(--jb-fill)] px-3 py-2.5">
+        <div className="flex flex-col gap-2.5 pb-1.5 pl-[88px]">
             {notices.map((n, i) => <NoticeView key={i} notice={n} />)}
             {login.prompt && <PromptView key={login.prompt.id} login={login.id} promptId={login.prompt.id} prompt={login.prompt.prompt} />}
             {waiting && (
@@ -481,13 +605,12 @@ const draftOf = (m: EndpointModel): ModelDraft => ({
 })
 
 /**
- * A models.json entry. For a built-in provider only its base URL (a proxy or regional address); for
- * a custom one the API, key and models too. pi validates the result before it is kept.
+ * A custom provider's models.json entry: address, API, key and models. pi validates the result before
+ * it is kept.
  */
-const EndpointForm = observer(function EndpointForm({ provider, endpoint, onDone }: { provider?: ProviderInfo, endpoint?: Endpoint, onDone: () => void }) {
+const EndpointForm = observer(function EndpointForm({ provider, endpoint, onDone, onRemove }: { provider?: ProviderInfo, endpoint?: Endpoint, onDone: () => void, onRemove?: () => void }) {
     const isNew = !provider
-    const builtIn = !!provider?.builtIn
-    const [name, setName] = useState(endpoint?.name ?? (provider && !builtIn ? provider.name : ''))
+    const [name, setName] = useState(endpoint?.name ?? provider?.name ?? '')
     const [id, setId] = useState(provider?.id ?? '')
     const [idTouched, setIdTouched] = useState(false)
     const [baseUrl, setBaseUrl] = useState(endpoint?.baseUrl ?? '')
@@ -550,10 +673,7 @@ const EndpointForm = observer(function EndpointForm({ provider, endpoint, onDone
                 reasoning: m.reasoning,
                 images: m.images,
             }))
-            if (builtIn)
-                await window.pi.saveEndpoint({ endpoint: { id: provider.id, baseUrl: baseUrl.trim() } })
-            else
-                await window.pi.saveEndpoint({ endpoint: { id: id.trim(), name: name.trim() || undefined, baseUrl: baseUrl.trim(), api, models: endpointModels }, apiKey: keyless ? undefined : apiKey.trim() || undefined, keyless, create: isNew })
+            await window.pi.saveEndpoint({ endpoint: { id: id.trim(), name: name.trim() || undefined, baseUrl: baseUrl.trim(), api, models: endpointModels }, apiKey: keyless ? undefined : apiKey.trim() || undefined, keyless, create: isNew })
             toast.success(tr('已保存', 'Saved'))
             onDone()
         }
@@ -566,7 +686,7 @@ const EndpointForm = observer(function EndpointForm({ provider, endpoint, onDone
     }
 
     const field = cn(flatFieldClass, 'min-w-0 bg-[var(--jb-dialog-bg)]')
-    const label = 'w-20 shrink-0 text-[12px] text-gray-700'
+    const label = LINE_LABEL
     const apiOptions = ENDPOINT_APIS.map(value => ({ value, label: API_LABELS[value].label }))
     if (!(ENDPOINT_APIS as readonly string[]).includes(api))
         apiOptions.push({ value: api as typeof ENDPOINT_APIS[number], label: api })
@@ -576,17 +696,15 @@ const EndpointForm = observer(function EndpointForm({ provider, endpoint, onDone
 
     return (
         <form
-            aria-labelledby={formId}
+            aria-labelledby={isNew ? formId : undefined}
+            aria-label={isNew ? undefined : provider.name}
             className="mt-2 flex flex-col gap-2 rounded-[6px] bg-[var(--jb-fill)] px-3 py-2.5"
             onSubmit={(e) => {
                 e.preventDefault()
                 void save()
             }}
         >
-            <div id={formId} className="text-[12px] font-medium text-gray-900">
-                {isNew ? tr('添加自定义端点', 'Add a custom endpoint') : builtIn ? tr(`${provider.name} 的请求地址`, `Base URL for ${provider.name}`) : tr(`编辑 ${provider.name}`, `Edit ${provider.name}`)}
-            </div>
-            {builtIn && <Comment>{tr('走代理或区域地址时填写，留空用 pi 的默认地址。登录方式和模型列表不变。', 'For a proxy or regional address; leave empty for pi\'s default. Sign-in and models stay the same.')}</Comment>}
+            {isNew && <div id={formId} className="text-[12px] font-medium text-gray-900">{tr('添加自定义端点', 'Add a custom endpoint')}</div>}
             {isNew && (
                 <div className="flex flex-wrap items-center gap-1">
                     <span className="mr-1 text-[12px] text-[var(--jb-comment)]">{tr('本地服务：', 'Local servers:')}</span>
@@ -598,21 +716,19 @@ const EndpointForm = observer(function EndpointForm({ provider, endpoint, onDone
                     ))}
                 </div>
             )}
-            {!builtIn && (
-                <label className="flex items-center gap-2">
-                    <span className={label}>{tr('名称', 'Name')}</span>
-                    <input
-                        className={cn(field, 'flex-1')}
-                        value={name}
-                        placeholder={tr('例如：公司网关', 'e.g. Company gateway')}
-                        onChange={(e) => {
-                            setName(e.target.value)
-                            if (isNew && !idTouched)
-                                setId(slug(e.target.value))
-                        }}
-                    />
-                </label>
-            )}
+            <label className="flex items-center gap-2">
+                <span className={label}>{tr('名称', 'Name')}</span>
+                <input
+                    className={cn(field, 'flex-1')}
+                    value={name}
+                    placeholder={tr('例如：公司网关', 'e.g. Company gateway')}
+                    onChange={(e) => {
+                        setName(e.target.value)
+                        if (isNew && !idTouched)
+                            setId(slug(e.target.value))
+                    }}
+                />
+            </label>
             {isNew && (
                 <label className="flex items-center gap-2">
                     <span className={label}>ID</span>
@@ -630,69 +746,66 @@ const EndpointForm = observer(function EndpointForm({ provider, endpoint, onDone
             )}
             <label className="flex items-center gap-2">
                 <span className={label}>{tr('地址', 'Base URL')}</span>
-                <input className={cn(field, 'flex-1 font-mono')} value={baseUrl} spellCheck={false} placeholder={builtIn ? tr('默认', 'Default') : 'https://example.com/v1'} onChange={e => setBaseUrl(e.target.value)} />
+                <input className={cn(field, 'flex-1 font-mono')} value={baseUrl} spellCheck={false} placeholder="https://example.com/v1" onChange={e => setBaseUrl(e.target.value)} />
             </label>
-            {!builtIn && (
-                <>
-                    <div className="flex items-center gap-2">
-                        <span className={label}>{tr('接口', 'API')}</span>
-                        <span className="text-[12px]" title={API_LABELS[api]?.title}>
-                            <Segmented value={api as typeof ENDPOINT_APIS[number]} options={apiOptions} onChange={setApi} />
-                        </span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                        <span className={label}>API key</span>
-                        <input
-                            className={cn(field, 'flex-1 font-mono', keyless && 'opacity-50')}
-                            type="password"
-                            autoComplete="off"
-                            disabled={keyless}
-                            value={apiKey}
-                            placeholder={keyless ? tr('不需要', 'Not needed') : keyPlaceholder}
-                            aria-label="API key"
-                            onChange={e => setApiKey(e.target.value)}
-                        />
-                        <span id={keylessId} className="text-[12px] text-gray-700">{tr('不需要 key', 'No key')}</span>
-                        <Switch labelledBy={keylessId} checked={keyless} onChange={setKeyless} />
-                    </div>
-                    <div className="flex items-start gap-2">
-                        <span className={cn(label, 'pt-1.5')}>{tr('模型', 'Models')}</span>
-                        <div className="flex min-w-0 flex-1 flex-col gap-1">
-                            {models.length > 0 && (
-                                <div className="flex gap-2 text-[11px] text-[var(--jb-comment)]">
-                                    <span className="flex-1">ID</span>
-                                    <span className="w-[76px]">{tr('上下文 (K)', 'Context (K)')}</span>
-                                    <span className="w-[64px]">{tr('图片', 'Images')}</span>
-                                    <span className="w-7" />
-                                </div>
-                            )}
-                            <div className="flex max-h-[220px] flex-col gap-1 overflow-y-auto">
-                                {models.map((m, i) => (
-                                    <ModelRow
-                                        key={i}
-                                        model={m}
-                                        onChange={next => setModels(list => list.map((x, j) => (j === i ? next : x)))}
-                                        onRemove={() => setModels(list => list.filter((_, j) => j !== i))}
-                                    />
-                                ))}
-                            </div>
-                            <div className="flex items-center gap-1">
-                                <Button type="button" variant="ghost" size="sm" className="h-6 px-2 text-gray-700" onClick={() => setModels(list => [...list, { id: '', contextK: '', images: false }])}>
-                                    <Plus size={13} />
-                                    {tr('添加', 'Add')}
-                                </Button>
-                                <Button type="button" variant="ghost" size="sm" className="h-6 px-2 text-gray-700" disabled={!baseUrl.trim() || busy !== ''} onClick={() => void fetchModels()}>
-                                    {busy === 'fetch' ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
-                                    {tr('从端点获取', 'Fetch from the endpoint')}
-                                </Button>
-                            </div>
+            <div className="flex items-center gap-2">
+                <span className={label}>{tr('接口', 'API')}</span>
+                <span className="text-[12px]" title={API_LABELS[api]?.title}>
+                    <Segmented value={api as typeof ENDPOINT_APIS[number]} options={apiOptions} onChange={setApi} />
+                </span>
+            </div>
+            <div className="flex items-center gap-2">
+                <span className={label}>API key</span>
+                <input
+                    className={cn(field, 'flex-1 font-mono', keyless && 'opacity-50')}
+                    type="password"
+                    autoComplete="off"
+                    disabled={keyless}
+                    value={apiKey}
+                    placeholder={keyless ? tr('不需要', 'Not needed') : keyPlaceholder}
+                    aria-label="API key"
+                    onChange={e => setApiKey(e.target.value)}
+                />
+                <span id={keylessId} className="text-[12px] text-gray-700">{tr('不需要 key', 'No key')}</span>
+                <Switch labelledBy={keylessId} checked={keyless} onChange={setKeyless} />
+            </div>
+            <div className="flex items-start gap-2">
+                <span className={cn(label, 'pt-1.5')}>{tr('模型', 'Models')}</span>
+                <div className="flex min-w-0 flex-1 flex-col gap-1">
+                    {models.length > 0 && (
+                        <div className="flex gap-2 text-[11px] text-[var(--jb-comment)]">
+                            <span className="flex-1">ID</span>
+                            <span className="w-[76px]">{tr('上下文 (K)', 'Context (K)')}</span>
+                            <span className="w-[64px]">{tr('图片', 'Images')}</span>
+                            <span className="w-7" />
                         </div>
+                    )}
+                    <div className="flex max-h-[220px] flex-col gap-1 overflow-y-auto">
+                        {models.map((m, i) => (
+                            <ModelRow
+                                key={i}
+                                model={m}
+                                onChange={next => setModels(list => list.map((x, j) => (j === i ? next : x)))}
+                                onRemove={() => setModels(list => list.filter((_, j) => j !== i))}
+                            />
+                        ))}
                     </div>
-                </>
-            )}
+                    <div className="flex items-center gap-1">
+                        <Button type="button" variant="ghost" size="sm" className="h-6 px-2 text-gray-700" onClick={() => setModels(list => [...list, { id: '', contextK: '', images: false }])}>
+                            <Plus size={13} />
+                            {tr('添加', 'Add')}
+                        </Button>
+                        <Button type="button" variant="ghost" size="sm" className="h-6 px-2 text-gray-700" disabled={!baseUrl.trim() || busy !== ''} onClick={() => void fetchModels()}>
+                            {busy === 'fetch' ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
+                            {tr('从端点获取', 'Fetch from the endpoint')}
+                        </Button>
+                    </div>
+                </div>
+            </div>
             {error && <div className={cn('whitespace-pre-wrap text-[12px]', DANGER)} role="alert">{error}</div>}
             <div className="flex justify-end gap-2">
-                <Button type="button" variant="ghost" size="sm" onClick={onDone}>{tr('取消', 'Cancel')}</Button>
+                {onRemove && <Button type="button" variant="ghost" size="sm" className={cn('mr-auto', DANGER)} onClick={onRemove}>{tr('删除端点', 'Remove endpoint')}</Button>}
+                <Button type="button" variant="ghost" size="sm" onClick={onDone}>{isNew ? tr('取消', 'Cancel') : tr('收起', 'Close')}</Button>
                 <Button type="submit" variant="primary" size="sm" disabled={busy !== ''}>
                     {busy === 'save' && <Loader2 size={13} className="animate-spin" />}
                     {tr('保存', 'Save')}
