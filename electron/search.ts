@@ -139,7 +139,8 @@ export class SessionSearch {
     private updating: Promise<void> | null = null
     private loaded: Promise<void> | null = null
 
-    constructor(private cacheFile?: string) {}
+    /** `extraFiles`: more pi-format session files to index (the ACP copies, acp/mirror.ts). */
+    constructor(private cacheFile?: string, private extraFiles?: () => Promise<string[]>) {}
 
     /** Re-reads changed and new session files; concurrent callers share one pass. */
     update(): Promise<void> {
@@ -173,7 +174,8 @@ export class SessionSearch {
 
     private async refresh() {
         await (this.loaded ??= this.load())
-        const files = await sessionFiles()
+        const [own, extra] = await Promise.all([sessionFiles(), this.extraFiles?.() ?? []])
+        const files = [...own, ...extra]
         const present = new Set(files)
         let changed = false
         for (const file of this.index.keys()) {

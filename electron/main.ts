@@ -49,7 +49,8 @@ const agents = new AgentManager({
 }, extensionsDir)
 
 // Sessions of ACP agents (Codex, …) started from the app; the agents keep the conversations.
-const acp = new AcpService(() => path.join(app.getPath('userData'), 'acp-sessions.json'))
+const acpMirrorDir = () => path.join(app.getPath('userData'), 'acp-transcripts')
+const acp = new AcpService(() => path.join(app.getPath('userData'), 'acp-sessions.json'), acpMirrorDir)
 
 const windows = new Windows({ store, create: createWindow, stopAgent: id => agents.stop(id) })
 
@@ -97,7 +98,7 @@ const search = (() => {
     let next = 0
     const pending = new Map<number, { resolve: (r: SearchResult[]) => void, reject: (e: Error) => void }>()
     const start = () => {
-        const w = new Worker(path.join(__dirname, 'searchWorker.js'), { workerData: { cacheFile: path.join(app.getPath('userData'), 'search-index.json') } })
+        const w = new Worker(path.join(__dirname, 'searchWorker.js'), { workerData: { cacheFile: path.join(app.getPath('userData'), 'search-index.json'), mirrorDir: acpMirrorDir() } })
         w.on('message', ({ id, ok, results, error }) => {
             const p = pending.get(id)
             pending.delete(id)
@@ -235,10 +236,17 @@ const absolutePath = (value: unknown): string => {
 function registerIpc() {
     ipcMain.handle(IPC.resolveEnv, () => resolvePiEnv())
     ipcMain.handle(IPC.listAgents, () => acp.availability())
-    ipcMain.handle(IPC.listSessions, async () => [...await listSessions(), ...acp.listSessions()].sort((a, b) => b.updatedAt - a.updatedAt))
+    ipcMain.handle(IPC.listSessions, async () => {
+        const pi = await listSessions()
+        const known = new Set([...store.state.projects, ...pi.map(s => s.cwd)])
+        const others = await acp.listSessions(known)
+        return [...pi, ...others].sort((a, b) => b.updatedAt - a.updatedAt)
+    })
     ipcMain.handle(IPC.readSession, (_e, file: string) => (parseAcpSessionKey(file) ? acp.readSession(file) : readSession(file)))
     ipcMain.handle(IPC.presence, () => presence.current)
-    ipcMain.handle(IPC.searchSessions, (_e, query: unknown) => search.search(typeof query === 'string' ? query.slice(0, 500) : ''))
+    // ACP sessions are indexed through their pi-format copies; results name the session key.
+    ipcMain.handle(IPC.searchSessions, async (_e, query: unknown) => (await search.search(typeof query === 'string' ? query.slice(0, 500) : ''))
+        .map(r => ({ ...r, session: acp.keyOfMirror(r.session) ?? r.session })))
     ipcMain.handle(IPC.trashSession, async (_e, file: string) => {
         if (parseAcpSessionKey(file)) {
             acp.remove(file)
@@ -339,7 +347,7 @@ function registerIpc() {
         return Object.fromEntries(await Promise.all(list.map(async cwd => [cwd, await gitBranch(cwd)] as const)))
     })
     ipcMain.handle(IPC.gitFileDiff, (_e, cwd: string, file: string, status: string) => gitFileDiff(cwd, file, status))
-    ipcMain.handle(IPC.repoEdits, (_e, cwd: unknown) => repoEdits(absolutePath(cwd)))
+    ipcMain.handle(IPC.repoEdits, async (_e, cwd: unknown) => repoEdits(absolutePath(cwd), await acp.mirrors(), file => acp.keyOfMirror(file)))
     ipcMain.handle(IPC.gitDiscard, (_e, cwd: unknown, files: unknown) => {
         if (!Array.isArray(files))
             throw new Error('expected a file list')

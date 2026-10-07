@@ -1,12 +1,13 @@
-// ACP agents for the main process: finding their adapter commands, the index of sessions started
-// from the app, and reading a session back (live transcript, or a session/load replay).
+// ACP agents for the main process: finding their adapter commands, the index of their sessions
+// (started from the app, or listed by the agent itself), reading a session back (live transcript, or
+// a session/load replay), and the pi-format copies that search and the edit log read (mirror.ts).
 
 import type { AcpAgentId, AcpAgentSpec, AgentAvailability } from '@shared/agents'
-import type { SessionSnapshot, SessionSummary } from '@shared/ipc'
+import type { SessionItem, SessionSnapshot, SessionSummary } from '@shared/ipc'
 import type { AcpAgentCallbacks, AcpLaunch } from './agent'
-import { ACP_AGENTS, acpAgent, parseAcpSessionKey } from '@shared/agents'
+import { ACP_AGENTS, acpAgent, acpSessionKey, parseAcpSessionKey } from '@shared/agents'
 import { constants, readFileSync } from 'node:fs'
-import { access, mkdir, readFile, rename, writeFile } from 'node:fs/promises'
+import { access, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import process from 'node:process'
@@ -14,6 +15,8 @@ import { tr } from '../i18n'
 import { loginShellPath } from '../pi-env'
 import { agentDir } from '../piSettings'
 import { AcpAgent } from './agent'
+import { listAgentSessions } from './list'
+import { mirrorFile, mirrorFiles, mirrorKey, mirrorText } from './mirror'
 
 /** What the app remembers of an ACP session (the agent keeps the conversation itself). */
 export interface AcpSessionRecord {
@@ -28,7 +31,15 @@ export interface AcpSessionRecord {
     firstPrompt?: string
     createdAt: number
     updatedAt: number
+    /** Found in the agent's own list (session/list), not started from the app. */
+    imported?: boolean
 }
+
+/** An agent's own list is read again after this long (sessions from a terminal show up then). */
+const IMPORT_EVERY_MS = 2 * 60_000
+/** The first list (nothing imported yet) is waited for this long before the sidebar shows. */
+const FIRST_IMPORT_WAIT_MS = 6000
+const MIRROR_DELAY_MS = 200
 
 async function findIn(bin: string, dirs: string[]): Promise<string | undefined> {
     for (const dir of dirs) {
@@ -111,14 +122,27 @@ export class AcpService {
     private live = new Map<string, AcpAgent>()
     private replays = new Map<string, { updatedAt: number, snapshot: Promise<SessionSnapshot> }>()
     private saving: Promise<void> = Promise.resolve()
+    /** Sessions the user removed from the app; the agent still lists them. */
+    private hidden = new Set<string>()
+    /** When each agent's list was last read (attempted). */
+    private importedAt: Partial<Record<AcpAgentId, number>> = {}
+    private importing: Promise<void> | null = null
+    private mirrorTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
-    constructor(private file: () => string) {
+    /** `mirrorDir`: where the pi-format copies go; none, no copies. */
+    constructor(private file: () => string, private mirrorDir?: () => string) {
         try {
             const saved = JSON.parse(readFileSync(file(), 'utf8'))
             for (const record of Array.isArray(saved?.sessions) ? saved.sessions : []) {
                 if (typeof record?.key === 'string' && parseAcpSessionKey(record.key))
                     this.records.set(record.key, record)
             }
+            for (const key of Array.isArray(saved?.hidden) ? saved.hidden : []) {
+                if (typeof key === 'string')
+                    this.hidden.add(key)
+            }
+            if (saved?.importedAt && typeof saved.importedAt === 'object')
+                this.importedAt = saved.importedAt
         }
         catch {}
     }
@@ -144,7 +168,11 @@ export class AcpService {
         const record = sessionKey ? this.records.get(sessionKey) : undefined
         const launch = await resolveLaunch(spec)
         const instance = new AcpAgent(spec, launch, { cwd, sessionId: resume?.sessionId, replayTime: record?.updatedAt }, {
-            onEvent: callbacks.onEvent,
+            onEvent: (id, event) => {
+                callbacks.onEvent(id, event)
+                if (event.type === 'message_end')
+                    this.mirrorSoon(instance.key, () => instance.snapshot())
+            },
             onExit: (id, info) => {
                 if (this.live.get(instance.key) === instance)
                     this.live.delete(instance.key)
@@ -156,6 +184,7 @@ export class AcpService {
                 this.live.set(a.key, a)
                 this.replays.delete(a.key)
                 this.note(a, change)
+                this.mirrorSoon(a.key, () => a.snapshot())
                 if (change.title && !this.records.get(a.key)?.name)
                     callbacks.onEvent(a.id, { type: 'session_info_changed', name: change.title })
             },
@@ -181,8 +210,22 @@ export class AcpService {
         this.save()
     }
 
-    listSessions(): SessionSummary[] {
-        return [...this.records.values()].map(r => ({
+    /**
+     * The index, after bringing in each agent's own list when it is due. The first time (nothing
+     * imported yet) waits a little for it; later the last import shows and the next lands behind.
+     *
+     * Every session cwd is a project in the sidebar, so imported sessions only show for `projects`
+     * (folders the app knows already): a Codex history spans every scratch folder it ever ran in.
+     */
+    async listSessions(projects: ReadonlySet<string>): Promise<SessionSummary[]> {
+        const pass = this.importDue()
+        if (!Object.keys(this.importedAt).length)
+            await Promise.race([pass, new Promise(resolve => setTimeout(resolve, FIRST_IMPORT_WAIT_MS))])
+        return this.summaries(projects)
+    }
+
+    private summaries(projects: ReadonlySet<string>): SessionSummary[] {
+        return [...this.records.values()].filter(r => !r.imported || projects.has(r.cwd)).map(r => ({
             path: r.key,
             id: r.sessionId,
             cwd: r.cwd,
@@ -212,10 +255,122 @@ export class AcpService {
         const cached = this.replays.get(key)
         if (cached?.updatedAt === record.updatedAt)
             return cached.snapshot
-        const snapshot = this.replay(record).then(items => ({ ...header, items }))
+        const snapshot = this.replay(record).then((items) => {
+            void this.writeMirror(key, items)
+            return { ...header, items }
+        })
         this.replays.set(key, { updatedAt: record.updatedAt, snapshot })
         snapshot.catch(() => this.replays.delete(key))
         return snapshot
+    }
+
+    /** Reads the lists of the agents that are due, one pass at a time. */
+    importDue(): Promise<void> {
+        this.importing ??= this.importAll().finally(() => {
+            this.importing = null
+        })
+        return this.importing
+    }
+
+    private async importAll() {
+        const now = Date.now()
+        await Promise.all(ACP_AGENTS.map(async (spec) => {
+            if (now - (this.importedAt[spec.id] ?? 0) < IMPORT_EVERY_MS)
+                return
+            let launch: AcpLaunch
+            try {
+                launch = await resolveLaunch(spec)
+            }
+            catch {
+                return
+            }
+            // npx would download the adapter (hundreds of MB) just to list: only once the user ran it.
+            if (launch.via === 'npx' && ![...this.records.values()].some(r => r.agent === spec.id && !r.imported))
+                return
+            this.importedAt[spec.id] = now
+            try {
+                const list = await listAgentSessions(spec, launch)
+                if (list)
+                    this.merge(spec.id, list.sessions, list.complete)
+            }
+            catch {}
+        }))
+        this.save()
+    }
+
+    /** Folds an agent's list into the index; with the whole list, imported sessions it no longer has go. */
+    merge(agent: AcpAgentId, listed: { sessionId: string, cwd: string, title?: string, updatedAt: number }[], complete: boolean) {
+        const seen = new Set<string>()
+        for (const s of listed) {
+            const key = acpSessionKey(agent, s.sessionId)
+            seen.add(key)
+            if (this.hidden.has(key))
+                continue
+            const existing = this.records.get(key)
+            if (existing) {
+                existing.title ??= s.title
+                if (s.updatedAt > existing.updatedAt)
+                    existing.updatedAt = s.updatedAt
+                continue
+            }
+            const at = s.updatedAt || Date.now()
+            this.records.set(key, { key, agent, sessionId: s.sessionId, cwd: s.cwd, title: s.title, createdAt: at, updatedAt: at, imported: true })
+        }
+        if (complete) {
+            for (const record of [...this.records.values()]) {
+                if (record.agent === agent && record.imported && !seen.has(record.key) && !this.live.has(record.key)) {
+                    this.records.delete(record.key)
+                    this.dropMirror(record.key)
+                }
+            }
+        }
+        this.save()
+    }
+
+    // ---------------------------------------------------------------- pi-format copies
+
+    /** Every copy, for search and the edit log. */
+    mirrors(): Promise<string[]> {
+        return this.mirrorDir ? mirrorFiles(this.mirrorDir()) : Promise.resolve([])
+    }
+
+    /** The session key a copy stands for. */
+    keyOfMirror(file: string): string | undefined {
+        return this.mirrorDir ? mirrorKey(this.mirrorDir(), file) : undefined
+    }
+
+    /** Rewrites a session's copy soon; bursts of messages collapse into one write. */
+    private mirrorSoon(key: string, items: () => SessionItem[]) {
+        if (!this.mirrorDir || !key)
+            return
+        clearTimeout(this.mirrorTimers.get(key))
+        this.mirrorTimers.set(key, setTimeout(() => {
+            this.mirrorTimers.delete(key)
+            void this.writeMirror(key, items())
+        }, MIRROR_DELAY_MS))
+    }
+
+    private async writeMirror(key: string, items: SessionItem[]) {
+        const record = this.records.get(key)
+        const file = this.mirrorDir && mirrorFile(this.mirrorDir(), key)
+        // Only listed sessions: one that never got a prompt is not in the index either.
+        if (!record || !file || !items.length)
+            return
+        const text = mirrorText({ sessionId: record.sessionId, cwd: record.cwd, createdAt: record.createdAt, name: record.name ?? record.title }, items)
+        try {
+            await mkdir(path.dirname(file), { recursive: true })
+            await writeFile(`${file}.tmp`, text)
+            await rename(`${file}.tmp`, file)
+        }
+        catch {}
+    }
+
+    private dropMirror(key: string) {
+        clearTimeout(this.mirrorTimers.get(key))
+        this.mirrorTimers.delete(key)
+        const file = this.mirrorDir && mirrorFile(this.mirrorDir(), key)
+        if (file)
+            void rm(file, { force: true }).catch(() => {})
     }
 
     /** Opens the session in a throwaway process; session/load streams the history back. */
@@ -241,16 +396,19 @@ export class AcpService {
         }
     }
 
-    /** Forgets a session in the app; the agent's own history is left alone. */
+    /** Forgets a session in the app; the agent's own history is left alone (and stays hidden here). */
     remove(key: string) {
-        if (this.records.delete(key)) {
-            this.replays.delete(key)
-            this.save()
-        }
+        if (!this.records.delete(key))
+            return
+        // The agent's own list would bring it back.
+        this.hidden.add(key)
+        this.replays.delete(key)
+        this.dropMirror(key)
+        this.save()
     }
 
     private save() {
-        const data = JSON.stringify({ sessions: [...this.records.values()] }, null, 2)
+        const data = JSON.stringify({ sessions: [...this.records.values()], hidden: [...this.hidden], importedAt: this.importedAt }, null, 2)
         const file = this.file()
         this.saving = this.saving.then(async () => {
             await mkdir(path.dirname(file), { recursive: true })

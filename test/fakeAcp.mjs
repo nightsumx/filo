@@ -1,15 +1,24 @@
 // A scripted ACP agent for test/acp-e2e.ts, shaped like codex-acp (config options, terminal output
 // deltas, diff content, request_permission, session/load replay). Sessions persist as JSONL of
-// the updates sent, under FAKE_ACP_DIR, so a reopened thread replays them.
+// the updates sent, under FAKE_ACP_DIR, so a reopened thread replays them; <id>.meta.json holds
+// what session/list reports (agent, cwd, title, updatedAt). `--agent=<id>` picks whose sessions
+// it lists, since every agent of the e2e runs this one script.
 //
 //   "edit <file>"  runs `ls`, asks to write <file> (diff), writes it once allowed, then answers
 //   anything else  answers "echo: <prompt>"
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import process from 'node:process'
 
 const DIR = process.env.FAKE_ACP_DIR || '/tmp/fake-acp'
+const AGENT = process.argv.find(a => a.startsWith('--agent='))?.slice('--agent='.length) ?? 'codex'
 mkdirSync(DIR, { recursive: true })
+
+const metaFile = id => path.join(DIR, `${id}.meta.json`)
+function touch(session, patch = {}) {
+    const meta = existsSync(metaFile(session.id)) ? JSON.parse(readFileSync(metaFile(session.id), 'utf8')) : { agent: AGENT, cwd: session.cwd }
+    writeFileSync(metaFile(session.id), JSON.stringify({ ...meta, ...patch, updatedAt: new Date().toISOString() }))
+}
 
 const sessions = new Map()
 const pending = new Map()
@@ -53,6 +62,7 @@ async function prompt(session, params) {
     // Recorded for replay only: ACP does not echo the prompt live.
     appendFileSync(path.join(DIR, `${session.id}.jsonl`), `${JSON.stringify({ sessionUpdate: 'user_message_chunk', content: { type: 'text', text } })}\n`)
     session.cancelled = false
+    touch(session, existsSync(metaFile(session.id)) ? {} : { title: text })
     const edit = /^edit (\S+)/.exec(text)
     if (!edit) {
         update(session, say(`echo: ${text}`))
@@ -84,6 +94,7 @@ async function prompt(session, params) {
     update(session, { sessionUpdate: 'plan', entries: [{ content: 'Look around', status: 'completed', priority: 'high' }, { content: `Write ${edit[1]}`, status: allowed ? 'completed' : 'pending', priority: 'high' }] })
     update(session, say(allowed ? `Wrote ${edit[1]}.` : 'Not allowed, left it alone.'))
     update(session, { sessionUpdate: 'session_info_update', title: `Edit ${edit[1]}` }, { record: false })
+    touch(session, { title: `Edit ${edit[1]}` })
     update(session, { sessionUpdate: 'usage_update', used: 1200, size: 100_000 }, { record: false })
     return { stopReason: 'end_turn', usage: { inputTokens: 1000, cachedReadTokens: 400, outputTokens: 50, thoughtTokens: 5, totalTokens: 1050 } }
 }
@@ -97,7 +108,7 @@ function newSession(id, cwd) {
 const handlers = {
     initialize: () => ({
         protocolVersion: 1,
-        agentCapabilities: { loadSession: true, promptCapabilities: { image: true }, sessionCapabilities: {} },
+        agentCapabilities: { loadSession: true, promptCapabilities: { image: true }, sessionCapabilities: { list: {} } },
         authMethods: [],
         _meta: { steering: { supported: false } },
     }),
@@ -115,6 +126,12 @@ const handlers = {
             update(session, JSON.parse(line), { record: false })
         return { configOptions: configOptions(session) }
     },
+    'session/list': () => ({
+        sessions: readdirSync(DIR).filter(f => f.endsWith('.meta.json')).map((f) => {
+            const meta = JSON.parse(readFileSync(path.join(DIR, f), 'utf8'))
+            return { sessionId: f.slice(0, -'.meta.json'.length), cwd: meta.cwd, title: meta.title, updatedAt: meta.updatedAt, agent: meta.agent }
+        }).filter(s => s.agent === AGENT).map(({ agent, ...s }) => s),
+    }),
     'session/set_config_option': (params) => {
         const session = sessions.get(params.sessionId)
         const key = { mode: 'mode', model: 'model', reasoning_effort: 'effort' }[params.configId]

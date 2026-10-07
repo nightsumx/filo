@@ -89,13 +89,15 @@ async function sessionEdits(file: string, size: number, mtime: number): Promise<
 
 /**
  * For each uncommitted file in the repository holding `cwd`, the sessions that edited it after
- * the last commit (latest edit per session).
+ * the last commit (latest edit per session). `extra`: more pi-format session files (the ACP copies),
+ * reported under `keyOf(file)`.
  */
-export async function repoEdits(cwd: string): Promise<RepoEdits> {
+export async function repoEdits(cwd: string, extra: string[] = [], keyOf: (file: string) => string | undefined = () => undefined): Promise<RepoEdits> {
     const root = await gitRoot(cwd)
     if (!root)
         return { files: {} }
-    const [since, dirty, files] = await Promise.all([gitHeadTime(root), gitDirty(root), sessionFiles()])
+    const [since, dirty, own] = await Promise.all([gitHeadTime(root), gitDirty(root), sessionFiles()])
+    const files = [...own, ...extra]
     const wanted = new Set(dirty.map(f => f.path))
     const result: Record<string, FileEditor[]> = {}
     if (!wanted.size)
@@ -118,7 +120,7 @@ export async function repoEdits(cwd: string): Promise<RepoEdits> {
                 latest.set(rel, Math.max(latest.get(rel) ?? 0, edit.at))
             }
             for (const [rel, at] of latest)
-                (result[rel] ??= []).push({ session: file, title: session.title, at })
+                (result[rel] ??= []).push({ session: keyOf(file) ?? file, title: session.title, at })
         }
         catch {}
     }))

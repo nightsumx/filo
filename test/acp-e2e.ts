@@ -6,8 +6,11 @@
 //   - the session is listed with its agent, and a reopened tab replays it from the agent
 //   - pi-only actions (fork, compaction) stay hidden
 //   - Claude Code and Grok Build are offered too; a Claude thread carries its own label
+//   - a session the agent lists itself (started in a terminal) shows up and opens
+//   - ACP threads are in session search and in the changes panel's edit log
 //
 //   bun run build && bun run e2e:acp
+import { execFileSync } from 'node:child_process'
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import process from 'node:process'
@@ -15,6 +18,7 @@ import { check, launch, until, windows } from './app'
 
 const WORK = '/private/tmp/pi-gui-acp'
 const SHOTS = process.env.SHOTS ?? ''
+const FAKE = path.resolve(import.meta.dirname, 'fakeAcp.mjs')
 
 async function main() {
     await rm(WORK, { recursive: true, force: true })
@@ -24,6 +28,16 @@ async function main() {
     const fakeDir = path.join(WORK, 'fake-acp')
     await Promise.all([repo, userData, agentDir, fakeDir].map(d => mkdir(d, { recursive: true })))
     await writeFile(path.join(repo, 'README.md'), 'hello\n')
+    const git = (...args: string[]) => execFileSync('git', ['-c', 'user.email=a@b', '-c', 'user.name=t', ...args], { cwd: repo })
+    git('init', '-q')
+    git('add', '-A')
+    git('commit', '-qm', 'init')
+    // A Codex session from a terminal: the agent lists it, the app has never seen it.
+    await writeFile(path.join(fakeDir, 'term-1.jsonl'), [
+        { sessionUpdate: 'user_message_chunk', content: { type: 'text', text: 'from the terminal' } },
+        { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'echo: from the terminal' } },
+    ].map(u => JSON.stringify(u)).join('\n'))
+    await writeFile(path.join(fakeDir, 'term-1.meta.json'), JSON.stringify({ agent: 'codex', cwd: repo, title: 'From the terminal', updatedAt: new Date(Date.now() - 60_000).toISOString() }))
     await writeFile(path.join(userData, 'state.json'), JSON.stringify({
         projects: [repo],
         hiddenProjects: [],
@@ -41,9 +55,9 @@ async function main() {
         PI_CODING_AGENT_DIR: agentDir,
         PI_GUI_TEST: '1',
         // Every ACP agent runs the same scripted one here.
-        PI_GUI_ACP_CODEX: JSON.stringify(['node', path.resolve(import.meta.dirname, 'fakeAcp.mjs')]),
-        PI_GUI_ACP_CLAUDE: JSON.stringify(['node', path.resolve(import.meta.dirname, 'fakeAcp.mjs')]),
-        PI_GUI_ACP_GROK: JSON.stringify(['node', path.resolve(import.meta.dirname, 'fakeAcp.mjs')]),
+        PI_GUI_ACP_CODEX: JSON.stringify(['node', FAKE, '--agent=codex']),
+        PI_GUI_ACP_CLAUDE: JSON.stringify(['node', FAKE, '--agent=claude']),
+        PI_GUI_ACP_GROK: JSON.stringify(['node', FAKE, '--agent=grok']),
         FAKE_ACP_DIR: fakeDir,
     }
     const R = JSON.stringify(repo)
@@ -110,6 +124,12 @@ async function main() {
         check(await js<boolean>(`[...document.querySelectorAll('[role=treeitem]')].some(r => r.textContent.includes('Codex'))`), 'the sidebar row says Codex')
         check(await js<boolean>(`![...document.querySelectorAll('button')].some(b => b.getAttribute('title') === 'Fork from here')`), 'fork stays hidden for ACP threads')
 
+        // The app's copy of the transcript feeds search and the edit log.
+        const found = await until('search finds the ACP thread', () => js<boolean>(`(async () => (await window.pi.searchSessions('wrote notes')).some(r => r.session === ${JSON.stringify(key)} && r.hits.length > 0))()`))
+        check(found, 'session search finds the Codex thread by its reply, under its session key')
+        await until('the edit log names the thread', () => js<boolean>(`(async () => ((await window.pi.repoEdits(${R})).files['notes.txt'] ?? []).some(e => e.session === ${JSON.stringify(key)}))()`))
+        check(true, 'the changes panel knows the Codex thread wrote notes.txt')
+
         await js(`${T}.setConfigOption('mode', 'agent')`)
         await until('mode changed', () => js<boolean>(`${T}.configOptions.find(o => o.id === 'mode')?.currentValue === 'agent'`))
         check(true, 'a config picker choice goes to the agent')
@@ -132,6 +152,15 @@ async function main() {
         await js(`(() => { const t = window.__app.threads.get(${JSON.stringify(key)}); t.draft = 'third'; void t.send(); return true })()`)
         await until('resumed run', () => js<boolean>(`(() => { const t = window.__app.threads.get(${JSON.stringify(key)}); return !t.running && t.turns.length === ${turnsBefore + 1} && JSON.stringify(t.turns.at(-1).steps).includes('echo: third') })()`), 20_000)
         check(await js<string>(`window.__app.threads.get(${JSON.stringify(key)}).key`) === key, 'the resumed session keeps its key')
+
+        // The terminal session the agent listed: in the sidebar with its agent, and it opens.
+        const termKey = 'acp:codex:term-1'
+        check(await js<boolean>(`window.__app.sessions.some(s => s.path === '${termKey}' && s.name === 'From the terminal' && s.agent === 'codex')`), 'a session the agent lists itself shows up in the project')
+        await js(`(() => { window.__app.openSession(window.__app.sessions.find(s => s.path === '${termKey}')); return true })()`)
+        await until('the terminal session replays', () => js<boolean>(`(() => { const t = window.__app.threads.get('${termKey}'); return !!t && t.loaded && JSON.stringify(t.turns).includes('echo: from the terminal') })()`), 20_000)
+        check(true, 'it opens with its history from the agent')
+        await until('search finds the opened terminal session', () => js<boolean>(`(async () => (await window.pi.searchSessions('from the terminal')).some(r => r.session === '${termKey}'))()`))
+        check(true, 'once opened it is in search too')
 
         // Another agent in a second thread: its own label everywhere.
         await js(`(() => { window.__app.newThread(${R}); return true })()`)
