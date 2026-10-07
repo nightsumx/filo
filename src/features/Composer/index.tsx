@@ -60,7 +60,7 @@ const SlashMenu = observer(function SlashMenu({ commands, active, onPick }: { co
         listRef.current?.querySelector('[data-active="true"]')?.scrollIntoView({ block: 'nearest' })
     }, [active])
     return (
-        <div ref={listRef} role="listbox" className="absolute bottom-full left-0 right-0 z-20 mb-1.5 max-h-64 overflow-y-auto rounded-lg border border-gray-200 bg-elevated p-1 shadow-[0_6px_24px_rgba(0,0,0,0.18)]">
+        <div ref={listRef} role="listbox" className="absolute bottom-full left-0 right-0 z-20 mb-1.5 max-h-64 overflow-y-auto rounded-lg border border-gray-200 bg-elevated p-1 shadow-[0_6px_24px_rgba(0,0,0,0.18)] light:shadow-[shadow:var(--ide-float-shadow)]">
             {commands.map((c, i) => (
                 <button
                     key={`${c.source}:${c.name}`}
@@ -200,9 +200,10 @@ export const Composer = observer(({ thread }: { thread: Thread }) => {
                 {slashMatches.length > 0 && <SlashMenu commands={slashMatches} active={slashIndex} onPick={pickCommand} />}
                 <div
                     className={cn(
-                        // A borderless filled field; focus changes nothing but the caret. Only a file
-                        // drag shows an outline, as the drop target.
-                        'relative cursor-text rounded-lg border border-transparent bg-ide-block transition-[border-color,background-color]',
+                        // A filled field (dark: borderless; light: white with a hairline and a faint drop);
+                        // focus changes nothing but the caret. A file drag shows an accent outline, as
+                        // the drop target.
+                        'relative cursor-text rounded-lg border border-transparent bg-ide-input shadow-[shadow:var(--ide-input-shadow)] transition-[border-color,background-color] light:border-ide-border',
                         dragOver && '!border-ide-accent !bg-ide-sel',
                     )}
                     onClick={e => e.target === e.currentTarget && textareaRef.current?.focus()}

@@ -301,7 +301,7 @@ export const Sidebar = observer(() => {
     })
 
     return (
-        <nav className="ide-island flex w-[272px] shrink-0 flex-col bg-ide-panel" aria-label={tr('项目', 'Projects')}>
+        <nav className="ide-island flex w-[272px] shrink-0 flex-col bg-ide-side [--ide-island-edge:none]" aria-label={tr('项目', 'Projects')}>
             <div className="flex h-[34px] shrink-0 items-center gap-0.5 pl-3 pr-1.5">
                 <span className="flex-1 text-[13px] font-semibold text-gray-900">{tr('项目', 'Projects')}</span>
                 <button type="button" aria-label={tr('添加项目到此窗口', 'Add project to this window')} title={tr('添加项目到此窗口', 'Add project to this window')} onClick={() => void appStore.addProjectHere()} className={toolBtn}>

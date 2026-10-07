@@ -13,7 +13,7 @@ const Toaster = observer(({ ...props }: ToasterProps) => {
             toastOptions={{
                 classNames: {
                     toast:
-                        'group toast group-[.toaster]:bg-elevated group-[.toaster]:border-black/10 group-[.toaster]:backdrop-blur-sm group-[.toaster]:text-gray-700 group-[.toaster]:rounded-md group-[.toaster]:shadow-xl',
+                        'group toast group-[.toaster]:bg-elevated group-[.toaster]:border-black/10 group-[.toaster]:backdrop-blur-sm group-[.toaster]:text-gray-700 group-[.toaster]:rounded-md group-[.toaster]:shadow-xl light:group-[.toaster]:shadow-[shadow:var(--ide-float-shadow)]',
                     description: 'group-[.toast]:text-gray-600',
                     actionButton:
                         'group-[.toast]:bg-blue-100 group-[.toast]:text-blue-700 group-[.toast]:rounded-lg',

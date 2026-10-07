@@ -468,7 +468,7 @@ export const ReviewPanel = observer(({ thread, onClose }: { thread: Thread, onCl
                         rows={3}
                         aria-label={tr('提交说明', 'Commit message')}
                         placeholder={tr('提交说明', 'Commit message')}
-                        className="block w-full resize-none rounded-md bg-ide-editor px-2 py-1.5 text-[13px] text-gray-900 outline-none placeholder:text-gray-400"
+                        className="block w-full resize-none rounded-md bg-ide-editor px-2 py-1.5 text-[13px] text-gray-900 outline-none placeholder:text-gray-400 light:bg-ide-block light:shadow-[inset_0_0_0_1px_var(--ide-line)]"
                     />
                     <div className="mt-1.5 flex items-center gap-2">
                         <span className="text-[12px] tabular-nums text-gray-500">{tr(`已选 ${picked.length} / ${files.length} 个文件`, `${picked.length} of ${files.length} files`)}</span>

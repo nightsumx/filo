@@ -16,12 +16,11 @@ const gray = v => `${v} ${v} ${v}`
 /** JetBrains "Islands" dark neutrals (slightly cool), lightest last; tuned against the #1e1f22 editor. */
 const DARK_GRAY = { 50: '34 35 39', 100: '43 45 48', 200: '57 59 64', 300: '78 81 87', 400: '111 115 122', 500: '134 138 145', 600: '157 161 168', 700: '180 184 191', 800: '206 208 214', 900: '223 225 229', 950: '240 241 242' }
 /**
- * Light neutrals, pure grey like the Codex app's (its gray-50 #f9f9f9, ink #0d0d0d). Each step keeps
- * the OKLab lightness of the JetBrains Int UI Light scale it replaced, so contrast between steps is
- * unchanged and 500 / 700 sit next to Codex's tertiary (#878787) and secondary (#575757) text.
- * 900 / 950 are Codex's ink (#0d0d0d) and black.
+ * Light neutrals: apple.com's greys, which are faintly cool (blue a few points above red and green).
+ * 300 / 500 / 600 / 900 are its tokens (#d2d2d7, #86868b, #6e6e73, #1d1d1f); the other steps keep the
+ * lightness of the scale they replaced with the same tint, so contrast between steps is unchanged.
  */
-const LIGHT_GRAY = { 50: '248 248 248', 100: '236 236 236', 200: '225 225 225', 300: '204 204 204', 400: '164 164 164', 500: '134 134 134', 600: '112 112 112', 700: '84 84 84', 800: '57 57 57', 900: '13 13 13', 950: '0 0 0' }
+const LIGHT_GRAY = { 50: '248 248 250', 100: '236 236 240', 200: '225 225 230', 300: '210 210 215', 400: '164 164 169', 500: '134 134 139', 600: '110 110 115', 700: '84 84 89', 800: '57 57 61', 900: '29 29 31', 950: '0 0 0' }
 const SURFACE = { light: { 'white': '255 255 255', 'black': '0 0 0', 'elevated': '255 255 255' }, dark: { 'white': '30 31 34', 'black': '255 255 255', 'elevated': '43 45 48' } }
 
 /*
@@ -95,6 +94,8 @@ export default {
                 'ide': {
                     frame: 'var(--ide-frame)',
                     panel: 'var(--ide-panel)',
+                    side: 'var(--ide-side)',
+                    input: 'var(--ide-input)',
                     editor: 'var(--ide-editor)',
                     border: 'var(--ide-border)',
                     line: 'var(--ide-line)',

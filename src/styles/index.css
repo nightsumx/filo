@@ -11,40 +11,55 @@
 @layer base {
     :root {
         --color-primary: rgba(69, 89, 164, 1);
-        --text-color-a: #0d0d0d;
+        --text-color-a: #1d1d1f;
         --text-color-b: rgba(0, 0, 0, 0.6);
         --text-color-c: rgba(0, 0, 0, 0.3);
         --bg-main: #fff;
-        --bg-side: #f9f9f9;
+        --bg-side: #f5f5f7;
         --bg-hover: rgba(0, 0, 0, 0.05);
-        --bg-selected: #e1e1e1;
-        --bg-active: #e1e1e1;
-        --border-color: #ececec;
+        --bg-selected: #e1e1e6;
+        --bg-active: #e1e1e6;
+        --border-color: #e8e8ed;
 
-        /* Light follows the Codex app's light palette (its default theme: surface #fff, ink #0d0d0d,
-           accent #0169cc, contrast 45). Neutrals are pure grey; fills and lines are ink at the
-           alpha Codex derives (border 7.8%, button/code fill 4.9%, user bubble 5%). The island layout
-           is still WebStorm's: frame, tool-window panels, editor. Dark = Islands Dark (sampled). */
-        --ide-frame: #f3f3f3;
-        --ide-panel: #f9f9f9;
+        /* Light follows apple.com's palette (read from its stylesheet): white, the faintly cool grey
+           #f5f5f7, separators #e8e8ed / #d2d2d7, text #1d1d1f / #6e6e73 / #86868b, blue #0071e3.
+           Fills are its ink (29 29 31) at low alpha. Dark = Islands Dark.
+           Same layout, different surface rules: a grey step on white reads weaker and dirtier than
+           the same step on #1e1f22, so light does not separate areas by fill alone. It has two
+           surface levels (frame + project panel grey, everything else white) and draws edges with
+           hairlines and faint shadows (--ide-island-edge, the block outline, --ide-float-shadow). */
+        --ide-frame: #f5f5f7;
+        /* Tool windows on the editor's level: the tab strip and the changes panel. */
+        --ide-panel: #ffffff;
+        /* Project panel: part of the frame, as a macOS sidebar is part of the window. */
+        --ide-side: #f5f5f7;
         --ide-editor: #ffffff;
-        --ide-border: #e3e3e3;
-        --ide-line: #ececec;
-        --ide-hover: rgba(13, 13, 13, 0.05);
-        /* Codex selects with grey, not blue: list hover and active selection are ink fills. */
-        --ide-sel: rgba(13, 13, 13, 0.08);
-        --ide-sel-muted: rgba(13, 13, 13, 0.05);
-        --ide-tab: #ffffff;
-        /* Filled block on the editor (prompt, composer, code, tool output, diff): Codex's code-block
-           fill. Both themes are borderless; blocks separate from the editor by fill alone. */
-        --ide-block: #f3f3f3;
-        /* User message bubble: Codex's ink at 5% on white. */
-        --ide-prompt: #f3f3f3;
-        --ide-tab-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
-        --ide-accent: #0169cc;
+        --ide-border: #dedee3;
+        --ide-line: #e8e8ed;
+        --ide-hover: rgba(29, 29, 31, 0.05);
+        /* Selection is grey, not blue: list hover and active selection are ink fills. */
+        --ide-sel: rgba(29, 29, 31, 0.08);
+        --ide-sel-muted: rgba(29, 29, 31, 0.05);
+        /* Active tab: a grey pill on the white strip (dark: a raised tab). */
+        --ide-tab: rgba(29, 29, 31, 0.05);
+        --ide-tab-shadow: none;
+        /* White islands on the grey frame: a hairline and a faint drop. */
+        --ide-island-edge: 0 0 0 1px rgba(29, 29, 31, 0.07), 0 1px 3px rgba(0, 0, 0, 0.04);
+        /* Filled block on the editor (code, tool output, diff, todo, queued): a near-white fill with a
+           hairline outline (see .bg-ide-block below). Dark: fill alone. */
+        --ide-block: #fafafc;
+        /* Composer: a white field with a hairline and a faint drop. */
+        --ide-input: #ffffff;
+        --ide-input-shadow: 0 2px 6px -1px rgba(0, 0, 0, 0.05);
+        /* User message bubble: apple.com's tile grey. Filled, no outline. */
+        --ide-prompt: #f5f5f7;
+        /* Menus, popovers, tooltips. Dark keeps each component's own shadow. */
+        --ide-float-shadow: 0 6px 20px rgba(0, 0, 0, 0.08), 0 1px 3px rgba(0, 0, 0, 0.04);
+        /* apple.com's button blue; its hover is a touch lighter, not darker. */
+        --ide-accent: #0071e3;
         /* Same colour as channels, so Tailwind opacity modifiers (ring-ide-accent/50) work. */
-        --ide-accent-rgb: 1 105 204;
-        --ide-accent-hover: #015cb3;
+        --ide-accent-rgb: 0 113 227;
+        --ide-accent-hover: #0076df;
         /* Tool success mark. pi-cc-extensions' #99d58f is too faint on white, so light uses a deeper shade of it. */
         --ide-success: #5c9e51;
         /* Diff rows, word marks, bar and added-line numbers (TuiDiff and the review panel): Codex's
@@ -60,37 +75,37 @@
         --sl-ok: #4f8a4f;
         --sl-dir: #3b70a6;
         --sl-model: #7a4fd0;
-        --sl-muted: #8a8a8a;
+        --sl-muted: #86868b;
         --sl-warn: #a6791c;
         --sl-danger: #c0504d;
-        --ide-fg: #0d0d0d;
-        --ide-muted: #575757;
-        --ide-dim: #878787;
+        --ide-fg: #1d1d1f;
+        --ide-muted: #6e6e73;
+        --ide-dim: #86868b;
         --ide-radius: 10px;
         /* Dialogs and form controls (light). */
         --jb-dialog-bg: #ffffff;
         /* Settings dialog's page list. */
-        --jb-dialog-side: #f9f9f9;
+        --jb-dialog-side: #f5f5f7;
         --jb-dialog-border: rgba(0, 0, 0, 0.1);
-        --jb-dialog-shadow: 0 14px 40px rgba(0, 0, 0, 0.14), 0 2px 8px rgba(0, 0, 0, 0.05);
+        --jb-dialog-shadow: 0 16px 48px rgba(0, 0, 0, 0.1), 0 2px 6px rgba(0, 0, 0, 0.04);
         --jb-scrim: rgba(0, 0, 0, 0.1);
-        --jb-separator: #ececec;
-        --jb-field-border: #d4d4d4;
-        --jb-comment: #878787;
-        --jb-disabled-fg: #ababab;
-        --jb-disabled-border: #e3e3e3;
+        --jb-separator: #e8e8ed;
+        --jb-field-border: #d2d2d7;
+        --jb-comment: #86868b;
+        --jb-disabled-fg: #aeaeb2;
+        --jb-disabled-border: #e8e8ed;
         --jb-secondary-bg: #ffffff;
-        --jb-secondary-hover: #f9f9f9;
-        --jb-fill: rgba(13, 13, 13, 0.05);
-        --jb-fill-hover: rgba(13, 13, 13, 0.08);
-        --jb-switch-off: #d4d4d4;
+        --jb-secondary-hover: #f5f5f7;
+        --jb-fill: rgba(29, 29, 31, 0.05);
+        --jb-fill-hover: rgba(29, 29, 31, 0.08);
+        --jb-switch-off: #d2d2d7;
         --box-shadow: rgba(0, 0, 0, 0.15);
         --background: 0 0% 100%;
-        --foreground: 0 0% 3.9%;
+        --foreground: 240 3% 12%;
         --card: 0 0% 100%;
-        --card-foreground: 0 0% 3.9%;
+        --card-foreground: 240 3% 12%;
         --popover: 0 0% 100%;
-        --popover-foreground: 0 0% 3.9%;
+        --popover-foreground: 240 3% 12%;
         --primary: 0 0% 15%;
         --primary-foreground: 0 0% 98%;
         --secondary: 0 0% 96.1%;
@@ -133,6 +148,10 @@
 
         --ide-frame: #26282c;
         --ide-panel: #191a1c;
+        --ide-side: #191a1c;
+        --ide-island-edge: none;
+        --ide-input: #2b2d30;
+        --ide-input-shadow: 0 0 #0000;
         --ide-editor: #1e1f22;
         --ide-border: #141517;
         --ide-line: #2b2d30;
@@ -400,10 +419,20 @@ ul {
     user-select: text;
 }
 
-/* Island: a rounded panel floating on the window frame (WebStorm 2025 "Islands" UI). */
+/* Island: a rounded panel floating on the window frame (WebStorm 2025 "Islands" UI). Light draws
+   its edge (--ide-island-edge); dark separates by fill alone. An island that is part of the frame
+   clears it with [--ide-island-edge:none]. */
 .ide-island {
     border-radius: var(--ide-radius);
     overflow: hidden;
+    box-shadow: var(--ide-island-edge);
+}
+
+/* Light: filled blocks get a hairline. An inset outline paints over the block's children, so tinted
+   diff rows and code lines don't break it. Dark is fill alone. */
+:root:not(.dark) .bg-ide-block {
+    outline: 1px solid var(--ide-line);
+    outline-offset: -1px;
 }
 
 /* Review panel diffs (@git-diff-view) in light: its GitHub palette (mint rows, saturated line-number

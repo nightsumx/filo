@@ -1,17 +1,43 @@
-/* Light theme syntax colours: the Codex app's "Codex Light" code theme (red keywords, green strings,
-   blue numbers, purple functions and types, orange variables and properties, grey punctuation and
-   comments), mapped from its TextMate scopes onto highlight.js classes. Loaded by src/lib/theme.ts
-   in light only; dark keeps github-dark.
+/* Light theme syntax colours: the Codex app's "Codex Light" code theme, cut down to five roles.
+   Codex's own theme also colours variables and properties orange and punctuation grey; on white
+   that many hues make a block busy, so here only keywords (red), strings (green), numbers and
+   literals (blue), function and class names (purple) and comments (grey) are coloured, and the
+   rest is ink. Hex values are Codex Light's. Loaded by src/lib/theme.ts in light only; dark keeps
+   github-dark.
    The :is() prefix gives every rule the specificity of the review panel's own GitHub rules
    (.diff-tailwindcss-wrapper[data-theme="light"] .diff-line-syntax-raw …), so one list covers code
    blocks, transcript diffs and the review panel. */
 
 :is(html, html .diff-tailwindcss-wrapper[data-theme='light'] .diff-line-syntax-raw) .hljs {
-    color: #0d0d0d;
+    color: #1d1d1f;
     background: transparent;
 }
 
-/* keyword, storage, keyword.operator.new/typeof/…, entity.name.tag, markup.heading */
+/* Everything not listed below: ink. */
+:is(html, html .diff-tailwindcss-wrapper[data-theme='light'] .diff-line-syntax-raw) :is(
+    .hljs-variable,
+    .hljs-variable.language_,
+    .hljs-template-variable,
+    .hljs-attr,
+    .hljs-property,
+    .hljs-params,
+    .hljs-operator,
+    .hljs-punctuation,
+    .hljs-tag,
+    .hljs-subst,
+    .hljs-type,
+    .hljs-built_in,
+    .hljs-symbol,
+    .hljs-meta,
+    .hljs-attribute,
+    .hljs-selector-class,
+    .hljs-selector-pseudo,
+    .hljs-selector-attr,
+    .hljs-selector-id
+) {
+    color: inherit;
+}
+
 :is(html, html .diff-tailwindcss-wrapper[data-theme='light'] .diff-line-syntax-raw) :is(
     .hljs-keyword,
     .hljs-meta .hljs-keyword,
@@ -24,73 +50,20 @@
     color: #d53538;
 }
 
-/* string, markup.inline.raw */
 :is(html, html .diff-tailwindcss-wrapper[data-theme='light'] .diff-line-syntax-raw) :is(.hljs-string, .hljs-meta .hljs-string, .hljs-code) {
     color: #008809;
 }
 
-/* constant.numeric, constant.language, constant.character.escape, entity.other.attribute-name,
-   support.type.property-name.css */
-:is(html, html .diff-tailwindcss-wrapper[data-theme='light'] .diff-line-syntax-raw) :is(
-    .hljs-number,
-    .hljs-literal,
-    .hljs-char.escape_,
-    .hljs-attribute,
-    .hljs-selector-class,
-    .hljs-selector-pseudo,
-    .hljs-selector-attr
-) {
+:is(html, html .diff-tailwindcss-wrapper[data-theme='light'] .diff-line-syntax-raw) :is(.hljs-number, .hljs-literal, .hljs-regexp, .hljs-char.escape_) {
     color: #0071ea;
 }
 
-/* string.regexp */
-:is(html, html .diff-tailwindcss-wrapper[data-theme='light'] .diff-line-syntax-raw) .hljs-regexp {
-    color: #001bcb;
-}
-
-/* entity.name.function, support.function, entity.name.type/class, support.type, entity.other.attribute-name.id */
-:is(html, html .diff-tailwindcss-wrapper[data-theme='light'] .diff-line-syntax-raw) :is(
-    .hljs-title,
-    .hljs-title.function_,
-    .hljs-title.class_,
-    .hljs-title.class_.inherited__,
-    .hljs-type,
-    .hljs-built_in,
-    .hljs-selector-id
-) {
+:is(html, html .diff-tailwindcss-wrapper[data-theme='light'] .diff-line-syntax-raw) :is(.hljs-title, .hljs-title.function_, .hljs-title.class_, .hljs-title.class_.inherited__) {
     color: #751ed9;
 }
 
-/* variable, variable.language, meta.object-literal.key, support.variable.property, constant (named) */
-:is(html, html .diff-tailwindcss-wrapper[data-theme='light'] .diff-line-syntax-raw) :is(
-    .hljs-variable,
-    .hljs-variable.language_,
-    .hljs-template-variable,
-    .hljs-attr,
-    .hljs-property,
-    .hljs-symbol,
-    .hljs-meta,
-    .hljs-strong
-) {
-    color: #bd5800;
-}
-
-/* comment, punctuation, keyword.operator, variable.parameter, meta.tag */
-:is(html, html .diff-tailwindcss-wrapper[data-theme='light'] .diff-line-syntax-raw) :is(
-    .hljs-comment,
-    .hljs-quote,
-    .hljs-doctag,
-    .hljs-formula,
-    .hljs-operator,
-    .hljs-punctuation,
-    .hljs-params,
-    .hljs-tag
-) {
+:is(html, html .diff-tailwindcss-wrapper[data-theme='light'] .diff-line-syntax-raw) :is(.hljs-comment, .hljs-quote, .hljs-doctag, .hljs-formula) {
     color: #666666;
-}
-
-:is(html, html .diff-tailwindcss-wrapper[data-theme='light'] .diff-line-syntax-raw) .hljs-subst {
-    color: inherit;
 }
 
 :is(html, html .diff-tailwindcss-wrapper[data-theme='light'] .diff-line-syntax-raw) .hljs-section {
@@ -98,7 +71,6 @@
 }
 
 :is(html, html .diff-tailwindcss-wrapper[data-theme='light'] .diff-line-syntax-raw) .hljs-emphasis {
-    color: #d53538;
     font-style: italic;
 }
 
@@ -107,7 +79,7 @@
 }
 
 :is(html, html .diff-tailwindcss-wrapper[data-theme='light'] .diff-line-syntax-raw) .hljs-link {
-    color: #751ed9;
+    color: #0066cc;
     text-decoration: underline;
 }
 
