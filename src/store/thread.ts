@@ -19,12 +19,12 @@ import type { BlockTime, Step, TimelineMessage, ToolExecState, ToolResultView } 
 import { newThreadLabel, tr } from '@/lib/i18n'
 import { parsePartialJson } from '@/lib/partialJson'
 import { threadActivity } from '@/lib/threadActivity'
-import { blockTimeKey, buildTurns, contentText } from '@/lib/timeline'
+import { blockTimeKey, buildTurns, contentImages, contentText } from '@/lib/timeline'
 import type { WaitingKind } from '@/lib/threadActivity'
 import { tuiTitle } from '@/lib/toolMeta'
 import { agentFeatures, agentLabel, agentOfKey } from '@shared/agents'
 import { APPROVAL_MODES, APPROVAL_TITLE_PREFIX, GUI_COMMAND_PREFIX, GUI_STATUS, REVIEW_TYPES } from '@shared/capabilities'
-import { readableError } from '@/lib/utils'
+import { readableError, uid } from '@/lib/utils'
 import { makeAutoObservable, observable, runInAction, toJS } from 'mobx'
 import { toast } from 'sonner'
 
@@ -83,6 +83,8 @@ function toolView(result: any): ToolResultView | undefined {
  * agent's session (Codex, …) driven through the main process's pi-RPC bridge.
  */
 export class Thread {
+    /** Stable for the object's life, unlike key (which follows the session file): use it as the React key. */
+    readonly id = uid()
     key: string
     cwd: string
     /** Which agent runs it; fixed once the thread has history. */
@@ -160,6 +162,7 @@ export class Thread {
         this.firstPrompt = init.firstPrompt
         this.persisted = !!init.sessionPath
         makeAutoObservable<this, 'liveCounter' | 'partialArgs' | 'startPromise' | 'stopping' | 'loadedConfig' | 'restartPending' | 'settling' | 'unfollow' | 'agentStale' | 'host'>(this, {
+            id: false,
             lastEventAt: false,
             liveCounter: false,
             partialArgs: false,
@@ -617,7 +620,8 @@ export class Thread {
         return response.success ? response.data : undefined
     }
 
-    async syncState() {
+    /** `keepItems`: the caller already put the new session's transcript in place (see fork). */
+    async syncState({ keepItems = false } = {}) {
         const state = await this.call<RpcSessionState>({ type: 'get_state' })
         if (!state)
             return
@@ -637,8 +641,10 @@ export class Thread {
                 this.key = state.sessionFile!
                 // An extension command (e.g. /new) switched sessions inside the process.
                 if (hadHistory) {
-                    this.items = []
-                    this.live = []
+                    if (!keepItems) {
+                        this.items = []
+                        this.live = []
+                    }
                     this.name = state.sessionName
                     this.persisted = false
                 }
@@ -793,6 +799,46 @@ export class Thread {
     }
 
     /**
+     * Ask again from a prompt: pi goes back to before `entryId` (a user prompt) in the same session
+     * file, and the prompt comes back into the composer to edit. The answers after it stay in the file
+     * as an abandoned branch; the tab, its key and its session do not change.
+     */
+    async rewind(entryId: string): Promise<boolean> {
+        if (this.running) {
+            toast.error(tr('运行中不能重问，先停止或等它结束', 'Cannot ask again while running; stop it or wait for it to finish'))
+            return false
+        }
+        const at = this.items.findIndex(i => i.key === entryId)
+        const prompt = this.items[at]
+        if (!prompt || prompt.message.role !== 'user')
+            return false
+        const content = prompt.message.content
+        const before = this.items
+        // Show the result right away; the reload below reads the same entries back from the file.
+        runInAction(() => {
+            this.items = before.slice(0, at)
+            this.live = []
+        })
+        try {
+            await this.guiCommand('gui-rewind', entryId)
+            await this.load()
+            if (this.items.length !== at)
+                throw new Error(tr('pi 没有回到这条提问之前', 'pi did not go back to before this prompt'))
+            runInAction(() => {
+                this.draft = contentText(content)
+                this.images = contentImages(content)
+            })
+            await this.refreshStats()
+            return true
+        }
+        catch (error: any) {
+            toast.error(`${tr('重问失败：', 'Ask again failed: ')}${error.message}`)
+            await this.load().catch(() => runInAction(() => (this.items = before)))
+            return false
+        }
+    }
+
+    /**
      * pi's fork: this process moves to a new session holding the branch before `entryId` (a user
      * prompt), and the prompt comes back into the composer to edit. The old session stays as it was.
      */
@@ -801,11 +847,22 @@ export class Thread {
             toast.error(tr('运行中不能分叉，先停止或等它结束', 'Cannot fork while running; stop it or wait for it to finish'))
             return false
         }
+        // The fork holds exactly the turns before this prompt: show them right away, so the view goes
+        // straight to the result instead of blanking and refilling while pi switches sessions.
+        const at = this.items.findIndex(i => i.key === entryId)
+        const kept = at === -1 ? null : this.items.slice(0, at)
         try {
             const response = await this.request<{ text?: string, cancelled?: boolean }>({ type: 'fork', entryId })
             if (response.data?.cancelled)
                 return false
-            await this.syncState()
+            runInAction(() => {
+                if (kept) {
+                    this.items = kept
+                    this.live = []
+                }
+                this.draft = response.data?.text ?? ''
+            })
+            await this.syncState({ keepItems: !!kept })
             // Forking at the first prompt leaves no conversation, and pi writes no file until there is one.
             await this.load().catch(() => runInAction(() => {
                 this.items = []
@@ -815,7 +872,6 @@ export class Thread {
                 // Otherwise the fork's file already holds the earlier turns: the tab survives a restart.
                 if (this.items.length)
                     this.persisted = true
-                this.draft = response.data?.text ?? ''
             })
             await this.refreshStats()
             return true

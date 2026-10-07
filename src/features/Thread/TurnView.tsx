@@ -91,7 +91,7 @@ const PromptBubble = observer(({ user, thread, entryId }: { user: UserPrompt, th
                         {thread && thread.features.fork && forkable(entryId) && thread.sessionPath && (
                             <>
                                 <ActionBtn icon={GitFork} size="small" title={t.forkHere} onClick={() => void appStore.forkThread(thread, entryId!, false)} />
-                                {!thread.running && <ActionBtn icon={PencilLine} size="small" title={t.editResend} onClick={() => void appStore.forkThread(thread, entryId!, true)} />}
+                                {!thread.running && <ActionBtn icon={PencilLine} size="small" title={t.askAgain} onClick={() => void appStore.forkThread(thread, entryId!, true)} />}
                             </>
                         )}
                         <CopyAction text={user.text} />

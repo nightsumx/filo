@@ -284,7 +284,7 @@ export const TabBar = observer(() => {
                 }}
                 className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto px-px py-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                 {appStore.tabs.map((thread, i) => (
-                    <Tab key={thread.key} thread={thread} index={i} visible={visible.has(thread.key) && appStore.tabs.length > 1} />
+                    <Tab key={thread.id} thread={thread} index={i} visible={visible.has(thread.key) && appStore.tabs.length > 1} />
                 ))}
             </div>
             {appStore.project && (

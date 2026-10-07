@@ -2,6 +2,11 @@ import type { ApprovalMode } from '@shared/capabilities'
 import { APPROVAL_MODES, CAPABILITIES, normalizeCapabilities } from '@shared/capabilities'
 import path from 'node:path'
 
+/** `-e` arguments for extensions the app's own features need (rewind), loaded whatever capabilities are on. */
+export function hostExtensionArgs(extensionsDir: string): string[] {
+    return ['-e', path.join(extensionsDir, 'rewind.ts')]
+}
+
 /**
  * `-e <file>` arguments loading the requested capabilities (unknown ids are dropped), plus the flags
  * they read: the approval mode a new session starts in.

@@ -29,6 +29,8 @@ export interface GuiCommands {
     reviewApply: 'gui-review-apply'
     /** `/gui-review-cancel` */
     reviewCancel: 'gui-review-cancel'
+    /** `/gui-rewind <entryId>`: back to before that user prompt, in the same session (extensions/rewind.ts, always loaded). */
+    rewind: 'gui-rewind'
 }
 
 /**

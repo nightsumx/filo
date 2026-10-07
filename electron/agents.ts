@@ -7,7 +7,7 @@ import { randomUUID } from 'node:crypto'
 import type { AcpService } from './acp/service'
 import { BridgeAgent } from './bridge'
 import { ENV } from '@shared/capabilities'
-import { capabilityArgs } from './capabilities'
+import { capabilityArgs, hostExtensionArgs } from './capabilities'
 import { tr } from './i18n'
 import { JsonlSplitter } from './jsonl'
 import { piCommand, piSpawnEnv } from './pi-env'
@@ -46,7 +46,7 @@ class PiAgent implements ManagedAgent {
     private exited = false
 
     constructor(env: PiEnv, options: AgentStartOptions, extensionsDir: string, callbacks: AgentCallbacks) {
-        const args = ['--mode', 'rpc', ...capabilityArgs(options.capabilities, extensionsDir, { approvalMode: options.approvalMode })]
+        const args = ['--mode', 'rpc', ...hostExtensionArgs(extensionsDir), ...capabilityArgs(options.capabilities, extensionsDir, { approvalMode: options.approvalMode })]
         if (options.sessionPath)
             args.push('--session', options.sessionPath)
         const command = piCommand(env, args)

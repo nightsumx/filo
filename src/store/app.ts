@@ -810,7 +810,7 @@ class AppStore implements ThreadHost {
      */
     async forkThread(thread: Thread, entryId: string, inPlace: boolean) {
         if (inPlace) {
-            if (await thread.fork(entryId))
+            if (await thread.rewind(entryId))
                 this.focus(thread.key, true)
             return
         }

@@ -3,7 +3,7 @@
 //   - the changes panel knows which thread edited what, and flags files two threads both changed
 //   - commit / roll back from the panel's IPC
 //   - ⌘⇧F search finds a prompt and opens its thread
-//   - fork a prompt into a new tab, and edit-and-resend in place
+//   - fork a prompt into a new tab, and ask again from a prompt in place
 //   - a terminal pi's presence file shows up in the project tree
 //   - a tab torn off into its own window keeps its live pi process, survives a restart in that
 //     window, and can be dragged back
@@ -132,11 +132,36 @@ async function main() {
         check(fork.draft === 'second question', 'fork opens a new tab with the prompt back in the composer')
         check(fork.users === 1 && fork.key !== s1 && fork.key.endsWith('.jsonl'), 'the fork holds the turns before it, in a session of its own')
         check(await page.evaluate<number>(`window.__app.threads.get(${JSON.stringify(s1)}).items.length`) === original, 'the original thread is untouched')
-        // Edit and resend in place: thread two moves to a fork before its only prompt.
+        // Ask again from a later prompt, in place: every frame shows the same pane and the turns before it,
+        // never a blank thread that refills.
+        await send(fork.key, 'third question')
+        await settled(`window.__app.threads.get(${JSON.stringify(fork.key)})`)
+        const third = await page.evaluate<string>(`window.__app.threads.get(${JSON.stringify(fork.key)}).items.filter(i => i.message.role === 'user')[1].key`)
+        await page.evaluate(`(() => {
+            const pane = () => document.querySelector('section[aria-label]')
+            const first = pane()
+            const w = window.__askAgain = { min: Infinity, remounted: false, done: false }
+            const tick = () => {
+                w.min = Math.min(w.min, window.__app.active.items.length)
+                w.remounted ||= pane() !== first
+                if (!w.done)
+                    requestAnimationFrame(tick)
+            }
+            tick()
+            void window.__app.forkThread(window.__app.threads.get(${JSON.stringify(fork.key)}), ${JSON.stringify(third)}, true).then(() => { w.done = true })
+            return true
+        })()`)
+        const watched = await until('ask again in place', () => page.evaluate<{ min: number, remounted: boolean, key: string, draft: string, users: number } | null>(`(() => { const w = window.__askAgain, t = window.__app.active; return w.done ? { min: w.min, remounted: w.remounted, key: t.key, draft: t.draft, users: t.items.filter(i => i.message.role === 'user').length } : null })()`))
+        check(watched.key === fork.key && watched.draft === 'third question' && watched.users === 1, 'ask again stays in the same session, keeps the turns before the prompt and puts it back in the composer')
+        check(watched.min > 0 && !watched.remounted, 'ask again never blanks the transcript or remounts the pane')
+        const onDisk = await page.evaluate<number>(`window.pi.readSession(${JSON.stringify(fork.key)}).then(s => s.items.filter(i => i.message.role === 'user').length)`)
+        check(onDisk === 1, 'the file\'s active branch moved back too, so a restarted pi resumes there')
+        await page.evaluate(`(() => { window.__app.active.draft = ''; return true })()`)
+        // Ask again from thread two's only prompt: nothing is left before it.
         const firstOfTwo = await page.evaluate<string>(`window.__app.threads.get(${JSON.stringify(s2)}).items.find(i => i.message.role === 'user').key`)
         await page.evaluate(`window.__app.forkThread(window.__app.threads.get(${JSON.stringify(s2)}), ${JSON.stringify(firstOfTwo)}, true)`)
-        const inPlace = await until('in-place fork', () => page.evaluate<{ key: string, draft: string, items: number } | null>(`(() => { const t = window.__app.active; return t && t.draft === 'edit two' ? { key: t.key, draft: t.draft, items: t.items.length } : null })()`))
-        check(inPlace.key !== s2 && inPlace.items === 0, 'edit-and-resend moves the tab to an empty fork with the prompt to edit')
+        const inPlace = await until('ask again from the first prompt', () => page.evaluate<{ key: string, draft: string, items: number } | null>(`(() => { const t = window.__app.active; return t && t.draft === 'edit two' ? { key: t.key, draft: t.draft, items: t.items.length } : null })()`))
+        check(inPlace.key === s2 && inPlace.items === 0, 'ask again from the first prompt empties the same thread, with the prompt to edit')
         await page.evaluate(`(() => { window.__app.active.draft = ''; return true })()`)
 
         // ---------------------------------------------------------------- search
@@ -160,7 +185,8 @@ async function main() {
         check(true, 'the transcript scrolls to it and marks it')
 
         // ---------------------------------------------------------------- terminal presence
-        // Thread two's old session (left behind by the in-place fork) is "open in a terminal".
+        // Thread two's session, its tab closed, is "open in a terminal".
+        await page.evaluate(`window.__app.closeTab(${JSON.stringify(s2)})`)
         const presenceDir = path.join(agentDir, 'pi-kit-presence')
         await mkdir(presenceDir, { recursive: true })
         await writeFile(path.join(presenceDir, `${sleeper.pid}.json`), JSON.stringify({ pid: sleeper.pid, cwd: repo, session: s2, state: 'running', since: Date.now() - 65_000 }))

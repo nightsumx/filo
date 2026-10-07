@@ -43,7 +43,7 @@ const Panes = observer(() => {
     return (
         <div ref={ref} className="flex min-w-0 flex-1">
             {panes.map((thread, i) => (
-                <Fragment key={thread.key}>
+                <Fragment key={thread.id}>
                     {i > 0 && <div className="w-px shrink-0" />}
                     <ThreadPane thread={thread} focused={thread.key === appStore.activeKey} />
                 </Fragment>
