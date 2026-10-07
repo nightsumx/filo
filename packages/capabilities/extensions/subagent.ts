@@ -9,207 +9,24 @@
 // except subagent (no recursion), ask and plan (both need the user, who talks to the parent); its
 // environment carries PI_KIT_SUBAGENT so copies loaded another way (pi-cc-tui) stay off too.
 // In the terminal the call draws as Claude Code's Task row: the latest tool, then a Done summary.
-import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent'
-import type { ChildProcessWithoutNullStreams } from 'node:child_process'
-import type { ApprovalChoice, ApprovalRequest, GuiCommands, SubagentDetails } from '../protocol'
-import { spawn } from 'node:child_process'
-import path from 'node:path'
-import process from 'node:process'
+import type { ExtensionAPI } from '@earendil-works/pi-coding-agent'
+import type { GuiCommands, SubagentDetails } from '../protocol'
+import type { Child as ChildProcess } from '../lib/child'
 import { getMarkdownTheme } from '@earendil-works/pi-coding-agent'
 import { Container, Markdown, Text } from '@earendil-works/pi-tui'
 import { Type } from 'typebox'
-import { promptApproval } from '../tui/approval'
-import { serialized } from '../tui/dialog'
+import { Child, childLaunch, clip, finishRun, followApprovalMode, forwardDialog, lastReply, newRun, recordEvent, runUsage, toolCalls } from '../lib/child'
 import { count, duration, hang, header, oneLine } from '../tui/render'
 
 const STEER_COMMAND: GuiCommands['subagentSteer'] = 'gui-subagent-steer'
 const CANCEL_COMMAND: GuiCommands['subagentCancel'] = 'gui-subagent-cancel'
-const APPROVAL_TITLE_PREFIX = 'gui-approval '
-/** Extensions the child does not load. */
-const PARENT_ONLY = new Set(['subagent.ts', 'ask.ts', 'plan.ts'])
-/** Clip sizes for what the details carry; the model only gets the final reply. */
-const RESULT_CLIP = 2000
-const THINKING_CLIP = 8000
 const REPLY_CLIP = 30_000
 const UPDATE_INTERVAL = 150
 
-const clip = (text: string, max: number) => text.length > max ? `${text.slice(0, max)}\n… (${text.length - max} more characters)` : text
-
-/** `-e` values from this process's command line, without parent-only capabilities. */
-export function childExtensionArgs(argv: string[]): string[] {
-    const out: string[] = []
-    for (let i = 0; i < argv.length; i++) {
-        if ((argv[i] === '-e' || argv[i] === '--extension') && argv[i + 1]) {
-            if (!PARENT_ONLY.has(path.basename(argv[i + 1])))
-                out.push('-e', argv[i + 1])
-            i++
-        }
-    }
-    return out
-}
-
-/** How to start pi again: this process's runtime plus its CLI script when it is one. */
-function piCommand(): { file: string, args: string[] } {
-    // Under node or bun the script is argv[1]; a global install runs it as `bin/pi`, without an extension.
-    const script = process.argv[1]
-    const runtime = /^(?:node|bun)(?:\.exe)?$/i.test(path.basename(process.execPath))
-    return script && (runtime || /\.[cm]?[jt]s$/.test(script))
-        ? { file: process.execPath, args: [script] }
-        : { file: process.execPath, args: [] }
-}
-
-/** Child message with tool results and thinking clipped, images dropped. */
-function clipMessage(message: any): any {
-    if (message?.role === 'toolResult') {
-        const content = (message.content ?? []).map((c: any) => c.type === 'text' ? { type: 'text', text: clip(c.text ?? '', RESULT_CLIP) } : { type: 'text', text: '[image]' })
-        return { ...message, content }
-    }
-    if (message?.role === 'assistant')
-        return { ...message, content: (message.content ?? []).map((c: any) => c.type === 'thinking' ? { ...c, thinking: clip(c.thinking ?? '', THINKING_CLIP) } : c) }
-    if (message?.role === 'user' && Array.isArray(message.content))
-        return { ...message, content: message.content.filter((c: any) => c.type === 'text') }
-    return message
-}
-
-function lastReply(messages: any[]): string {
-    for (let i = messages.length - 1; i >= 0; i--) {
-        const m = messages[i]
-        if (m.role === 'assistant') {
-            const text = (m.content ?? []).filter((c: any) => c.type === 'text').map((c: any) => c.text).join('\n').trim()
-            if (text)
-                return text
-        }
-    }
-    return ''
-}
-
-class Child {
-    private proc: ChildProcessWithoutNullStreams
-    private buffer = ''
-    private pending = new Map<string, (r: any) => void>()
-    private next = 0
-    private stderr = ''
-    exited = false
-    onEvent: (event: any) => void = () => {}
-    onExit: (error: string) => void = () => {}
-
-    constructor(args: string[], cwd: string, env: Record<string, string>) {
-        const command = piCommand()
-        this.proc = spawn(command.file, [...command.args, ...args], { cwd, env: { ...process.env, PI_KIT_SUBAGENT: '1', ...env }, stdio: ['pipe', 'pipe', 'pipe'] })
-        this.proc.stdout.setEncoding('utf8')
-        this.proc.stdout.on('data', (chunk: string) => {
-            this.buffer += chunk
-            let nl: number
-            while ((nl = this.buffer.indexOf('\n')) >= 0) {
-                const line = this.buffer.slice(0, nl).trim()
-                this.buffer = this.buffer.slice(nl + 1)
-                if (!line)
-                    continue
-                let record: any
-                try {
-                    record = JSON.parse(line)
-                }
-                catch {
-                    continue
-                }
-                if (record.type === 'response' && this.pending.has(record.id)) {
-                    this.pending.get(record.id)!(record)
-                    this.pending.delete(record.id)
-                }
-                else {
-                    this.onEvent(record)
-                }
-            }
-        })
-        this.proc.stderr.on('data', (chunk) => {
-            this.stderr = (this.stderr + chunk).slice(-8000)
-        })
-        this.proc.stdin.on('error', () => {})
-        const exit = () => {
-            if (this.exited)
-                return
-            this.exited = true
-            for (const resolve of this.pending.values())
-                resolve({ success: false, error: 'subagent exited' })
-            this.pending.clear()
-            this.onExit(this.stderr.trim().split('\n').slice(-5).join('\n'))
-        }
-        this.proc.on('exit', exit)
-        this.proc.on('error', (e) => {
-            this.stderr += `\n${e.message}`
-            exit()
-        })
-    }
-
-    request(command: Record<string, unknown>): Promise<any> {
-        if (this.exited)
-            return Promise.resolve({ success: false, error: 'subagent exited' })
-        const id = `sub-${++this.next}`
-        return new Promise((resolve) => {
-            this.pending.set(id, resolve)
-            this.send({ ...command, id })
-        })
-    }
-
-    send(record: Record<string, unknown>) {
-        if (!this.exited)
-            this.proc.stdin.write(`${JSON.stringify(record)}\n`)
-    }
-
-    stop() {
-        if (this.exited)
-            return
-        this.proc.stdin.end()
-        setTimeout(() => !this.exited && this.proc.kill('SIGTERM'), 3000).unref()
-    }
-}
-
 interface Run {
-    child: Child
+    child: ChildProcess
     details: SubagentDetails
     cancel: () => void
-}
-
-/** Rebuilds the streaming assistant message from wire deltas (they carry no snapshots). */
-function applyDelta(message: any, update: any) {
-    const i = update?.contentIndex
-    if (typeof i !== 'number')
-        return
-    const block = message.content[i]
-    switch (update.type) {
-        case 'text_start':
-            message.content[i] = { type: 'text', text: '' }
-            break
-        case 'text_delta':
-            message.content[i] = { type: 'text', text: (block?.text ?? '') + update.delta }
-            break
-        case 'thinking_start':
-            message.content[i] = { type: 'thinking', thinking: '' }
-            break
-        case 'thinking_delta':
-            message.content[i] = { type: 'thinking', thinking: (block?.thinking ?? '') + update.delta }
-            break
-        case 'text_end':
-        case 'thinking_end':
-            if (typeof update.content === 'string')
-                message.content[i] = update.type === 'text_end' ? { type: 'text', text: update.content } : { type: 'thinking', thinking: update.content }
-            break
-        case 'toolcall_start':
-            message.content[i] = { type: 'toolCall', id: update.id, name: update.toolName, arguments: {} }
-            break
-        case 'toolcall_end':
-            if (update.toolCall)
-                message.content[i] = update.toolCall
-            break
-        default:
-            break
-    }
-}
-
-/** The child's tool calls so far, in order. */
-function toolCalls(details: SubagentDetails): { name: string, arguments: Record<string, unknown> }[] {
-    const messages = [...details.messages, ...(details.streaming ? [details.streaming] : [])] as any[]
-    return messages.flatMap(m => m?.role === 'assistant' ? (m.content ?? []).filter((c: any) => c.type === 'toolCall') : [])
 }
 
 /** `Read(src/app.ts)`: the tool and its most telling argument. */
@@ -222,42 +39,7 @@ function describeCall(call: { name: string, arguments: Record<string, unknown> }
 
 export default function (pi: ExtensionAPI) {
     const runs = new Map<string, Run>()
-    /** Mirrors the approval capability's mode (pi.events), so the child asks the same way. */
-    let approvalMode: string | undefined
-    pi.events.on('gui-approval:mode', (mode) => {
-        approvalMode = typeof mode === 'string' ? mode : undefined
-    })
-
-    /** Forwards a child dialog to this session's UI and answers the child. */
-    async function forwardDialog(run: Run, event: any, ctx: ExtensionContext, signal?: AbortSignal) {
-        const opts = { signal, timeout: event.timeout }
-        let response: Record<string, unknown>
-        if (event.method === 'select') {
-            let title: string = event.title ?? ''
-            if (title.startsWith(APPROVAL_TITLE_PREFIX)) {
-                const request: ApprovalRequest = { ...JSON.parse(title.slice(APPROVAL_TITLE_PREFIX.length)), agent: run.details.title }
-                if (ctx.mode === 'tui') {
-                    const choice = await serialized(() => promptApproval(ctx, request, undefined, (event.options ?? []) as ApprovalChoice[]))
-                    run.child.send({ type: 'extension_ui_response', id: event.id, ...(choice ? { value: choice } : { cancelled: true }) })
-                    return
-                }
-                title = APPROVAL_TITLE_PREFIX + JSON.stringify(request)
-            }
-            const value = await ctx.ui.select(title, event.options ?? [], opts)
-            response = value === undefined ? { cancelled: true } : { value }
-        }
-        else if (event.method === 'confirm') {
-            response = { confirmed: await ctx.ui.confirm(event.title ?? '', event.message ?? '', opts) }
-        }
-        else if (event.method === 'input' || event.method === 'editor') {
-            const value = event.method === 'input' ? await ctx.ui.input(event.title ?? '', event.placeholder, opts) : await ctx.ui.editor(event.title ?? '', event.prefill)
-            response = value === undefined ? { cancelled: true } : { value }
-        }
-        else {
-            return
-        }
-        run.child.send({ type: 'extension_ui_response', id: event.id, ...response })
-    }
+    const approvalMode = followApprovalMode(pi)
 
     pi.registerTool({
         name: 'subagent',
@@ -276,29 +58,9 @@ export default function (pi: ExtensionAPI) {
         annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
 
         async execute(toolCallId, params, signal, onUpdate, ctx) {
-            const model = ctx.model
-            const args = ['--mode', 'rpc', '--no-session', ...childExtensionArgs(process.argv)]
-            if (model)
-                args.push('--provider', model.provider, '--model', model.id)
-            args.push('--thinking', pi.getThinkingLevel())
-            const mode = approvalMode ?? pi.getFlag('gui-approval')
-            if (typeof mode === 'string' && args.some(a => path.basename(a) === 'approval.ts'))
-                args.push('--gui-approval', mode)
-
-            const details: SubagentDetails = {
-                kind: 'subagent',
-                status: 'running',
-                title: params.title.trim() || 'Subagent',
-                task: params.task,
-                model: model ? `${model.provider}/${model.id}` : undefined,
-                messages: [],
-                tools: {},
-                steering: [],
-                usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 },
-                startedAt: Date.now(),
-            }
-            // Approval loaded without -e (pi-cc-tui) reads the mode from the environment.
-            const child = new Child(args, ctx.cwd, typeof mode === 'string' ? { PI_KIT_APPROVAL_MODE: mode } : {})
+            const details = newRun(params.title.trim() || 'Subagent', params.task, ctx)
+            const launch = childLaunch(pi, ctx, approvalMode())
+            const child = new Child(launch.args, ctx.cwd, launch.env)
 
             // Throttled (first change right away, then at most every UPDATE_INTERVAL): streaming tokens
             // would otherwise send the whole details per delta.
@@ -327,61 +89,16 @@ export default function (pi: ExtensionAPI) {
                 runs.set(toolCallId, run)
 
                 child.onEvent = (event) => {
-                    switch (event.type) {
-                        case 'message_start':
-                            if (event.message?.role === 'assistant')
-                                details.streaming = { ...event.message, content: [] }
-                            break
-                        case 'message_update':
-                            if (details.streaming)
-                                applyDelta(details.streaming, event.assistantMessageEvent)
-                            break
-                        case 'message_end': {
-                            const message = event.message
-                            if (message?.role === 'assistant') {
-                                details.streaming = undefined
-                                const u = message.usage
-                                if (u) {
-                                    details.usage.input += u.input ?? 0
-                                    details.usage.output += u.output ?? 0
-                                    details.usage.cacheRead += u.cacheRead ?? 0
-                                    details.usage.cacheWrite += u.cacheWrite ?? 0
-                                    details.usage.cost += u.cost?.total ?? 0
-                                }
-                            }
-                            // System messages hold the child's whole prompt; the card has no use for them.
-                            if (message && message.role !== 'system')
-                                details.messages.push(clipMessage(message))
-                            break
-                        }
-                        case 'tool_execution_start':
-                            details.tools[event.toolCallId] = { startedAt: Date.now() }
-                            break
-                        case 'tool_execution_update': {
-                            const partial = event.partialResult
-                            const text = (partial?.content ?? []).filter((c: any) => c.type === 'text').map((c: any) => c.text).join('')
-                            details.tools[event.toolCallId] = {
-                                startedAt: details.tools[event.toolCallId]?.startedAt ?? Date.now(),
-                                partial: { content: [{ type: 'text', text: clip(text, RESULT_CLIP) }], details: partial?.details },
-                            }
-                            break
-                        }
-                        case 'tool_execution_end':
-                            delete details.tools[event.toolCallId]
-                            break
-                        case 'queue_update':
-                            details.steering = [...(event.steering ?? [])]
-                            break
-                        case 'extension_ui_request':
-                            void forwardDialog(run, event, ctx, signal).catch(() => child.send({ type: 'extension_ui_response', id: event.id, cancelled: true }))
-                            return
-                        case 'agent_settled':
-                            resolve()
-                            return
-                        default:
-                            return
+                    if (event.type === 'extension_ui_request') {
+                        void forwardDialog(child, details.title, event, ctx, signal).catch(() => child.send({ type: 'extension_ui_response', id: event.id, cancelled: true }))
+                        return
                     }
-                    changed()
+                    if (event.type === 'agent_settled') {
+                        resolve()
+                        return
+                    }
+                    if (recordEvent(details, event))
+                        changed()
                 }
                 child.onExit = (error) => {
                     if (details.status === 'running') {
@@ -410,31 +127,10 @@ export default function (pi: ExtensionAPI) {
             child.stop()
             if (timer)
                 clearTimeout(timer)
-
-            details.streaming = undefined
-            details.tools = {}
-            details.steering = []
-            details.endedAt = Date.now()
-            const last = details.messages.findLast((m: any) => m.role === 'assistant') as any
-            if (details.status === 'running') {
-                if (last?.stopReason === 'error') {
-                    details.status = 'failed'
-                    details.error = last.errorMessage ?? 'The subagent request failed.'
-                }
-                else {
-                    details.status = 'done'
-                }
-            }
+            finishRun(details)
 
             const reply = clip(lastReply(details.messages), REPLY_CLIP)
-            const usage = {
-                input: details.usage.input,
-                output: details.usage.output,
-                cacheRead: details.usage.cacheRead,
-                cacheWrite: details.usage.cacheWrite,
-                totalTokens: details.usage.input + details.usage.output + details.usage.cacheRead + details.usage.cacheWrite,
-                cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: details.usage.cost },
-            }
+            const usage = runUsage(details)
             if (details.status === 'cancelled') {
                 const note = signal?.aborted ? 'The subagent was stopped with the run.' : 'The user cancelled this subagent. Do not start it again; continue without it or ask the user.'
                 return { content: [{ type: 'text', text: reply ? `${note}\n\nIts last reply before stopping:\n${reply}` : note }], details, usage }
