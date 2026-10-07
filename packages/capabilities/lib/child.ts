@@ -34,10 +34,17 @@ export function childExtensionArgs(argv: string[]): string[] {
     return out
 }
 
+/** Set by the Pi app's launcher when pi runs on the app's Electron as node (the app's bundled pi). */
+const LAUNCHER_ENV = 'PI_KIT_PI_LAUNCHER'
+
 /** How to start pi again: this process's runtime plus its CLI script when it is one. */
-function piCommand(): { file: string, args: string[] } {
+function piCommand(): { file: string, args: string[], env?: Record<string, string> } {
     // Under node or bun the script is argv[1]; a global install runs it as `bin/pi`, without an extension.
     const script = process.argv[1]
+    // Electron needs the flag to act as node; the launcher drops it again inside the child.
+    const launcher = process.versions.electron ? process.env[LAUNCHER_ENV] : undefined
+    if (launcher && script)
+        return { file: process.execPath, args: [launcher, script], env: { ELECTRON_RUN_AS_NODE: '1' } }
     const runtime = /^(?:node|bun)(?:\.exe)?$/i.test(path.basename(process.execPath))
     return script && (runtime || /\.[cm]?[jt]s$/.test(script))
         ? { file: process.execPath, args: [script] }
@@ -88,7 +95,7 @@ export class Child {
 
     constructor(args: string[], cwd: string, env: Record<string, string>) {
         const command = piCommand()
-        this.proc = spawn(command.file, [...command.args, ...args], { cwd, env: { ...process.env, PI_KIT_SUBAGENT: '1', ...env }, stdio: ['pipe', 'pipe', 'pipe'] })
+        this.proc = spawn(command.file, [...command.args, ...args], { cwd, env: { ...process.env, PI_KIT_SUBAGENT: '1', ...command.env, ...env }, stdio: ['pipe', 'pipe', 'pipe'] })
         this.proc.stdout.setEncoding('utf8')
         this.proc.stdout.on('data', (chunk: string) => {
             this.buffer += chunk

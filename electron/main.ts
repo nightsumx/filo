@@ -17,7 +17,7 @@ import { gitBranch, gitCommit, gitDiscard, gitFileDiff, gitStatus } from './git'
 import { mainLang, setMainLang, tr } from './i18n'
 import { compactionInfo, globalCompaction, setGlobalCompaction } from './piSettings'
 import { endpointSaveOf, helperLaunch, ProviderHelper, ProviderService } from './providers'
-import { resolvePiEnv } from './pi-env'
+import { resolvePiEnv, setBundledPi } from './pi-env'
 import { assertInSessionsDir, listSessions, readSession } from './sessions'
 import { Windows } from './windows'
 
@@ -33,6 +33,13 @@ const store = new StateFile(() => path.join(app.getPath('userData'), 'state.json
 // pi loads capability extensions from real files, so packaged builds keep the pi-capabilities package
 // (extensions plus the helpers they import) outside the asar, as Resources/capabilities.
 const extensionsDir = app.isPackaged ? path.join(process.resourcesPath, 'capabilities', 'extensions') : path.join(__dirname, '../../packages/capabilities/extensions')
+
+// The pi shipped for users without one (electron/pi-env.ts): Resources/pi, installed by
+// scripts/bundle-pi.sh; in development the pi devDependency.
+const PI_CLI = path.join('node_modules', '@earendil-works', 'pi-coding-agent', 'dist', 'bundle', 'cli.js')
+setBundledPi(app.isPackaged
+    ? { cli: path.join(process.resourcesPath, 'pi', PI_CLI), launcher: path.join(process.resourcesPath, 'piLauncher.mjs') }
+    : { cli: path.join(__dirname, '../..', PI_CLI), launcher: path.join(__dirname, '../../electron/piLauncher.mjs') })
 
 const agents = new AgentManager({
     onEvent: (agentId, event) => windows.deliver(agentId, IPC.agentEvent, event),

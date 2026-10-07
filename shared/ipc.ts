@@ -4,9 +4,15 @@ import type { AgentMessage, PiEvent, RpcResponse } from './pi'
 import type { AuthMethod, EndpointModel, EndpointSave, LoginUpdate, ProvidersState } from './providers'
 
 export interface PiEnv {
+    /** node, or the app's own Electron for the bundled pi. */
     nodePath: string
+    /** pi's CLI (a JS file, or a compiled binary). */
     piPath: string
     version: string
+    /** The pi shipped in the app, used when the user has none: started through this launcher script. */
+    bundled?: { launcher: string }
+    /** Why the user's own pi is not the one in use (it failed to start). */
+    note?: string
 }
 
 export type PiEnvResult = { ok: true, env: PiEnv } | { ok: false, error: string }

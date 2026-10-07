@@ -1,0 +1,8 @@
+{
+    "name": "pi-kit-bundled-pi",
+    "private": true,
+    "description": "The pi the app ships for users without one; scripts/bundle-pi.sh installs it from the lockfile",
+    "dependencies": {
+        "@earendil-works/pi-coding-agent": "1.0.3"
+    }
+}

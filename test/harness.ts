@@ -6,10 +6,11 @@ import type { PiEvent, RpcResponse } from '@shared/pi'
 import type { AddressInfo } from 'node:net'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import http from 'node:http'
+import { createRequire } from 'node:module'
 import os from 'node:os'
 import path from 'node:path'
 import { AgentManager } from '../electron/agents'
-import { resolvePiEnv } from '../electron/pi-env'
+import { resolvePiEnv, setBundledPi } from '../electron/pi-env'
 
 export const EXTENSIONS_DIR = path.resolve(__dirname, '../packages/capabilities/extensions')
 
@@ -115,8 +116,17 @@ export async function startMockLlm(reply: (request: MockRequest, index: number) 
     }
 }
 
-/** The installed pi, or null when it cannot be found (tests then skip). */
+/**
+ * The installed pi, or null when it cannot be found (tests then skip). PI_GUI_PI=bundled runs the
+ * pi devDependency on the electron package's binary as node, the way the app runs its shipped pi.
+ */
 export async function findPi(): Promise<PiEnv | null> {
+    const root = path.join(import.meta.dirname, '..')
+    setBundledPi({
+        cli: path.join(root, 'node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js'),
+        launcher: path.join(root, 'electron/piLauncher.mjs'),
+        runtime: createRequire(import.meta.url)('electron') as unknown as string,
+    })
     const result = await resolvePiEnv()
     return result.ok ? result.env : null
 }

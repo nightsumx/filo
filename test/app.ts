@@ -108,10 +108,13 @@ export function check(ok: boolean, message: string) {
     console.log(`ok - ${message}`)
 }
 
+/** Starts the built app; PI_E2E_APP runs a packaged one instead (…/Pi.app/Contents/MacOS/Pi). */
 export async function launch(env: Record<string, string>) {
     // The electron package's main export is the binary path; the .bin shim would outlive kill().
-    const electron = createRequire(import.meta.url)('electron') as string
-    const app = spawn(electron, ['.', `--remote-debugging-port=${PORT}`], { cwd: ROOT, env: { ...process.env, ...env }, stdio: 'ignore' })
+    const packaged = process.env.PI_E2E_APP
+    const electron = packaged || createRequire(import.meta.url)('electron') as string
+    const args = packaged ? [`--remote-debugging-port=${PORT}`] : ['.', `--remote-debugging-port=${PORT}`]
+    const app = spawn(electron, args, { cwd: ROOT, env: { ...process.env, ...env }, stdio: 'ignore' })
     return async () => {
         const exited = new Promise(resolve => app.once('exit', resolve))
         app.kill('SIGTERM')

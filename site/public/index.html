@@ -134,7 +134,7 @@
                 </div>
                 <ul>
                     <li><span lang="zh">从 GitHub 下载最新版，先校验签名，再装到 /Applications。没有管理员权限的话装到 ~/Applications。</span><span lang="en">Downloads the latest release from GitHub, checks its signature, and installs to /Applications (or ~/Applications without admin rights).</span></li>
-                    <li><span lang="zh">如果还没装 pi 命令行，会用 npm 顺带装上，所以需要 Node.js 22.19 或以上。</span><span lang="en">If the pi CLI isn't installed yet, it installs it with npm, so you need Node.js 22.19 or later.</span></li>
+                    <li><span lang="zh">不需要 Node.js 或 pi 命令行：Pi 自带一份 pi。你装了自己的 pi，就用你的。</span><span lang="en">No Node.js or pi CLI needed: Pi comes with its own pi, and uses yours if you have one.</span></li>
                     <li><span lang="zh">要更新，再运行一次同样的命令。运行前请先退出 Pi。</span><span lang="en">To update, run the same command again. Quit Pi first.</span></li>
                     <li><a href="/install.sh"><span lang="zh">先看看脚本内容</span><span lang="en">Read the script first</span></a></li>
                 </ul>
@@ -144,7 +144,7 @@
                 <p><a class="button" href="https://github.com/nightsumx/pi-kit/releases/latest/download/Pi-arm64.dmg"><span lang="zh">下载 Pi-arm64.dmg</span><span lang="en">Download Pi-arm64.dmg</span></a></p>
                 <ul>
                     <li><span lang="zh">应用没有经过 Apple 公证，第一次打开会被拦下。先双击打开一次，再到「系统设置 → 隐私与安全性」，点「仍要打开」。</span><span lang="en">The app isn't notarized by Apple, so macOS blocks the first launch. Open it once, then go to System Settings → Privacy &amp; Security and click Open Anyway.</span></li>
-                    <li><span lang="zh">pi 命令行需要另外装：</span><span lang="en">Install the pi CLI separately:</span><code class="block">npm install -g @earendil-works/pi-coding-agent</code></li>
+                    <li><span lang="zh">想在终端里也用 pi，再装命令行，两边共用同一份配置和会话：</span><span lang="en">For pi in the terminal too, install the CLI; both share the same setup and sessions:</span><code class="block">npm install -g @earendil-works/pi-coding-agent</code></li>
                 </ul>
             </div>
         </div>
