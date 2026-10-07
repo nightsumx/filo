@@ -141,4 +141,71 @@ describe('acpTranscript', () => {
         const last = transcript.messages.at(-1)!.message as any
         expect(last).toMatchObject({ role: 'assistant', stopReason: 'error', errorMessage: 'Reconnecting... high demand' })
     })
+
+    // Shapes recorded from claude-agent-acp 0.86.0: the call is announced empty, its arguments and
+    // diff come in an update, and a command's content is its description until the output replaces it.
+    it('reads Claude Code calls: late arguments, fenced command output, Anthropic-style usage', () => {
+        const { transcript, events } = record()
+        transcript.userPrompt('please edit files')
+        const meta = (toolName: string) => ({ claudeCode: { toolName } })
+        for (const u of [
+            think('I should look first.'),
+            { _meta: meta('Bash'), toolCallId: 'toolu_1', sessionUpdate: 'tool_call', name: 'Bash', rawInput: {}, status: 'pending', title: 'Terminal', kind: 'execute', content: [] },
+            { _meta: meta('Bash'), toolCallId: 'toolu_1', sessionUpdate: 'tool_call_update', rawInput: { command: 'ls', description: 'List files' }, title: 'ls', content: [{ type: 'content', content: { type: 'text', text: 'List files' } }] },
+            { _meta: meta('Edit'), toolCallId: 'toolu_2', sessionUpdate: 'tool_call', name: 'Edit', rawInput: {}, status: 'pending', title: 'Edit', kind: 'edit', content: [], locations: [] },
+            { _meta: meta('Edit'), toolCallId: 'toolu_2', sessionUpdate: 'tool_call_update', rawInput: { file_path: '/w/seed.txt', old_string: 'seed line', new_string: 'seed line edited' }, title: 'Edit seed.txt', content: [{ type: 'diff', path: '/w/seed.txt', oldText: 'seed line', newText: 'seed line edited' }], locations: [{ path: '/w/seed.txt' }] },
+            { _meta: meta('Bash'), toolCallId: 'toolu_1', sessionUpdate: 'tool_call_update', status: 'completed', rawOutput: 'seed.txt', content: [{ type: 'content', content: { type: 'text', text: '```console\nseed.txt\n```' } }] },
+            { _meta: meta('Edit'), toolCallId: 'toolu_2', sessionUpdate: 'tool_call_update', status: 'completed', rawOutput: 'The file /w/seed.txt has been updated successfully.' },
+            say('All done.'),
+        ])
+            transcript.update(u)
+        transcript.finish('end_turn', { inputTokens: 2000, outputTokens: 80, cachedReadTokens: 400, cachedWriteTokens: 0, totalTokens: 2480 })
+
+        const messages = transcript.messages.map(m => m.message) as any[]
+        const calls = messages.flatMap(m => m.role === 'assistant' ? m.content.filter((b: any) => b.type === 'toolCall') : [])
+        expect(calls).toEqual([
+            { type: 'toolCall', id: 'toolu_1', name: 'bash', arguments: { command: 'ls' } },
+            { type: 'toolCall', id: 'toolu_2', name: 'edit', arguments: { path: '/w/seed.txt', oldText: 'seed line', newText: 'seed line edited' } },
+        ])
+        const results = messages.filter(m => m.role === 'toolResult')
+        expect(results.map(r => [r.toolCallId, r.content[0]?.text])).toEqual([['toolu_1', 'seed.txt'], ['toolu_2', 'The file /w/seed.txt has been updated successfully.']])
+        // The description never shows as the command's output while it runs.
+        expect(events.some(e => e.type === 'tool_execution_update' && JSON.stringify(e).includes('List files'))).toBe(false)
+        // Anthropic counts cache reads apart from input: 2000 + 400 + 80 = 2480.
+        expect(messages.at(-1).usage).toMatchObject({ input: 2000, cacheRead: 400, output: 80 })
+    })
+
+    it('reads usage by the agent\'s convention when it is declared', () => {
+        const run = (inputIncludesCache?: boolean) => {
+            const transcript = new AcpTranscript('', { inputIncludesCache })
+            transcript.userPrompt('x')
+            transcript.update(say('y'))
+            transcript.finish('end_turn', { inputTokens: 100, cachedReadTokens: 40, outputTokens: 10, totalTokens: 150 })
+            return (transcript.messages.at(-1)!.message as any).usage.input
+        }
+        expect(run(true)).toBe(60)
+        expect(run(false)).toBe(100)
+        expect(run()).toBe(100)
+    })
+
+    // Grok Build 1.0.46: the call is announced with no kind, then gains one with a diff.
+    it('reads a Grok Build write that gains its kind and diff in updates', () => {
+        const { transcript } = record()
+        transcript.userPrompt('change a.txt')
+        const id = 'call-1-0'
+        for (const u of [
+            say('I\'ll write it.'),
+            { sessionUpdate: 'tool_call', toolCallId: id, title: 'write', rawInput: { file_path: '/w/a.txt', content: 'hello\n' } },
+            { sessionUpdate: 'tool_call_update', toolCallId: id, kind: 'edit', title: 'Write `/w/a.txt`', content: [{ type: 'diff', path: '/w/a.txt', oldText: '', newText: 'hello\n' }], locations: [{ path: '/w/a.txt' }] },
+            { sessionUpdate: 'tool_call_update', toolCallId: id, status: 'completed', content: [{ type: 'diff', path: '/w/a.txt', oldText: 'hi\n', newText: 'hello\n' }], rawOutput: { type: 'SearchReplace' } },
+            say('OK'),
+        ])
+            transcript.update(u)
+        transcript.finish('end_turn', { inputTokens: 37039, outputTokens: 92, totalTokens: 37131, cachedReadTokens: 19072 })
+        const messages = transcript.messages.map(m => m.message) as any[]
+        expect(messages[1].content.at(-1)).toEqual({ type: 'toolCall', id, name: 'edit', arguments: { path: '/w/a.txt', oldText: 'hi\n', newText: 'hello\n' } })
+        expect(messages[2]).toMatchObject({ role: 'toolResult', toolCallId: id, isError: false })
+        // OpenAI-style totals (input already holds the cache reads).
+        expect(messages.at(-1).usage).toMatchObject({ input: 37039 - 19072, cacheRead: 19072 })
+    })
 })

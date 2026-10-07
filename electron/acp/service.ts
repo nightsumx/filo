@@ -6,11 +6,13 @@ import type { SessionSnapshot, SessionSummary } from '@shared/ipc'
 import type { AcpAgentCallbacks, AcpLaunch } from './agent'
 import { ACP_AGENTS, acpAgent, parseAcpSessionKey } from '@shared/agents'
 import { constants, readFileSync } from 'node:fs'
-import { access, mkdir, rename, writeFile } from 'node:fs/promises'
+import { access, mkdir, readFile, rename, writeFile } from 'node:fs/promises'
+import os from 'node:os'
 import path from 'node:path'
 import process from 'node:process'
 import { tr } from '../i18n'
 import { loginShellPath } from '../pi-env'
+import { agentDir } from '../piSettings'
 import { AcpAgent } from './agent'
 
 /** What the app remembers of an ACP session (the agent keeps the conversation itself). */
@@ -28,8 +30,8 @@ export interface AcpSessionRecord {
     updatedAt: number
 }
 
-async function findOnPath(bin: string, searchPath: string): Promise<string | undefined> {
-    for (const dir of searchPath.split(path.delimiter)) {
+async function findIn(bin: string, dirs: string[]): Promise<string | undefined> {
+    for (const dir of dirs) {
         if (!dir)
             continue
         const file = path.join(dir, bin)
@@ -42,7 +44,9 @@ async function findOnPath(bin: string, searchPath: string): Promise<string | und
     return undefined
 }
 
-/** PI_GUI_ACP_CODEX='["node","/path/agent.mjs"]' replaces the adapter command (tests, local builds). */
+const findOnPath = (bin: string, searchPath: string) => findIn(bin, searchPath.split(path.delimiter))
+
+/** PI_GUI_ACP_<ID>='["node","/path/agent.mjs"]' replaces the adapter command (tests, local builds). */
 function overrideOf(spec: AcpAgentSpec): string[] | undefined {
     const raw = process.env[`PI_GUI_ACP_${spec.id.toUpperCase()}`]
     if (!raw)
@@ -56,6 +60,19 @@ function overrideOf(spec: AcpAgentSpec): string[] | undefined {
     return [raw]
 }
 
+/** A literal API key saved in pi's auth.json for this provider (not an env name or a !command). */
+async function piApiKey(provider: string): Promise<string | undefined> {
+    try {
+        const auth = JSON.parse(await readFile(path.join(agentDir(), 'auth.json'), 'utf8'))
+        const entry = auth?.[provider]
+        const key = entry?.type === 'api_key' && typeof entry.key === 'string' ? entry.key.trim() : ''
+        return key && !key.startsWith('!') && !/^[A-Z][A-Z0-9_]*$/.test(key) ? key : undefined
+    }
+    catch {
+        return undefined
+    }
+}
+
 export async function resolveLaunch(spec: AcpAgentSpec): Promise<AcpLaunch> {
     const searchPath = await loginShellPath()
     const env: Record<string, string> = { ...process.env as Record<string, string>, PATH: searchPath }
@@ -66,18 +83,25 @@ export async function resolveLaunch(spec: AcpAgentSpec): Promise<AcpLaunch> {
         if (cli)
             env[spec.cli.env] = cli
     }
+    if (spec.apiKey && !env[spec.apiKey.env]) {
+        const key = await piApiKey(spec.apiKey.provider)
+        if (key)
+            env[spec.apiKey.env] = key
+    }
     const override = overrideOf(spec)
     if (override)
-        return { file: override[0], args: override.slice(1), env }
-    const adapter = await findOnPath(spec.bin, searchPath)
+        return { file: override[0], args: override.slice(1), env, via: 'override' }
+    const dirs = [...searchPath.split(path.delimiter), ...(spec.dirs ?? []).map(d => d.replace(/^~(?=\/)/, os.homedir()))]
+    const adapter = await findIn(spec.bin, dirs)
     if (adapter)
-        return { file: adapter, args: [], env }
+        return { file: adapter, args: spec.args ?? [], env, via: 'path' }
     const npx = await findOnPath('npx', searchPath)
     if (npx)
-        return { file: npx, args: ['-y', spec.npm], env }
+        return { file: npx, args: ['-y', spec.npm, ...(spec.npmArgs ?? spec.args ?? [])], env, via: 'npx' }
+    const pkg = spec.npm.replace(/@[^@/]+$/, '')
     throw new Error(tr(
-        `找不到 ${spec.bin}，也没有 npx 可以临时运行它。安装 Node.js，或者 npm install -g ${spec.npm.replace(/@[^@/]+$/, '')}。`,
-        `${spec.bin} not found, and no npx to run it. Install Node.js, or npm install -g ${spec.npm.replace(/@[^@/]+$/, '')}.`,
+        `找不到 ${spec.bin}，也没有 npx 可以临时运行它。安装 Node.js，或者 npm install -g ${pkg}。`,
+        `${spec.bin} not found, and no npx to run it. Install Node.js, or npm install -g ${pkg}.`,
     ))
 }
 
@@ -103,7 +127,7 @@ export class AcpService {
         return Promise.all(ACP_AGENTS.map(async (spec) => {
             try {
                 const launch = await resolveLaunch(spec)
-                return { id: spec.id, label: spec.label, available: true, command: [path.basename(launch.file), ...launch.args].join(' ') }
+                return { id: spec.id, label: spec.label, available: true, via: launch.via, command: [path.basename(launch.file), ...launch.args].join(' ') }
             }
             catch (error: any) {
                 return { id: spec.id, label: spec.label, available: false, error: String(error?.message ?? error) }

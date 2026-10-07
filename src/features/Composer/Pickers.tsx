@@ -24,7 +24,13 @@ const LEVEL_LABEL: Record<ThinkingLevel, Localized> = {
     max: { zh: '最高', en: 'Max' },
 }
 
-const levelLabel = (level: ThinkingLevel): string => (LEVEL_LABEL[level] ? tr(LEVEL_LABEL[level]) : level)
+/** ACP agents add their own levels (Claude Code: "default"). */
+const EXTRA_LEVEL_LABEL: Record<string, Localized> = { default: { zh: '默认', en: 'Default' } }
+
+const levelLabel = (level: ThinkingLevel): string => {
+    const label = LEVEL_LABEL[level] ?? EXTRA_LEVEL_LABEL[level]
+    return label ? tr(label) : level
+}
 
 /** pi started but has no provider to take a model from: nothing in the thread can run yet. */
 const lacksModels = (thread: Thread) => thread.agent === 'pi' && thread.agentStatus === 'ready' && !thread.models.length
@@ -295,6 +301,14 @@ function useAgents(): AgentAvailability[] {
     return agents
 }
 
+function agentHint(agent: AgentAvailability): string | undefined {
+    if (!agent.available)
+        return agent.error
+    if (agent.via === 'npx')
+        return tr(`首次使用时用 npx 下载（${agent.command?.replace(/^npx -y /, '')}）`, `Downloaded with npx on first use (${agent.command?.replace(/^npx -y /, '')})`)
+    return agent.command
+}
+
 /** Which agent a fresh thread runs: pi, or an ACP agent (Codex, …). Gone once the thread has history. */
 export const AgentPicker = observer(({ thread }: { thread: Thread }) => {
     const agents = useAgents()
@@ -302,7 +316,7 @@ export const AgentPicker = observer(({ thread }: { thread: Thread }) => {
         return null
     const choices: { id: AgentKind, label: string, available: boolean, hint?: string }[] = [
         { id: 'pi', label: 'pi', available: true },
-        ...agents.map(a => ({ id: a.id, label: a.label, available: a.available, hint: a.available ? a.command : a.error })),
+        ...agents.map(a => ({ id: a.id, label: a.label, available: a.available, hint: agentHint(a) })),
     ]
     if (!thread.agentSwitchable || choices.length < 2) {
         // A thread of another agent keeps saying which one it is.

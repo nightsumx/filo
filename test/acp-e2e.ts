@@ -5,6 +5,7 @@
 //     and a plan (todo card); Allow lets the edit through
 //   - the session is listed with its agent, and a reopened tab replays it from the agent
 //   - pi-only actions (fork, compaction) stay hidden
+//   - Claude Code and Grok Build are offered too; a Claude thread carries its own label
 //
 //   bun run build && bun run e2e:acp
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
@@ -39,7 +40,10 @@ async function main() {
         PI_GUI_USER_DATA: userData,
         PI_CODING_AGENT_DIR: agentDir,
         PI_GUI_TEST: '1',
+        // Every ACP agent runs the same scripted one here.
         PI_GUI_ACP_CODEX: JSON.stringify(['node', path.resolve(import.meta.dirname, 'fakeAcp.mjs')]),
+        PI_GUI_ACP_CLAUDE: JSON.stringify(['node', path.resolve(import.meta.dirname, 'fakeAcp.mjs')]),
+        PI_GUI_ACP_GROK: JSON.stringify(['node', path.resolve(import.meta.dirname, 'fakeAcp.mjs')]),
         FAKE_ACP_DIR: fakeDir,
     }
     const R = JSON.stringify(repo)
@@ -54,8 +58,17 @@ async function main() {
         await until('a new thread', () => js<boolean>(`!!${T} && ${T}.isEmpty`))
         const picker = await until('the agent picker lists Codex', () => js<boolean>(`(async () => (await window.pi.listAgents()).some(a => a.id === 'codex' && a.available))()`))
         check(picker, 'Codex is available (fake adapter)')
+        const ids = await js<string[]>(`(async () => (await window.pi.listAgents()).map(a => a.id))()`)
+        check(JSON.stringify(ids) === '["codex","claude","grok"]', `the picker offers Codex, Claude Code and Grok Build (${ids.join(', ')})`)
         await until('the agent picker shows', () => js<boolean>(`!![...document.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'Agent: pi')`))
         check(true, 'a fresh thread offers the agent picker')
+        if (SHOTS) {
+            await js(`(() => { const b = [...document.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'Agent: pi'); b.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0 })); return true })()`)
+            await until('picker menu', () => js<boolean>(`!!document.querySelector('[role=menu]')`))
+            await page.screenshot(path.join(SHOTS, 'acp-picker.png'))
+            await js(`(() => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); return true })()`)
+            await until('picker closed', () => js<boolean>(`!document.querySelector('[role=menu]')`))
+        }
 
         await js(`${T}.setAgent('codex')`)
         await until('Codex ready', () => js<boolean>(`${T}.agent === 'codex' && ${T}.agentStatus === 'ready'`))
@@ -119,6 +132,18 @@ async function main() {
         await js(`(() => { const t = window.__app.threads.get(${JSON.stringify(key)}); t.draft = 'third'; void t.send(); return true })()`)
         await until('resumed run', () => js<boolean>(`(() => { const t = window.__app.threads.get(${JSON.stringify(key)}); return !t.running && t.turns.length === ${turnsBefore + 1} && JSON.stringify(t.turns.at(-1).steps).includes('echo: third') })()`), 20_000)
         check(await js<string>(`window.__app.threads.get(${JSON.stringify(key)}).key`) === key, 'the resumed session keeps its key')
+
+        // Another agent in a second thread: its own label everywhere.
+        await js(`(() => { window.__app.newThread(${R}); return true })()`)
+        await until('another new thread', () => js<boolean>(`!!${T} && ${T}.isEmpty && ${T}.key !== ${JSON.stringify(key)}`))
+        await js(`${T}.setAgent('claude')`)
+        await until('Claude ready', () => js<boolean>(`${T}.agent === 'claude' && ${T}.agentStatus === 'ready'`))
+        check(await js<string>(`document.querySelector('textarea').placeholder`) === 'Ask Claude Code to do something, or type / for commands', 'a Claude Code thread names its agent')
+        await js(`(() => { const t = ${T}; t.draft = 'hi claude'; void t.send(); return true })()`)
+        await until('Claude answers', () => js<boolean>(`(() => { const t = ${T}; return !t.running && t.persisted && t.key.startsWith('acp:claude:') && JSON.stringify(t.turns.at(-1).steps).includes('echo: hi claude') })()`), 20_000)
+        check(true, 'a Claude Code session runs and is keyed acp:claude:…')
+        await until('Claude listed', () => js<boolean>(`[...document.querySelectorAll('[role=treeitem]')].some(r => r.textContent.includes('hi claude') && r.textContent.includes('Claude Code'))`))
+        check(true, 'its sidebar row says Claude Code')
         console.log('all ACP checks passed')
     }
     finally {

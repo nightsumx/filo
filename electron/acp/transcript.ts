@@ -66,6 +66,8 @@ export interface TranscriptOptions {
     now?: () => number
     /** Provider / model stamped on finished assistant messages. */
     model?: () => { provider?: string, model?: string, thinkingLevel?: string }
+    /** ACP inputTokens counts cache reads too (Codex) or not (Claude); undefined: judge by totalTokens. */
+    inputIncludesCache?: boolean
 }
 
 const text = (t: string): TextContent => ({ type: 'text', text: t })
@@ -92,8 +94,23 @@ function exitCodeOf(update: any): number | null | undefined {
 function contentText(content: any[] | undefined): string {
     return (content ?? [])
         .filter(c => c?.type === 'content' && c.content?.type === 'text' && typeof c.content.text === 'string')
-        .map(c => c.content.text)
+        .map(c => unfence(c.content.text))
         .join('\n')
+}
+
+/** Claude Code wraps command output as a Markdown block (```console … ```); the tool row wants the text. */
+function unfence(t: string): string {
+    const m = /^```[\w-]*\n([\s\S]*?)\n?```\s*$/.exec(t)
+    return m ? m[1] : t
+}
+
+/** What a finished call printed: streamed terminal output, else its content, else a plain rawOutput. */
+function outputOf(tool: ToolState): string {
+    const raw = typeof tool.rawOutput === 'string' ? tool.rawOutput : ''
+    // A command's content can still be its description (Claude Code) while rawOutput is the output.
+    if (tool.kind === 'execute')
+        return tool.output || raw || contentText(tool.content)
+    return tool.output || contentText(tool.content) || raw
 }
 
 /** How an ACP tool call reads as pi tool calls, so the transcript's tool views apply. */
@@ -145,11 +162,13 @@ export class AcpTranscript {
     private emit: (event: PiEvent) => void
     private now: () => number
     private modelInfo: TranscriptOptions['model']
+    private inputIncludesCache: boolean | undefined
 
     constructor(private prefix: string, options: TranscriptOptions = {}) {
         this.emit = options.emit ?? (() => {})
         this.now = options.now ?? Date.now
         this.modelInfo = options.model
+        this.inputIncludesCache = options.inputIncludesCache
     }
 
     setEmitter(emit: (event: PiEvent) => void) {
@@ -324,7 +343,7 @@ export class AcpTranscript {
             tool.calls = after
         }
         if (!this.settleIfFinished(tool, update) && tool.calls[0]) {
-            const partial = tool.output || contentText(tool.content)
+            const partial = tool.kind === 'execute' ? tool.output : tool.output || contentText(tool.content)
             if (partial)
                 this.emit({ type: 'tool_execution_update', toolCallId: tool.calls[0].id, toolName: tool.calls[0].name, partialResult: { content: [text(partial)] } })
         }
@@ -362,8 +381,7 @@ export class AcpTranscript {
         const status = update.status ?? tool.status
         if (status !== 'completed' && status !== 'failed')
             return false
-        const output = tool.output || contentText(tool.content) || (typeof tool.rawOutput === 'string' ? tool.rawOutput : '')
-        this.completeTool(tool, status, output)
+        this.completeTool(tool, status, outputOf(tool))
         return true
     }
 
@@ -447,11 +465,15 @@ export class AcpTranscript {
             if (m.role !== 'assistant')
                 continue
             const cacheRead = u.cachedReadTokens ?? 0
+            const cacheWrite = u.cachedWriteTokens ?? 0
+            const input = u.inputTokens ?? 0
+            // pi's input excludes cache reads. Anthropic-style totals add the cache on top of input.
+            const includes = this.inputIncludesCache ?? !(typeof u.totalTokens === 'number' && cacheRead > 0 && u.totalTokens >= input + cacheRead + (u.outputTokens ?? 0))
             const usage: Usage = {
-                input: Math.max(0, (u.inputTokens ?? 0) - cacheRead),
+                input: includes ? Math.max(0, input - cacheRead) : input,
                 output: u.outputTokens ?? 0,
                 cacheRead,
-                cacheWrite: u.cachedWriteTokens ?? 0,
+                cacheWrite,
                 totalTokens: u.totalTokens ?? 0,
                 cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
             }

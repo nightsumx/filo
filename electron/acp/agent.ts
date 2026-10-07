@@ -27,6 +27,7 @@ export interface AcpLaunch {
     file: string
     args: string[]
     env: Record<string, string>
+    via?: 'path' | 'npx' | 'override'
 }
 
 export interface AcpAgentOptions {
@@ -92,13 +93,14 @@ export class AcpAgent {
     private legacyConfig = false
     private commands: SlashCommand[] = []
     private context: { used: number, size: number } | null = null
+    private cost: number | undefined
     private running = false
     /** session/load is replaying history. */
     private loading = true
     private permissions = new Map<string, PermissionWait>()
 
     constructor(readonly spec: AcpAgentSpec, launch: AcpLaunch, private options: AcpAgentOptions, private callbacks: AcpAgentCallbacks) {
-        this.transcript = new AcpTranscript('', { model: () => this.modelStamp(), now: () => (this.loading && options.replayTime ? options.replayTime : Date.now()) })
+        this.transcript = new AcpTranscript('', { model: () => this.modelStamp(), inputIncludesCache: spec.inputIncludesCache, now: () => (this.loading && options.replayTime ? options.replayTime : Date.now()) })
         this.child = spawn(launch.file, launch.args, { cwd: options.cwd, env: launch.env, stdio: ['pipe', 'pipe', 'pipe'] })
         this.connection = new AcpConnection(this.child.stdin, this.child.stdout, {
             onNotification: (method, params) => this.notification(method, params),
@@ -182,8 +184,8 @@ export class AcpAgent {
     /** Sign-in errors read as what to do about them. */
     private explain(error: any): string {
         const message = String(error?.message ?? error)
-        if (error?.code === -32000 || /auth/i.test(message))
-            return tr(`${this.spec.label} 还没有登录：先在终端里运行 ${this.spec.cli?.bin ?? this.spec.id} 完成登录。（${message}）`, `${this.spec.label} is not signed in: run ${this.spec.cli?.bin ?? this.spec.id} in a terminal and sign in first. (${message})`)
+        if (error?.code === -32000 || /auth|sign in|log ?in/i.test(message))
+            return tr(`${this.spec.label} 还没有登录：${this.spec.signIn.zh}。（${message}）`, `${this.spec.label} is not signed in: ${this.spec.signIn.en}. (${message})`)
         return message
     }
 
@@ -256,6 +258,9 @@ export class AcpAgent {
             case 'usage_update':
                 if (typeof update.used === 'number' && typeof update.size === 'number')
                     this.context = { used: update.used, size: update.size }
+                // The session's running cost, when the agent knows it (Claude Code does, in USD).
+                if (typeof update.cost?.amount === 'number' && (update.cost.currency ?? 'USD') === 'USD')
+                    this.cost = update.cost.amount
                 break
             case 'session_info_update':
                 if (typeof update.title === 'string' && update.title) {
@@ -364,6 +369,7 @@ export class AcpAgent {
                     const context = this.context
                     return ok({
                         tokens,
+                        cost: this.cost,
                         contextUsage: context ? { tokens: context.used, contextWindow: context.size, percent: context.size ? (context.used / context.size) * 100 : null } : undefined,
                     })
                 }
@@ -437,8 +443,9 @@ export class AcpAgent {
         this.callbacks.onSession?.(this, { prompt: message })
         // pi answers a prompt at once and streams the run; do the same and settle when ACP returns.
         this.connection.request('session/prompt', { sessionId: this.sessionId, prompt: blocks }).then(
-            (result: any) => this.settle(result?.stopReason, result?.usage),
-            (error: any) => this.settle(undefined, undefined, String(error?.message ?? error)),
+            // Grok Build reports the prompt's usage only under _meta.
+            (result: any) => this.settle(result?.stopReason, result?.usage ?? result?._meta?.usage),
+            (error: any) => this.settle(undefined, undefined, this.explain(error)),
         )
         return {}
     }

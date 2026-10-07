@@ -4,16 +4,30 @@
 
 export type AgentKind = 'pi' | AcpAgentId
 
-export type AcpAgentId = 'codex'
+export type AcpAgentId = 'codex' | 'claude' | 'grok'
 
 export interface AcpAgentSpec {
     id: AcpAgentId
     label: string
-    /** Adapter commands tried in order: a binary on the login shell's PATH, then an npm package run with npx. */
+    /** The ACP command on the login shell's PATH (or in `dirs`), with its arguments. */
     bin: string
+    args?: string[]
+    /** Install folders the login shell may not have on PATH (`~/` is the home folder). */
+    dirs?: string[]
+    /** Fallback when `bin` is missing: an npm package run with npx, pinned. */
     npm: string
+    npmArgs?: string[]
     /** The agent's own CLI, passed to the adapter so it uses the user's install and sign-in. */
     cli?: { bin: string, env: string }
+    /** An API key the agent takes from pi's auth.json (Model providers) when the environment has none. */
+    apiKey?: { provider: string, env: string }
+    /** What to do when the agent says it is not signed in. */
+    signIn: { zh: string, en: string }
+    /**
+     * Whether ACP `inputTokens` already counts cache reads (OpenAI style) or not (Anthropic style).
+     * Undefined: decide from totalTokens.
+     */
+    inputIncludesCache?: boolean
 }
 
 export const ACP_AGENTS: readonly AcpAgentSpec[] = [
@@ -23,6 +37,34 @@ export const ACP_AGENTS: readonly AcpAgentSpec[] = [
         bin: 'codex-acp',
         npm: '@agentclientprotocol/codex-acp@2.1.1',
         cli: { bin: 'codex', env: 'CODEX_PATH' },
+        inputIncludesCache: true,
+        signIn: { zh: '在终端里运行 codex 完成登录', en: 'run codex in a terminal and sign in' },
+    },
+    {
+        id: 'claude',
+        label: 'Claude Code',
+        // Anthropic does not allow claude.ai sign-in in third-party apps: the adapter's
+        // --hide-claude-auth refuses turns a subscription would pay for, so an API key is needed.
+        bin: 'claude-agent-acp',
+        args: ['--hide-claude-auth'],
+        npm: '@agentclientprotocol/claude-agent-acp@0.86.0',
+        apiKey: { provider: 'anthropic', env: 'ANTHROPIC_API_KEY' },
+        inputIncludesCache: false,
+        signIn: {
+            zh: '在 设置 → 模型供应商 里填 Anthropic 的 API key（Anthropic 不允许第三方应用使用 Claude 订阅）',
+            en: 'enter an Anthropic API key in Settings → Model providers (Anthropic does not allow Claude subscriptions in third-party apps)',
+        },
+    },
+    {
+        id: 'grok',
+        label: 'Grok Build',
+        bin: 'grok',
+        args: ['agent', 'stdio'],
+        dirs: ['~/.grok/bin'],
+        npm: '@xai-official/grok@1.0.50',
+        npmArgs: ['agent', 'stdio'],
+        inputIncludesCache: true,
+        signIn: { zh: '在终端里运行 grok 完成登录', en: 'run grok in a terminal and sign in' },
     },
 ]
 
@@ -39,6 +81,8 @@ export interface AgentAvailability {
     available: boolean
     /** The adapter command that will run, for the settings line. */
     command?: string
+    /** Where the command comes from: installed, run through npx (downloaded on first use), or a test override. */
+    via?: 'path' | 'npx' | 'override'
     error?: string
 }
 
