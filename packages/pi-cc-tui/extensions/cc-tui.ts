@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { AssistantMessageComponent, CONFIG_DIR_NAME, getAgentDir, UserMessageComponent, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Editor, Loader, Markdown, Text } from "@earendil-works/pi-tui";
+import { latestTodos } from "pi-capabilities/lib/todo.ts";
 import type { TodoDetails } from "pi-capabilities/protocol";
 import { COLOR, key, MODE_KEY, shared } from "./lib/shared.ts";
 
@@ -159,12 +160,7 @@ export default function (pi: ExtensionAPI) {
 
 	// The todo capability's list: the latest result on the branch, then every new call.
 	const restoreTodos = (ctx: any) => {
-		shared.todos = [];
-		for (const entry of ctx.sessionManager.getBranch()) {
-			if (entry.type !== "message" || entry.message.role !== "toolResult" || entry.message.toolName !== "todo") continue;
-			const items = (entry.message.details as TodoDetails | undefined)?.items;
-			if (Array.isArray(items)) shared.todos = items;
-		}
+		shared.todos = latestTodos(ctx.sessionManager.getBranch());
 	};
 	pi.on("session_start", (_e, ctx) => restoreTodos(ctx));
 	pi.on("session_tree", (_e, ctx) => restoreTodos(ctx));

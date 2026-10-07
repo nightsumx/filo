@@ -19,7 +19,7 @@ afterEach(async () => {
     }
 })
 
-async function setup(capabilities: CapabilityId[], reply: (request: MockRequest, index: number) => MockReply, options: { approvalMode?: ApprovalMode } = {}) {
+async function setup(capabilities: CapabilityId[], reply: (request: MockRequest, index: number) => MockReply, options: { approvalMode?: ApprovalMode, settings?: Record<string, unknown> } = {}) {
     const llm = await startMockLlm(reply)
     const slot: { llm: MockLlm, pi?: PiSession } = { llm }
     open.push(slot)
@@ -54,6 +54,57 @@ describe.runIf(process.env.PI_GUI_SKIP_E2E !== '1')('capability extensions (real
         expect(end.result.details as TodoDetails).toEqual({ kind: 'todo', items })
         expect(llm.requests[1].toolResults[0]).toBe('Todo list updated: 1/3 done. In progress: Write the fix')
     }, 30_000)
+
+    // A list left with open steps (finished work never ticked off, or work dropped) would otherwise
+    // keep showing under every later prompt; the model is shown it again so it updates or clears it.
+    it('todo: open steps left from earlier are shown to the model at the next prompt', async ({ skip }) => {
+        if (!env)
+            return skip('pi not installed')
+        const open = [{ text: 'Write the fix', status: 'done' }, { text: 'Run tests', status: 'in_progress' }]
+        const { llm, pi } = await setup(['todo'], script({ toolCalls: [{ name: 'todo', arguments: { items: open } }] }))
+        await pi.run('fix it')
+        const before = llm.requests.length
+        await pi.run('commit it')
+        const next = JSON.stringify(llm.requests[before].messages)
+        expect(next).toContain('still has open steps')
+        expect(next).toContain('Run tests')
+        // Once, as the last message before the new prompt's reply.
+        expect(next.split('still has open steps').length - 1).toBe(1)
+    }, 30_000)
+
+    it('todo: a finished or empty list adds nothing to the next prompt', async ({ skip }) => {
+        if (!env)
+            return skip('pi not installed')
+        const { llm, pi } = await setup(['todo'], script({ toolCalls: [{ name: 'todo', arguments: { items: [{ text: 'Write the fix', status: 'done' }] } }] }))
+        await pi.run('fix it')
+        await pi.run('thanks')
+        expect(JSON.stringify(llm.requests.at(-1)!.messages)).not.toContain('still has open steps')
+    }, 30_000)
+
+    // Compaction replaces the todo call with a summary, which is when the list stops being updated.
+    it('todo: after a compaction mid-run, the open list is repeated to the model', async ({ skip }) => {
+        if (!env)
+            return skip('pi not installed')
+        const open = [{ text: 'Step one', status: 'in_progress' }, { text: 'Step two', status: 'pending' }]
+        const { llm, pi } = await setup(['todo'], (r, i) => {
+            // The summary request is the only one without tools.
+            if (!r.tools.length)
+                return { text: '## Goal\nsummary' }
+            if (i === 0)
+                return { toolCalls: [{ name: 'todo', arguments: { items: open } }] }
+            // Reports a context near the window (with enough output to cut), so pi compacts before the next request.
+            if (i === 1)
+                return { toolCalls: [{ name: 'bash', arguments: { command: 'seq 1 3000' } }], usage: { input: 95_000, output: 10 } }
+            return { text: 'done' }
+        }, { settings: { compaction: { keepRecentTokens: 100 } } })
+        await pi.run('do it')
+        const compacted = pi.events.some(e => e.type === 'compaction_end' && (e as any).reason === 'threshold')
+        const after = llm.requests.filter(r => r.tools.length).at(-1)!
+        expect(compacted).toBe(true)
+        expect(JSON.stringify(after.messages)).toContain('still has open steps')
+        // Hidden: not listed as a queued steering message either.
+        expect(JSON.stringify(pi.events.filter(e => e.type === 'queue_update'))).not.toContain('open steps')
+    }, 60_000)
 
     it('ask: waits for /gui-ask-answer and returns the answers to the model', async ({ skip }) => {
         if (!env)

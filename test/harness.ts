@@ -140,7 +140,7 @@ export interface PiSession {
  * Starts pi in a throwaway agent dir whose only model is the mock, so user settings, extensions
  * and credentials are never read.
  */
-export async function startPi(env: PiEnv, llm: MockLlm, capabilities: CapabilityId[], options: { approvalMode?: ApprovalMode } = {}): Promise<PiSession> {
+export async function startPi(env: PiEnv, llm: MockLlm, capabilities: CapabilityId[], options: { approvalMode?: ApprovalMode, settings?: Record<string, unknown> } = {}): Promise<PiSession> {
     const root = await mkdtemp(path.join(os.tmpdir(), 'pi-gui-test-'))
     const agentDir = path.join(root, 'agent')
     const cwd = path.join(root, 'project')
@@ -149,7 +149,7 @@ export async function startPi(env: PiEnv, llm: MockLlm, capabilities: Capability
     await writeFile(path.join(agentDir, 'models.json'), JSON.stringify({
         providers: { mock: { baseUrl: llm.baseUrl, api: 'openai-completions', apiKey: 'mock', models: [{ id: 'mock-1', contextWindow: 100_000, maxTokens: 1000 }] } },
     }))
-    await writeFile(path.join(agentDir, 'settings.json'), JSON.stringify({ defaultProvider: 'mock', defaultModel: 'mock-1', defaultThinkingLevel: 'off' }))
+    await writeFile(path.join(agentDir, 'settings.json'), JSON.stringify({ defaultProvider: 'mock', defaultModel: 'mock-1', defaultThinkingLevel: 'off', ...options.settings }))
 
     const events: PiEvent[] = []
     const waiters: { match: (e: PiEvent) => boolean, resolve: (e: PiEvent) => void }[] = []
@@ -172,7 +172,7 @@ export async function startPi(env: PiEnv, llm: MockLlm, capabilities: Capability
     // piSpawnEnv copies process.env at spawn time.
     const previous = process.env.PI_CODING_AGENT_DIR
     process.env.PI_CODING_AGENT_DIR = agentDir
-    const id = manager.start(env, { cwd, capabilities, ...options })
+    const id = manager.start(env, { cwd, capabilities, approvalMode: options.approvalMode })
     if (previous === undefined)
         delete process.env.PI_CODING_AGENT_DIR
     else

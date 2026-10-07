@@ -1,10 +1,16 @@
 // todo: the model keeps a task list for multi-step work. Each call replaces the whole list, so the
 // tool is stateless; the GUI reads the latest result's details on the active branch. In the terminal
 // the list draws like Claude Code's: ☐ pending, bold ☐ in progress, struck-through ☒ done.
+//
+// Models drop the list: after a compaction the todo calls are only a line in the summary, and work
+// gets finished without ticking steps off. Both hosts then show stale steps under every later
+// prompt. So while the list has open steps, the model is shown it again (hidden from the user) at
+// the next prompt and right after a mid-run compaction.
 import type { ExtensionAPI, Theme } from '@earendil-works/pi-coding-agent'
 import type { TodoDetails, TodoItem } from '../protocol'
 import { Text } from '@earendil-works/pi-tui'
 import { Type } from 'typebox'
+import { latestTodos } from '../lib/todo'
 import { hang, header } from '../tui/render'
 
 const TodoParams = Type.Object({
@@ -31,7 +37,35 @@ export function todoLine(theme: Theme, item: TodoItem): string {
     return item.status === 'in_progress' ? theme.bold(`☐ ${item.text}`) : `☐ ${item.text}`
 }
 
+const REMINDER_TYPE = 'todo-reminder'
+
+/** The reminder for a list with open steps; undefined when every step is done (or there is none). */
+function reminderText(items: TodoItem[]): string | undefined {
+    if (!items.some(i => i.status !== 'done'))
+        return undefined
+    return [
+        'Your todo list still has open steps:',
+        ...items.map(i => `- [${i.status}] ${i.text}`),
+        '',
+        'If any of them are finished or dropped, or this request is about something else, call todo now to bring the list up to date (an empty list clears it). Otherwise keep it updated as you work.',
+    ].join('\n')
+}
+
+const reminder = (content: string) => ({ customType: REMINDER_TYPE, content, display: false })
+
 export default function (pi: ExtensionAPI) {
+    pi.on('before_agent_start', async (_event, ctx) => {
+        const text = reminderText(latestTodos(ctx.sessionManager.getBranch()))
+        return text ? { message: reminder(text) } : undefined
+    })
+
+    // Mid-run the steer lands before the next request; an idle compaction waits for the next prompt.
+    pi.on('session_compact', async (_event, ctx) => {
+        const text = reminderText(latestTodos(ctx.sessionManager.getBranch()))
+        if (text && !ctx.isIdle())
+            pi.sendMessage(reminder(text), { deliverAs: 'steer' })
+    })
+
     pi.registerTool({
         name: 'todo',
         label: 'Todo',
