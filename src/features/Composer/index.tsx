@@ -10,7 +10,7 @@ import { observer } from 'mobx-react-lite'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { StatusLine } from '../Thread/StatusLine'
-import { ModelPicker, ModePicker, NoModelNotice, ThinkingPicker } from './Pickers'
+import { AgentPicker, ConfigPickers, ModelPicker, ModePicker, NoModelNotice, ThinkingPicker } from './Pickers'
 import { TodoBar } from './TodoBar'
 import { tr } from '@/lib/i18n'
 import type { Localized } from '@shared/i18n'
@@ -109,6 +109,7 @@ export const Composer = observer(({ thread }: { thread: Thread }) => {
     }, [thread.draft])
 
     const canSend = !!thread.draft.trim() || thread.images.length > 0
+    const agent = thread.agentLabel
     const queued = [...thread.queue.steering, ...thread.queue.followUp]
     const widgetsAbove = Object.entries(thread.widgets).filter(([, w]) => w.placement === 'aboveEditor')
     const widgetsBelow = Object.entries(thread.widgets).filter(([, w]) => w.placement === 'belowEditor')
@@ -220,8 +221,8 @@ export const Composer = observer(({ thread }: { thread: Thread }) => {
                         ref={textareaRef}
                         value={thread.draft}
                         rows={2}
-                        aria-label={tr('给 pi 发消息', 'Message pi')}
-                        placeholder={thread.running ? tr('继续输入以引导 pi（Esc 中断）', 'Type to steer pi (Esc to stop)') : thread.planMode ? tr('描述要做的事，pi 先写出计划给你审阅', 'Describe the task; pi writes a plan for you to review first') : tr('让 pi 做点什么，输入 / 查看命令', 'Ask pi to do something, or type / for commands')}
+                        aria-label={tr(`给 ${agent} 发消息`, `Message ${agent}`)}
+                        placeholder={thread.running ? tr(`继续输入以引导 ${agent}（Esc 中断）`, `Type to steer ${agent} (Esc to stop)`) : thread.planMode ? tr(`描述要做的事，${agent} 先写出计划给你审阅`, `Describe the task; ${agent} writes a plan for you to review first`) : tr(`让 ${agent} 做点什么，输入 / 查看命令`, `Ask ${agent} to do something, or type / for commands`)}
                         onChange={(e) => {
                             thread.draft = e.target.value
                             setSlashDismissed(false)
@@ -257,9 +258,11 @@ export const Composer = observer(({ thread }: { thread: Thread }) => {
                                 e.target.value = ''
                             }}
                         />
+                        <AgentPicker thread={thread} />
                         <ModelPicker thread={thread} />
                         <ThinkingPicker thread={thread} />
                         <ModePicker thread={thread} />
+                        <ConfigPickers thread={thread} />
                         <span className="flex-1" />
                         {thread.running && !canSend
                             ? (
@@ -295,7 +298,7 @@ export const Composer = observer(({ thread }: { thread: Thread }) => {
                 <div className="mt-1.5 flex flex-col gap-1 px-2 text-[11.5px] text-gray-500">
                     {(thread.agentStatus === 'error' || thread.agentStatus === 'exited') && (
                         <span className="text-red-500 whitespace-pre-wrap">
-                            {thread.agentStatus === 'error' ? `${tr('pi 启动失败：', 'pi failed to start: ')}${thread.agentError}` : tr('pi 进程已退出，发送消息会重新启动。', 'pi has exited; sending a message starts it again.')}
+                            {thread.agentStatus === 'error' ? `${tr(`${agent} 启动失败：`, `${agent} failed to start: `)}${thread.agentError}` : tr(`${agent} 进程已退出，发送消息会重新启动。`, `${agent} has exited; sending a message starts it again.`)}
                         </span>
                     )}
                     {statuses.length > 0 && (

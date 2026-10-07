@@ -1,8 +1,10 @@
+import type { AcpAgentId } from '@shared/agents'
 import type { AgentExitInfo, AgentStartOptions, PiEnv } from '@shared/ipc'
 import type { PiEvent, RpcResponse } from '@shared/pi'
 import type { ChildProcessWithoutNullStreams } from 'node:child_process'
 import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
+import type { AcpService } from './acp/service'
 import { ENV } from '@shared/capabilities'
 import { capabilityArgs } from './capabilities'
 import { tr } from './i18n'
@@ -21,8 +23,20 @@ export interface AgentCallbacks {
     onExit: (agentId: string, info: AgentExitInfo) => void
 }
 
+/**
+ * What the renderer drives: pi's RPC commands in, pi's events out. PiAgent is pi itself; AcpAgent
+ * (acp/agent.ts) speaks it on behalf of an ACP agent.
+ */
+export interface ManagedAgent {
+    readonly id: string
+    request: (command: Record<string, unknown>) => Promise<RpcResponse>
+    /** A record that gets no response (extension_ui_response). */
+    write: (record: Record<string, unknown>) => void
+    stop: () => Promise<void>
+}
+
 /** One `pi --mode rpc` child process bound to one working directory and session. */
-class PiAgent {
+class PiAgent implements ManagedAgent {
     readonly id = randomUUID()
     private child: ChildProcessWithoutNullStreams
     private pending = new Map<string, Pending>()
@@ -113,7 +127,7 @@ class PiAgent {
 }
 
 export class AgentManager {
-    private agents = new Map<string, PiAgent>()
+    private agents = new Map<string, ManagedAgent>()
 
     /** extensionsDir holds the capability extensions (packages/capabilities/extensions, or Resources/capabilities when packaged). */
     constructor(private callbacks: AgentCallbacks, private extensionsDir: string) {}
@@ -128,6 +142,19 @@ export class AgentManager {
         })
         this.agents.set(agent.id, agent)
         return agent.id
+    }
+
+    /** An ACP agent for a thread; resolves once its process is spawned (the session opens after). */
+    async startAcp(service: AcpService, agent: AcpAgentId, options: AgentStartOptions): Promise<string> {
+        const instance = await service.start(agent, options.cwd, options.sessionPath, {
+            onEvent: this.callbacks.onEvent,
+            onExit: (id, info) => {
+                this.agents.delete(id)
+                this.callbacks.onExit(id, info)
+            },
+        })
+        this.agents.set(instance.id, instance)
+        return instance.id
     }
 
     async request(agentId: string, command: Record<string, unknown>): Promise<RpcResponse> {

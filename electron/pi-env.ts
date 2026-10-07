@@ -109,6 +109,12 @@ async function checkVersion(env: PiEnv): Promise<PiEnvResult> {
 
 let shellLoaded = false
 
+/** The login shell's PATH (asked once), for finding other agents' commands. */
+export async function loginShellPath(): Promise<string> {
+    await loadShellPath()
+    return shellPath
+}
+
 /** The login shell's PATH, for the bundled pi when no local one was looked up. */
 async function loadShellPath() {
     if (shellLoaded)

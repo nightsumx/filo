@@ -106,13 +106,14 @@ const ApprovalPrompt = observer(function ApprovalPrompt({ thread, request }: { t
     const isBash = approval.tool === 'bash'
     // `edits` switches the thread to the edits mode (project files stop asking), like Claude Code.
     const allEdits = approval.scope === 'edits' && /^(edit|write)$/.test(approval.tool)
-    const always = !approval.scope
+    const scopeLabel = !approval.scope
         ? ''
         : isBash
             ? tr(`总是允许 ${approval.scope} 命令`, `Always allow ${approval.scope} commands`)
             : allEdits
                 ? tr('允许所有修改', 'Allow all edits')
                 : tr(`总是允许 ${tuiTitle(approval.scope)}`, `Always allow ${tuiTitle(approval.scope)}`)
+    const always = approval.alwaysLabel || scopeLabel
     const summary = /^(edit|write|read)$/.test(approval.tool) ? displayPath(approval.summary, cwd) : approval.summary
     // A main-thread call's row sits right above and already shows a one-line summary; a subagent's
     // call is inside its card, and long commands are truncated in the row.
@@ -140,7 +141,7 @@ const ApprovalPrompt = observer(function ApprovalPrompt({ thread, request }: { t
                 <Button variant="primary" className="min-w-[72px]" onClick={() => thread.answerApproval(request, 'allow')}>{tr('允许', 'Allow')}</Button>
                 {canAlways && <Button onClick={() => thread.answerApproval(request, 'always')}>{always}</Button>}
                 <Button variant="ghost" onClick={() => thread.answerApproval(request, 'deny')}>{tr('拒绝', 'Deny')}</Button>
-                {canAlways && (
+                {canAlways && !approval.alwaysLabel && (
                     <span className="ml-auto text-[12px] text-[var(--jb-comment)]">
                         {allEdits
                             ? tr('切到「自动编辑」：本线程里项目文件的改动不再询问', 'Switches to Auto-edit: project file edits stop asking in this thread')

@@ -24,6 +24,7 @@ function answer<A, R>(channel: string, handler: (arg: A) => Promise<R>) {
 // Narrow, typed surface: the renderer never gets raw ipcRenderer access.
 const bridge: PiBridge = {
     resolveEnv: () => ipcRenderer.invoke(IPC.resolveEnv),
+    listAgents: () => ipcRenderer.invoke(IPC.listAgents),
     listSessions: () => ipcRenderer.invoke(IPC.listSessions),
     readSession: path => ipcRenderer.invoke(IPC.readSession, path),
     trashSession: path => ipcRenderer.invoke(IPC.trashSession, path),

@@ -88,7 +88,7 @@ const PromptBubble = observer(({ user, thread, entryId }: { user: UserPrompt, th
             {user.text && (
                 <div className="flex max-w-full items-start gap-1">
                     <div className="flex shrink-0 gap-0.5 pt-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
-                        {thread && forkable(entryId) && thread.sessionPath && (
+                        {thread && thread.features.fork && forkable(entryId) && thread.sessionPath && (
                             <>
                                 <ActionBtn icon={GitFork} size="small" title={t.forkHere} onClick={() => void appStore.forkThread(thread, entryId!, false)} />
                                 {!thread.running && <ActionBtn icon={PencilLine} size="small" title={t.editResend} onClick={() => void appStore.forkThread(thread, entryId!, true)} />}

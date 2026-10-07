@@ -1,3 +1,4 @@
+import type { AcpConfigOption, AgentFeatures, AgentKind } from '@shared/agents'
 import type { ApprovalChoice, ApprovalMode, ApprovalRequest, AskResponse, CapabilityId, GuiCommands, PlanDecision, ReviewApply, ReviewProgress, TodoDetails } from '@shared/capabilities'
 import type { AgentExitInfo } from '@shared/ipc'
 import type {
@@ -20,6 +21,7 @@ import { threadActivity } from '@/lib/threadActivity'
 import { blockTimeKey, buildTurns, contentText } from '@/lib/timeline'
 import type { WaitingKind } from '@/lib/threadActivity'
 import { tuiTitle } from '@/lib/toolMeta'
+import { agentFeatures, agentLabel, agentOfKey } from '@shared/agents'
 import { APPROVAL_MODES, APPROVAL_TITLE_PREFIX, GUI_COMMAND_PREFIX, GUI_STATUS, REVIEW_TYPES } from '@shared/capabilities'
 import { readableError } from '@/lib/utils'
 import { makeAutoObservable, observable, runInAction, toJS } from 'mobx'
@@ -75,10 +77,15 @@ function toolView(result: any): ToolResultView | undefined {
     return { content: Array.isArray(result.content) ? result.content : [], details: result.details, isError: !!result.isError }
 }
 
-/** One conversation: a pi session file plus the live `pi --mode rpc` process driving it. */
+/**
+ * One conversation: a pi session file plus the live `pi --mode rpc` process driving it, or an ACP
+ * agent's session (Codex, …) driven through the main process's pi-RPC bridge.
+ */
 export class Thread {
     key: string
     cwd: string
+    /** Which agent runs it; fixed once the thread has history. */
+    agent: AgentKind
     sessionPath?: string
     name?: string
     firstPrompt?: string
@@ -111,6 +118,8 @@ export class Thread {
     /** Hidden `/gui-…` commands the process registered: which capabilities it actually loaded. */
     guiCommands: string[] = []
     stats: SessionStats | null = null
+    /** ACP agents' session settings (mode, model, effort, …) as they declare them. */
+    configOptions: AcpConfigOption[] = []
     queue: { steering: string[], followUp: string[] } = { steering: [], followUp: [] }
 
     uiRequests: UiRequest[] = []
@@ -137,9 +146,10 @@ export class Thread {
     /** The end-of-run reload in progress (see settle). */
     private settling: Promise<void> | null = null
 
-    constructor(private host: ThreadHost, init: { key: string, cwd: string, sessionPath?: string, name?: string, firstPrompt?: string }) {
+    constructor(private host: ThreadHost, init: { key: string, cwd: string, sessionPath?: string, name?: string, firstPrompt?: string, agent?: AgentKind }) {
         this.key = init.key
         this.cwd = init.cwd
+        this.agent = init.sessionPath ? agentOfKey(init.sessionPath) : init.agent ?? 'pi'
         this.sessionPath = init.sessionPath
         this.name = init.name
         this.firstPrompt = init.firstPrompt
@@ -171,6 +181,7 @@ export class Thread {
         const fields: Record<string, unknown> = {
             key: this.key,
             cwd: this.cwd,
+            agent: this.agent,
             sessionPath: this.sessionPath,
             name: this.name,
             firstPrompt: this.firstPrompt,
@@ -195,6 +206,7 @@ export class Thread {
             commands: this.commands,
             guiCommands: this.guiCommands,
             stats: this.stats,
+            configOptions: this.configOptions,
             queue: this.queue,
             uiRequests: this.uiRequests,
             statuses: this.statuses,
@@ -216,8 +228,8 @@ export class Thread {
 
     /** Rebuilds a thread from another window's snapshot; the caller registers its process. */
     static restore(host: ThreadHost, s: Record<string, any>): Thread {
-        const thread = new Thread(host, { key: s.key, cwd: s.cwd, sessionPath: s.sessionPath, name: s.name, firstPrompt: s.firstPrompt })
-        const { tools, blockTimes, partialArgs, liveCounter, stopping, loadedConfig, restartPending, key: _key, cwd: _cwd, sessionPath: _path, name: _name, firstPrompt: _first, ...fields } = s
+        const thread = new Thread(host, { key: s.key, cwd: s.cwd, sessionPath: s.sessionPath, name: s.name, firstPrompt: s.firstPrompt, agent: s.agent })
+        const { tools, blockTimes, partialArgs, liveCounter, stopping, loadedConfig, restartPending, key: _key, cwd: _cwd, agent: _agent, sessionPath: _path, name: _name, firstPrompt: _first, ...fields } = s
         Object.assign(thread, fields)
         thread.tools.replace(tools ?? new Map())
         thread.blockTimes.replace(blockTimes ?? new Map())
@@ -237,6 +249,53 @@ export class Thread {
         const first = [...this.items, ...this.live].find(m => m.message.role === 'user')
         const text = first ? contentText((first.message as any).content) : this.firstPrompt ?? this.pendingPrompt?.text
         return text?.trim().split('\n')[0].slice(0, 80) || newThreadLabel()
+    }
+
+    /** What the UI offers for this thread's agent. */
+    get features(): AgentFeatures {
+        return agentFeatures(this.agent)
+    }
+
+    get agentLabel(): string {
+        return agentLabel(this.agent)
+    }
+
+    /** The agent can still be switched: nothing was said in the thread yet. */
+    get agentSwitchable(): boolean {
+        return !this.persisted && this.isEmpty && !this.uiRequests.length
+    }
+
+    /** Picks the agent of a fresh thread; a started process of the old one stops. */
+    async setAgent(agent: AgentKind) {
+        if (agent === this.agent || !this.agentSwitchable)
+            return
+        const old = this.agentId
+        if (old) {
+            await this.stopAgent()
+            runInAction(() => {
+                if (this.agentId === old) {
+                    this.agentId = null
+                    this.agentStatus = 'none'
+                    this.startPromise = null
+                }
+            })
+        }
+        runInAction(() => {
+            this.agent = agent
+            this.state = null
+            this.models = []
+            this.thinkingLevels = []
+            this.commands = []
+            this.guiCommands = []
+            this.configOptions = []
+            this.stats = null
+            this.statuses = {}
+            this.widgets = {}
+            this.agentError = ''
+            if (this.agentStatus === 'error' || this.agentStatus === 'exited')
+                this.agentStatus = 'none'
+        })
+        await this.ensureAgent().catch(() => {})
     }
 
     get isEmpty(): boolean {
@@ -423,7 +482,7 @@ export class Thread {
         const capabilities = this.host.enabledCapabilities
         this.loadedConfig = this.configKey()
         this.restartPending = false
-        const agentId = await api().agentStart({ cwd: this.cwd, sessionPath: resumable, capabilities, approvalMode: this.host.approvalMode })
+        const agentId = await api().agentStart({ cwd: this.cwd, agent: this.agent, sessionPath: resumable, capabilities, approvalMode: this.host.approvalMode })
         runInAction(() => {
             this.agentId = agentId
             this.stopping = false
@@ -450,6 +509,9 @@ export class Thread {
     }
 
     private configKey(): string {
+        // Capabilities and pi's settings mean nothing to other agents: never restart those for them.
+        if (this.agent !== 'pi')
+            return this.agent
         return `${this.host.enabledCapabilities.join(',')}#${this.host.piSettingsEpoch}`
     }
 
@@ -505,6 +567,8 @@ export class Thread {
         const sessionChanged = !!state.sessionFile && state.sessionFile !== this.sessionPath
         runInAction(() => {
             this.state = state
+            if (Array.isArray(state.configOptions))
+                this.configOptions = state.configOptions
             if (state.sessionName)
                 this.name = state.sessionName
             if (state.isStreaming)
@@ -634,6 +698,21 @@ export class Thread {
                 if (this.state)
                     this.state.thinkingLevel = level
             })
+        }
+        catch (error: any) {
+            toast.error(error.message)
+        }
+    }
+
+    /** An ACP agent's session setting (mode, model, effort, …). */
+    async setConfigOption(configId: string, value: string) {
+        try {
+            const response = await this.request<{ configOptions?: AcpConfigOption[] }>({ type: 'set_config_option', configId, value })
+            runInAction(() => {
+                if (response.data?.configOptions)
+                    this.configOptions = response.data.configOptions
+            })
+            await this.syncState()
         }
         catch (error: any) {
             toast.error(error.message)
@@ -884,6 +963,15 @@ export class Thread {
                         void this.load()
                 }
                 break
+            case 'acp_config_changed':
+                if (Array.isArray(event.configOptions)) {
+                    this.configOptions = event.configOptions
+                    void this.syncState()
+                }
+                break
+            case 'acp_commands_changed':
+                void this.refreshCommands()
+                break
             case 'extension_error':
                 toast.error(`${tr('扩展出错：', 'Extension error: ')}${event.error}`, { description: event.extensionPath })
                 break
@@ -1039,8 +1127,9 @@ export class Thread {
         this.uiRequests = []
         this.tools.clear()
         if (unexpected) {
-            this.agentError = info.stderr.trim().split('\n').slice(-6).join('\n') || tr(`pi 进程退出（${info.code ?? info.signal}）`, `pi exited (${info.code ?? info.signal})`)
-            toast.error(tr('pi 进程意外退出', 'pi exited unexpectedly'), { description: this.agentError.slice(0, 300) })
+            const label = this.agentLabel
+            this.agentError = info.stderr.trim().split('\n').slice(-6).join('\n') || tr(`${label} 进程退出（${info.code ?? info.signal}）`, `${label} exited (${info.code ?? info.signal})`)
+            toast.error(tr(`${label} 进程意外退出`, `${label} exited unexpectedly`), { description: this.agentError.slice(0, 300) })
         }
     }
 }

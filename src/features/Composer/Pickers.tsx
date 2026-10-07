@@ -1,12 +1,13 @@
+import type { AgentAvailability, AgentKind } from '@shared/agents'
 import type { PiModel, ThinkingLevel } from '@shared/pi'
 import type { KeyboardEvent } from 'react'
 import type { Thread, ThreadMode } from '@/store/thread'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { cn, formatTokens } from '@/lib/utils'
-import { Brain, Check, ChevronDown, ClipboardList, Cpu, FilePen, KeyRound, ShieldCheck, Zap } from 'lucide-react'
+import { Bot, Brain, Check, ChevronDown, ClipboardList, Cpu, FilePen, KeyRound, ShieldCheck, SlidersHorizontal, Zap } from 'lucide-react'
 import { observer } from 'mobx-react-lite'
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { tr } from '@/lib/i18n'
 import { appStore } from '@/store/app'
 import type { Localized } from '@shared/i18n'
@@ -26,7 +27,7 @@ const LEVEL_LABEL: Record<ThinkingLevel, Localized> = {
 const levelLabel = (level: ThinkingLevel): string => (LEVEL_LABEL[level] ? tr(LEVEL_LABEL[level]) : level)
 
 /** pi started but has no provider to take a model from: nothing in the thread can run yet. */
-const lacksModels = (thread: Thread) => thread.agentStatus === 'ready' && !thread.models.length
+const lacksModels = (thread: Thread) => thread.agent === 'pi' && thread.agentStatus === 'ready' && !thread.models.length
 
 /** Above the composer while no model is usable, with the way to fix it. */
 export const NoModelNotice = observer(({ thread }: { thread: Thread }) => {
@@ -233,6 +234,98 @@ export const ModePicker = observer(({ thread }: { thread: Thread }) => {
                             <span className="text-[11.5px] text-gray-500">{tr(hint)}</span>
                         </span>
                         {mode === current && <Check size={14} className="mt-0.5 text-ide-accent" />}
+                    </DropdownMenuItem>
+                ))}
+            </DropdownMenuContent>
+        </DropdownMenu>
+    )
+})
+
+/** Options with their own picker (ModelPicker, ThinkingPicker); the rest get ConfigPickers. */
+const PLACED_CATEGORIES = new Set(['model', 'thought_level'])
+
+/** An ACP agent's own session settings (Codex: mode, collaboration mode, fast mode, …), one menu each. */
+export const ConfigPickers = observer(({ thread }: { thread: Thread }) => {
+    if (!thread.features.configOptions)
+        return null
+    const options = thread.configOptions.filter(o => !PLACED_CATEGORIES.has(o.category ?? '') && o.options.length > 1)
+    return (
+        <>
+            {options.map((option) => {
+                const current = option.options.find(o => o.value === option.currentValue)
+                const Icon = option.category === 'mode' ? ShieldCheck : SlidersHorizontal
+                return (
+                    <DropdownMenu key={option.id}>
+                        <DropdownMenuTrigger className={pill} title={option.description ?? option.name} aria-label={`${option.name}: ${current?.name ?? option.currentValue}`}>
+                            <Icon size={13} />
+                            <span className="max-w-[140px] truncate">{current?.name ?? option.currentValue}</span>
+                            <ChevronDown size={12} />
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="start" className="w-80">
+                            <DropdownMenuLabel>{option.name}</DropdownMenuLabel>
+                            {option.options.map(choice => (
+                                <DropdownMenuItem key={choice.value} onSelect={() => void thread.setConfigOption(option.id, choice.value)} className="h-auto items-start py-1.5">
+                                    <span className="flex min-w-0 flex-1 flex-col">
+                                        <span>{choice.name}</span>
+                                        {choice.description && <span className="text-[11.5px] text-gray-500">{choice.description}</span>}
+                                    </span>
+                                    {choice.value === option.currentValue && <Check size={14} className="mt-0.5 text-ide-accent" />}
+                                </DropdownMenuItem>
+                            ))}
+                        </DropdownMenuContent>
+                    </DropdownMenu>
+                )
+            })}
+        </>
+    )
+})
+
+/** Agents found on this machine, asked once per app run. */
+let agentsQuery: Promise<AgentAvailability[]> | undefined
+function useAgents(): AgentAvailability[] {
+    const [agents, setAgents] = useState<AgentAvailability[]>([])
+    useEffect(() => {
+        let live = true
+        agentsQuery ??= window.pi.listAgents().catch(() => [])
+        void agentsQuery.then(list => live && setAgents(list))
+        return () => {
+            live = false
+        }
+    }, [])
+    return agents
+}
+
+/** Which agent a fresh thread runs: pi, or an ACP agent (Codex, …). Gone once the thread has history. */
+export const AgentPicker = observer(({ thread }: { thread: Thread }) => {
+    const agents = useAgents()
+    if (!thread.agentSwitchable && thread.agent === 'pi')
+        return null
+    const choices: { id: AgentKind, label: string, available: boolean, hint?: string }[] = [
+        { id: 'pi', label: 'pi', available: true },
+        ...agents.map(a => ({ id: a.id, label: a.label, available: a.available, hint: a.available ? a.command : a.error })),
+    ]
+    if (!thread.agentSwitchable || choices.length < 2) {
+        // A thread of another agent keeps saying which one it is.
+        return thread.agent === 'pi'
+            ? null
+            : <span className={cn(pill, 'pointer-events-none')}><Bot size={13} /><span>{thread.agentLabel}</span></span>
+    }
+    return (
+        <DropdownMenu>
+            <DropdownMenuTrigger className={pill} title={tr('这个线程用哪个 Agent', 'Which agent runs this thread')} aria-label={tr(`Agent：${thread.agentLabel}`, `Agent: ${thread.agentLabel}`)}>
+                <Bot size={13} />
+                <span>{thread.agentLabel}</span>
+                <ChevronDown size={12} />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="w-80">
+                <DropdownMenuLabel>{tr('Agent', 'Agent')}</DropdownMenuLabel>
+                {choices.map(choice => (
+                    <DropdownMenuItem key={choice.id} disabled={!choice.available} onSelect={() => void thread.setAgent(choice.id)} className="h-auto items-start py-1.5">
+                        <span className="flex min-w-0 flex-1 flex-col">
+                            <span>{choice.label}</span>
+                            {choice.hint && <span className="text-[11.5px] break-all text-gray-500">{choice.hint}</span>}
+                        </span>
+                        {choice.id === thread.agent && <Check size={14} className="mt-0.5 text-ide-accent" />}
                     </DropdownMenuItem>
                 ))}
             </DropdownMenuContent>

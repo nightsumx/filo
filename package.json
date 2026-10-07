@@ -21,6 +21,7 @@
         "e2e:features": "bun --tsconfig-override=tsconfig.node.json test/features.ts",
         "e2e:review": "bun --tsconfig-override=tsconfig.node.json test/review-e2e.ts",
         "e2e:providers": "bun --tsconfig-override=tsconfig.node.json test/providers-e2e.ts",
+        "e2e:acp": "bun --tsconfig-override=tsconfig.node.json test/acp-e2e.ts",
         "site:shots": "bun --tsconfig-override=tsconfig.node.json site/shots.ts",
         "deploy:site": "cp scripts/install.sh site/public/install.sh && wrangler deploy -c site/wrangler.jsonc",
         "preview": "vite preview",

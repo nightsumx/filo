@@ -1,5 +1,6 @@
 import type { AgentStartOptions, GlobalCompactionPatch, SearchResult, StateSave, TabMove, ThemePref, WindowBounds, WindowReport } from '@shared/ipc'
 import type { LoginUpdate } from '@shared/providers'
+import { agentOfKey, parseAcpSessionKey } from '@shared/agents'
 import { APP_INFO } from '@shared/app'
 import { resolveLang } from '@shared/i18n'
 import { stat } from 'node:fs/promises'
@@ -10,6 +11,7 @@ import { Worker } from 'node:worker_threads'
 import { PresenceWatcher, presenceDir } from './presence'
 import { DEFAULT_THEME, IPC, THEME_PREFS } from '@shared/ipc'
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, net, Notification, shell } from 'electron'
+import { AcpService } from './acp/service'
 import { AgentManager } from './agents'
 import { applySave, savedWindows, StateFile } from './appState'
 import { repoEdits } from './edits'
@@ -45,6 +47,9 @@ const agents = new AgentManager({
     onEvent: (agentId, event) => windows.deliver(agentId, IPC.agentEvent, event),
     onExit: (agentId, info) => windows.deliver(agentId, IPC.agentExit, info),
 }, extensionsDir)
+
+// Sessions of ACP agents (Codex, …) started from the app; the agents keep the conversations.
+const acp = new AcpService(() => path.join(app.getPath('userData'), 'acp-sessions.json'))
 
 const windows = new Windows({ store, create: createWindow, stopAgent: id => agents.stop(id) })
 
@@ -229,11 +234,16 @@ const absolutePath = (value: unknown): string => {
 
 function registerIpc() {
     ipcMain.handle(IPC.resolveEnv, () => resolvePiEnv())
-    ipcMain.handle(IPC.listSessions, () => listSessions())
-    ipcMain.handle(IPC.readSession, (_e, file: string) => readSession(file))
+    ipcMain.handle(IPC.listAgents, () => acp.availability())
+    ipcMain.handle(IPC.listSessions, async () => [...await listSessions(), ...acp.listSessions()].sort((a, b) => b.updatedAt - a.updatedAt))
+    ipcMain.handle(IPC.readSession, (_e, file: string) => (parseAcpSessionKey(file) ? acp.readSession(file) : readSession(file)))
     ipcMain.handle(IPC.presence, () => presence.current)
     ipcMain.handle(IPC.searchSessions, (_e, query: unknown) => search.search(typeof query === 'string' ? query.slice(0, 500) : ''))
     ipcMain.handle(IPC.trashSession, async (_e, file: string) => {
+        if (parseAcpSessionKey(file)) {
+            acp.remove(file)
+            return
+        }
         await assertInSessionsDir(file)
         await shell.trashItem(file)
     })
@@ -291,6 +301,14 @@ function registerIpc() {
 
     const isDirectory = (dir: string) => stat(dir).then(s => s.isDirectory(), () => false)
     ipcMain.handle(IPC.agentStart, async (e, options: AgentStartOptions) => {
+        const kind = options.sessionPath ? agentOfKey(options.sessionPath) : options.agent ?? 'pi'
+        if (kind !== 'pi') {
+            if (!(await isDirectory(options.cwd)))
+                throw new Error(tr(`项目目录不存在：${options.cwd}`, `Project folder not found: ${options.cwd}`))
+            const agentId = await agents.startAcp(acp, kind, options)
+            windows.addAgent(agentId, e.sender, options.cwd)
+            return agentId
+        }
         const env = await resolvePiEnv()
         if (!env.ok)
             throw new Error(env.error)

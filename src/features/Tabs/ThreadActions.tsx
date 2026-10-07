@@ -50,10 +50,12 @@ export const ThreadActions = observer(({ thread, parts: { Item, Separator } }: {
                         <Pencil size={14} />
                         {tr('重命名', 'Rename')}
                     </Item>
-                    <Item disabled={thread.running} onSelect={() => void thread.compact()}>
-                        <Archive size={14} />
-                        {tr('压缩上下文', 'Compact context')}
-                    </Item>
+                    {thread.features.compaction && (
+                        <Item disabled={thread.running} onSelect={() => void thread.compact()}>
+                            <Archive size={14} />
+                            {tr('压缩上下文', 'Compact context')}
+                        </Item>
+                    )}
                 </>
             )}
             <Item onSelect={() => void window.pi.openFolder(thread.cwd)}>

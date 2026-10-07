@@ -2,6 +2,7 @@
 // with its path next to the name, and expands into its threads. A merged window lists each of its
 // projects as a root. Clicking a thread opens (or focuses) its tab.
 import type { SessionSummary } from '@shared/ipc'
+import { agentLabel, agentOfKey } from '@shared/agents'
 import type { Project } from '@/store/app'
 import type { Thread } from '@/store/thread'
 import { ConflictMark } from '@/components/ConflictMark'
@@ -95,6 +96,7 @@ const ThreadRow = observer(({ thread, session, selected }: { thread?: Thread, se
     const terminal = path && !thread?.agentId ? appStore.terminalSessions.get(path) : undefined
     const terminalBusy = !!terminal && terminal.state !== 'idle'
     const now = useNow(running || terminalBusy)
+    const agent = thread?.agent ?? agentOfKey(session?.path)
     return (
         <div
             role="treeitem"
@@ -117,6 +119,7 @@ const ThreadRow = observer(({ thread, session, selected }: { thread?: Thread, se
             <div className="flex h-6 min-w-0 flex-1 items-center gap-1.5">
                 {terminal ? <TerminalStatus presence={terminal} /> : thread ? <StatusDot thread={thread} /> : <PiGlyph dim />}
                 <span className={cn('min-w-0 flex-1 truncate', thread ? 'text-gray-900' : 'text-gray-700')}>{title}</span>
+                {agent !== 'pi' && <span className="shrink-0 text-[11px] text-gray-400">{agentLabel(agent)}</span>}
                 <ConflictMark cwd={thread?.cwd ?? session!.cwd} session={thread?.sessionPath ?? session?.path} />
                 {running
                     ? <span className="shrink-0 text-[11px] tabular-nums text-gray-500" title={tr('已运行', 'Running for')}>{formatElapsed(now - thread!.runStartedAt)}</span>

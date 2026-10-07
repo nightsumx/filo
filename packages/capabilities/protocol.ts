@@ -158,6 +158,8 @@ export interface ApprovalRequest {
     scope: string
     /** Set when a subagent's call is forwarded: the subagent's title. */
     agent?: string
+    /** The agent's own wording for "always" (ACP agents decide what it covers); replaces the scope label. */
+    alwaysLabel?: string
 }
 
 export type ApprovalChoice = 'allow' | 'always' | 'deny'

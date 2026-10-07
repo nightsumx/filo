@@ -1,3 +1,4 @@
+import type { AgentAvailability, AgentKind } from './agents'
 import type { ApprovalMode, CapabilityId, Presence } from './capabilities'
 import type { LangPref } from './i18n'
 import type { AgentMessage, PiEvent, RpcResponse } from './pi'
@@ -27,6 +28,8 @@ export interface SessionSummary {
     firstPrompt?: string
     createdAt: number
     updatedAt: number
+    /** The agent that ran it; absent for pi's own session files. */
+    agent?: AgentKind
 }
 
 /** A message that matched a full-text search. */
@@ -254,6 +257,8 @@ export const DEFAULT_THEME: ThemePref = 'dark'
 
 export interface AgentStartOptions {
     cwd: string
+    /** pi (default) or an ACP agent; a resumed ACP session's key names its agent too. */
+    agent?: AgentKind
     sessionPath?: string
     /** Capability extensions to load with `-e`. */
     capabilities?: CapabilityId[]
@@ -270,6 +275,8 @@ export interface AgentExitInfo {
 /** The API preload exposes on window.pi. */
 export interface PiBridge {
     resolveEnv: () => Promise<PiEnvResult>
+    /** ACP agents (Codex, …) and whether each can start here. */
+    listAgents: () => Promise<AgentAvailability[]>
     listSessions: () => Promise<SessionSummary[]>
     readSession: (path: string) => Promise<SessionSnapshot>
     trashSession: (path: string) => Promise<void>
@@ -393,6 +400,7 @@ export interface AppNotice {
 
 export const IPC = {
     resolveEnv: 'pi:resolve-env',
+    listAgents: 'agents:list',
     listSessions: 'sessions:list',
     readSession: 'sessions:read',
     trashSession: 'sessions:trash',
