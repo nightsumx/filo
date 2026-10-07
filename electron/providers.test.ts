@@ -56,7 +56,7 @@ describe('models.json endpoints', () => {
     it('changes only the address of a built-in, and drops the entry once nothing is overridden', () => {
         const proxy = applyEndpoint({}, { endpoint: { id: 'anthropic', baseUrl: 'https://proxy.example/' } }, true)
         expect(proxy).toEqual({ providers: { anthropic: { baseUrl: 'https://proxy.example' } } })
-        expect(applyEndpoint(proxy, { endpoint: { id: 'anthropic', baseUrl: '' } }, true)).toEqual({})
+        expect(applyEndpoint(proxy, { endpoint: { id: 'anthropic', baseUrl: '' } }, true)).toEqual({ providers: {} })
         // A key in models.json survives an address change.
         expect(applyEndpoint({ providers: { anthropic: { apiKey: 'k' } } }, { endpoint: { id: 'anthropic', baseUrl: '' } }, true)).toEqual({ providers: { anthropic: { apiKey: 'k' } } })
     })
@@ -79,7 +79,7 @@ describe('models.json endpoints', () => {
         ])
         expect(JSON.stringify(endpoints)).not.toContain('secret')
         expect(removeEndpoint(json, 'local')).toEqual({ providers: { anthropic: { apiKey: 'secret' } } })
-        expect(removeEndpoint({ providers: { local: {} } }, 'local')).toEqual({})
+        expect(removeEndpoint({ providers: { local: {} } }, 'local')).toEqual({ providers: {} })
     })
 
     it('rejects what pi could not use', () => {
@@ -261,7 +261,10 @@ describe('ProviderHelper', () => {
         await writeFile(path.join(dir, 'models.json'), JSON.stringify(valid))
 
         await service.removeEndpoint('relay')
-        expect((await service.state()).providers.some(p => p.id === 'relay')).toBe(false)
+        const after = await service.state()
+        expect(after.providers.some(p => p.id === 'relay')).toBe(false)
+        // The last entry gone, pi still loads the file.
+        expect(after.modelsError).toBeUndefined()
         expect(JSON.parse(await readFile(path.join(dir, 'auth.json'), 'utf8')).relay).toBeUndefined()
     }, 30_000)
 })

@@ -373,12 +373,8 @@ export function applyEndpoint(json: Record<string, any>, save: EndpointSave, bui
         providers[endpoint.id] = entry
     else
         delete providers[endpoint.id]
-    const next = { ...json }
-    if (Object.keys(providers).length)
-        next.providers = providers
-    else
-        delete next.providers
-    return next
+    // pi's schema requires the key even when nothing is left in it.
+    return { ...json, providers }
 }
 
 export function removeEndpoint(json: Record<string, any>, id: string): Record<string, any> {
@@ -386,12 +382,8 @@ export function removeEndpoint(json: Record<string, any>, id: string): Record<st
         return json
     const providers = { ...json.providers }
     delete providers[id]
-    const next = { ...json }
-    if (Object.keys(providers).length)
-        next.providers = providers
-    else
-        delete next.providers
-    return next
+    // pi's schema requires the key even when nothing is left in it.
+    return { ...json, providers }
 }
 
 /** models.json text ('' when missing) and its parsed object; refuses a file pi could not read either. */
