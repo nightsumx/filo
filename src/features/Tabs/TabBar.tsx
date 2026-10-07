@@ -158,9 +158,10 @@ const Tab = observer(({ thread, index, visible }: { thread: Thread, index: numbe
             onKeyDown={e => e.key === 'Enter' && appStore.focus(thread.key, true)}
             className={cn(
                 // WebStorm Islands tabs: the selected one is a raised chip; tabs shown in another split
-                // pane get a faint fill so it is clear which tabs are on screen. Tabs share the strip's
-                // width equally (basis-0 + flex-1) and only scroll once they hit min-w.
-                'group relative flex h-[26px] min-w-[120px] flex-1 basis-0 items-center gap-1.5 rounded-md pl-2 pr-1 text-[13px] cursor-default outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ide-accent/50',
+                // pane get a faint fill so it is clear which tabs are on screen. Every tab has the same
+                // fixed width, like WebStorm's: they line up from the left and the strip scrolls once
+                // they overflow, so a tab never moves or resizes when others open or close.
+                'group relative flex h-[26px] w-[200px] shrink-0 items-center gap-1.5 rounded-md pl-2 pr-1 text-[13px] cursor-default outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ide-accent/50',
                 active
                     ? 'bg-ide-tab text-gray-900 shadow-[var(--ide-tab-shadow)]'
                     : visible
@@ -251,9 +252,20 @@ const HistoryMenu = observer(() => {
 /** Editor tab strip at the top of the editor island. */
 export const TabBar = observer(() => {
     const visible = new Set(appStore.visibleTabs.map(t => t.key))
+    const listRef = useRef<HTMLDivElement>(null)
+    // Tabs keep their width, so a narrower window can push the selected one out of view: bring it back.
+    useEffect(() => {
+        const list = listRef.current
+        if (!list)
+            return
+        const ro = new ResizeObserver(() => list.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')?.scrollIntoView({ block: 'nearest', inline: 'nearest' }))
+        ro.observe(list)
+        return () => ro.disconnect()
+    }, [])
     return (
         <div className="flex h-[36px] shrink-0 items-center gap-1 bg-ide-panel px-1.5">
             <div
+                ref={listRef}
                 role="tablist"
                 aria-label={tr('线程标签', 'Thread tabs')}
                 // Space after the last tab: drops land at the end.
