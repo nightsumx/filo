@@ -50,41 +50,24 @@ export default function (pi: ExtensionAPI) {
 				},
 				render(width: number) {
 					const now = Date.now();
-					let cost = 0, add = 0, del = 0, recentOut = 0, lastReply = 0;
+					let cost = 0, lastReply = 0;
 					for (const e of ctx.sessionManager.getEntries()) {
-						if (e.type !== "message") continue;
-						const m = e.message;
-						if (m.role === "assistant") {
-							cost += m.usage?.cost?.total || 0;
-							lastReply = m.timestamp;
-							if (now - m.timestamp < 60_000) recentOut += m.usage?.output || 0;
-							for (const part of m.content)
-								if (part.type === "toolCall" && part.name === "write" && typeof part.arguments.content === "string")
-									add += part.arguments.content.split("\n").length - (part.arguments.content.endsWith("\n") ? 1 : 0);
-						}
-						if (m.role === "toolResult" && m.toolName === "edit" && typeof m.details?.diff === "string")
-							for (const line of m.details.diff.split("\n")) {
-								if (line[0] === "+") add++;
-								if (line[0] === "-") del++;
-							}
+						if (e.type !== "message" || e.message.role !== "assistant") continue;
+						cost += e.message.usage?.cost?.total || 0;
+						lastReply = e.message.timestamp;
 					}
 
-					const parts = [c(ARROW, "➜"), c(DIR, ctx.cwd.split("/").filter(Boolean).pop() || ctx.cwd)];
+					const parts = [c(DIR, ctx.cwd.split("/").filter(Boolean).pop() || ctx.cwd)];
 
 					const usage = ctx.getContextUsage();
 					if (usage?.tokens && usage.contextWindow) {
 						const pct = Math.floor((usage.tokens / usage.contextWindow) * 100);
 						const filled = Math.min(5, Math.floor((usage.tokens / usage.contextWindow) * 5 + 0.5));
 						const color = pct >= 80 ? DANGER : pct >= 50 ? WARN : ARROW;
-						parts.push(`${c(color, "█".repeat(filled))}${c(MUTED, "░".repeat(5 - filled))} ${c(color, `${pct}%`)} ${c(MUTED, `${k(usage.tokens)}/${k(usage.contextWindow)}`)}`);
+						parts.push(`${c(color, "█".repeat(filled))}${c(MUTED, "░".repeat(5 - filled))} ${c(MUTED, `${k(usage.tokens)}/${k(usage.contextWindow)}`)}`);
 					}
 
-					if (recentOut)
-						parts.push(`${c(ARROW, `⚡ ${recentOut >= 1000 ? `${(recentOut / 1000).toFixed(1)}k` : recentOut}tok`)} ${c(MUTED, `${Math.round(recentOut / 60)}/s`)}`);
-
 					if (cost) parts.push(c(cost >= 5 ? DANGER : cost >= 1 ? WARN : MUTED, `$${cost.toFixed(2)}`));
-
-					if (add || del) parts.push(`${c(ARROW, `+${add}`)} ${c(DANGER, `-${del}`)}`);
 
 					if (ctx.model) {
 						const name = ctx.model.name.split(" (")[0].replace("Claude ", "");

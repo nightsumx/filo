@@ -10,7 +10,7 @@ Make [pi](https://pi.dev) look like Claude Code.
 ────────────────────────────────────────────────────────────────────────────────
 ❯ █
 ────────────────────────────────────────────────────────────────────────────────
-  ➜ my-app ██░░░ 41% 410k/1000k ⚡ 4.1ktok 69/s $3.20 +215 -3 Opus 5.5 (high) ⏱ 12s
+  my-app ██░░░ 410k/1000k $3.20 Opus 5.5 (high) ⏱ 12s
   ⏵⏵ bypass permissions on (option+m to cycle)                      55% until auto-compact
 ```
 
@@ -73,28 +73,26 @@ The prompt is Claude Code's rounded box: ↑/↓ and enter, or press 1–3 direc
 
 **Review** — `/review [focus]` has a separate read-only pi audit this session's changes in the background: it gets your messages, the diff and the agent's claims (not its reasoning), runs commands to check them, and reports issues as reproduced (with the command's exit code and output) or suspected. `/review-apply [R1 S2 …] [note]` sends the picked items, every issue by default, back to the agent.
 
-Approval, plan mode, questions, todos, subagents and review come from `pi-capabilities`, the same extensions the Pi desktop app uses, bundled in this package. Inside the desktop app they stay off here, since it loads its own.
+Approval, plan mode, questions, todos, subagents and review come from `pi-capabilities`, the same extensions the Filo desktop app uses, bundled in this package. Inside the desktop app they stay off here, since it loads its own.
 
 **Compaction** — `· Compacting conversation… (1m 37s · ↓ 2.1k tokens · esc to cancel)` with a `▰▰▰▱▱▱ 60%` bar underneath, for both `/compact` and auto-compaction. pi's default summarizer still runs; the bar is an estimate from streamed summary tokens (the final length isn't known up front), so it eases toward 99% instead of tracking exact completion.
 
-**Status line** — two lines. The first has the same segments, glyphs and colors as a popular Claude Code `statusLine` script. The second is Claude Code's mode row: the permission mode (`? for shortcuts` in `default`, `! for bash mode` while typing a command) and the auto-compact estimate on the right.
+**Status line** — two lines. The first is a trimmed version of a popular Claude Code `statusLine` script. The second is Claude Code's mode row: the permission mode (`? for shortcuts` in `default`, `! for bash mode` while typing a command) and the auto-compact estimate on the right.
 
 | Segment | Meaning | Color |
 |---|---|---|
-| `➜ my-app` | current directory | sage / sky blue |
-| `██░░░ 41% 410k/1000k` | context used | green → amber at 50% → coral at 80% |
-| `⚡ 4.1ktok 69/s` | output tokens in the last 60s | shown only while generating |
+| `my-app` | current directory | sky blue |
+| `██░░░ 410k/1000k` | context used | green → amber at 50% → coral at 80% |
 | `$3.20` | session cost | gray → amber at $1 → coral at $5 |
-| `+215 -3` | lines written / edited this session | green / coral |
 | `Opus 5.5 (high)` | model, thinking level when high / xhigh / max | lavender / amber |
 | `⏱ 12s` | time since last reply | amber at 4 min, `✗` coral at 5 min (prompt cache expired) |
 | `55% until auto-compact` | second line, right-aligned, from pi's `compaction.reserveTokens` | gray |
 
 **Themes `claude-code` and `claude-code-light`** — Claude Code's dark and light palettes. Body text uses the terminal's default foreground and inline code / links use the same 256-color indexes as Claude Code (153 / 12), so both apps render identically in the same terminal. Code blocks use the 16-color ANSI palette and diffs use Monokai, like Claude Code dark. The light theme uses Claude Code's light colors.
 
-## With the Pi desktop app
+## With the Filo desktop app
 
-pi-cc-tui lets the [Pi desktop app](https://github.com/nightsumx/pi-kit) see and join the pi running in your terminal. Nothing changes in the terminal without the app.
+pi-cc-tui lets the [Filo desktop app](https://github.com/nightsumx/filo) see and join the pi running in your terminal. Nothing changes in the terminal without the app.
 
 - **Presence** — the app lists this pi in its project tree as working, waiting for you, or idle, from a small file at `~/.pi/agent/pi-kit-presence/<pid>.json`.
 - **Bridge** — open the same session in the app and it joins this pi instead of starting a second one on the same file, which would fork the conversation. A run typed here streams into the app as it happens, including thinking; a prompt, stop or model change from the app runs here. Approval prompts, questions and plan sign-off open on both sides, and whichever side answers first closes the other. The app connects over a unix socket, `~/.pi/agent/pi-kit-presence/<pid>.sock`, that only your user can open, and speaks pi's RPC protocol on it. Quitting pi (or `/new`, `/resume`) disconnects the app, which keeps the transcript. While joined, forking and clearing queued messages only work from the terminal.

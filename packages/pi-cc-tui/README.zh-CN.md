@@ -12,7 +12,7 @@
 ────────────────────────────────────────────────────────────────────────────────
 ❯ █
 ────────────────────────────────────────────────────────────────────────────────
-  ➜ my-app ██░░░ 41% 410k/1000k ⚡ 4.1ktok 69/s $3.20 +215 -3 Opus 5.5 (high) ⏱ 12s
+  my-app ██░░░ 410k/1000k $3.20 Opus 5.5 (high) ⏱ 12s
   ⏵⏵ bypass permissions on (option+m to cycle)                      55% until auto-compact
 ```
 
@@ -75,28 +75,26 @@ pi install npm:pi-cc-tui
 
 **审查**：`/review [重点]` 在后台另起一个只读的 pi 审查本会话的改动。它拿到你的消息、diff 和 Agent 的说法（不含推理过程），自己跑命令去核实，问题分为「已复现」（附命令的退出码和输出）和「推测」。`/review-apply [R1 S2 …] [备注]` 把选中的条目交回给 Agent，不写编号就交回全部问题。
 
-审批、Plan 模式、提问、Todo、子代理和审查来自 `pi-capabilities`，和 Pi 桌面版用的是同一套扩展，打包在本插件里。在桌面版里这些会自动关闭，由桌面版自己加载。
+审批、Plan 模式、提问、Todo、子代理和审查来自 `pi-capabilities`，和 Filo 桌面版用的是同一套扩展，打包在本插件里。在桌面版里这些会自动关闭，由桌面版自己加载。
 
 **压缩进度**：`/compact` 和自动压缩时显示 `· Compacting conversation… (1m 37s · ↓ 2.1k tokens · esc to cancel)`，下面一行 `▰▰▰▱▱▱ 60%` 进度条。仍然走 pi 默认的摘要逻辑；摘要最终长度事先未知，进度按已流出的 token 估算，逐渐逼近 99%，不是精确完成度。
 
-**状态栏**：两行。第一行的段落、符号、配色都和 Claude Code 常见的 `statusLine` 脚本一致；第二行是 Claude Code 的模式行：左边是权限模式（`default` 下显示 `? for shortcuts`，输入命令时显示 `! for bash mode`），右边是距自动压缩的估算。
+**状态栏**：两行。第一行是 Claude Code 常见 `statusLine` 脚本的精简版；第二行是 Claude Code 的模式行：左边是权限模式（`default` 下显示 `? for shortcuts`，输入命令时显示 `! for bash mode`），右边是距自动压缩的估算。
 
 | 段 | 含义 | 颜色 |
 |---|---|---|
-| `➜ my-app` | 当前目录 | 灰绿 / 天蓝 |
-| `██░░░ 41% 410k/1000k` | 上下文占用 | 绿 → 50% 琥珀 → 80% 珊瑚红 |
-| `⚡ 4.1ktok 69/s` | 最近 60 秒输出 token | 只在生成时出现 |
+| `my-app` | 当前目录 | 天蓝 |
+| `██░░░ 410k/1000k` | 上下文占用 | 绿 → 50% 琥珀 → 80% 珊瑚红 |
 | `$3.20` | 本会话花费 | 灰 → $1 琥珀 → $5 珊瑚红 |
-| `+215 -3` | 本会话写入 / 编辑的行数 | 绿 / 珊瑚红 |
 | `Opus 5.5 (high)` | 模型；思考强度 high / xhigh / max 时显示 | 淡紫 / 琥珀 |
 | `⏱ 12s` | 距上次回复 | 4 分钟琥珀，5 分钟变 `✗` 珊瑚红（提示缓存过期） |
 | `55% until auto-compact` | 第二行右对齐，按 pi 的 `compaction.reserveTokens` 计算 | 灰 |
 
 **主题 `claude-code` 和 `claude-code-light`**：Claude Code 的暗色和亮色配色。正文用终端默认前景色，行内代码和链接用和 Claude Code 相同的 256 色号（153 / 12），同一个终端里两边渲染完全一致。代码块用 16 色 ANSI 调色板，diff 用 Monokai，和 Claude Code 暗色一样。亮色主题用 Claude Code 亮色的配色。
 
-## 配合 Pi 桌面版
+## 配合 Filo 桌面版
 
-pi-cc-tui 让 [Pi 桌面版](https://github.com/nightsumx/pi-kit)看得见、也能连上终端里的 pi。不用桌面版的话，终端里什么都不变。
+pi-cc-tui 让 [Filo 桌面版](https://github.com/nightsumx/filo)看得见、也能连上终端里的 pi。不用桌面版的话，终端里什么都不变。
 
 - **状态同步**：桌面版的项目树里会列出这个 pi，显示在跑、等你回答还是空闲，读的是 `~/.pi/agent/pi-kit-presence/<pid>.json` 这个小文件。
 - **直连**：在桌面版打开同一个会话时，它会直接连上这个 pi，不再在同一个文件上另起一个（那样对话会分叉）。终端里打的字实时显示在桌面版，思考过程也有；桌面版发的消息、停止、切模型都在这里执行。审批、提问、计划确认两边都会弹出，哪边先回答，另一边的就关掉。连接走 unix socket `~/.pi/agent/pi-kit-presence/<pid>.sock`，只有你自己的用户能打开，上面跑的是 pi 的 RPC 协议。退出 pi（或 `/new`、`/resume`）后桌面版自动断开，对话内容保留。连接期间，分叉和清空排队消息只能在终端里做。
