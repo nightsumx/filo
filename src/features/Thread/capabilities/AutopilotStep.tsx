@@ -15,6 +15,7 @@ import { useThread } from '../ThreadContext'
 import { Gutter, StatusMark } from '../ToolRow'
 import { useViewState } from '../viewState'
 import { Transcript } from './SubagentStep'
+import { insideOf } from '@/platform'
 
 const Sep = () => <span className="shrink-0 text-gray-400">·</span>
 
@@ -156,7 +157,7 @@ const CardContext = observer(function CardContext({ card }: { card: AutopilotCar
 
 const Evidence = observer(function Evidence({ files }: { files: string[] }) {
     const cwd = useThread()?.cwd
-    const shown = (file: string) => cwd && file.startsWith(`${cwd}/`) ? file.slice(cwd.length + 1) : file
+    const shown = (file: string) => (cwd && insideOf(file, cwd)) || file
     return (
         <div className="mt-1 flex flex-col">
             {files.map(file => (

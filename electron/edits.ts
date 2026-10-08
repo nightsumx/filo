@@ -114,7 +114,8 @@ export async function repoEdits(cwd: string, extra: string[] = [], keyOf: (file:
             for (const edit of session.edits) {
                 if (edit.at < since)
                     continue
-                const rel = path.relative(root, edit.path)
+                // As git status names it: forward slashes on Windows too.
+                const rel = path.relative(root, edit.path).split(path.sep).join('/')
                 if (rel.startsWith('..') || path.isAbsolute(rel) || !wanted.has(rel))
                     continue
                 latest.set(rel, Math.max(latest.get(rel) ?? 0, edit.at))

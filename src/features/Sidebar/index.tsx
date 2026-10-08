@@ -19,7 +19,7 @@ import { observer } from 'mobx-react-lite'
 import { useEffect, useState } from 'react'
 import { ProjectBadge } from '../Toolbar/ProjectBadge'
 import { newThreadLabel, tr } from '@/lib/i18n'
-import { keys, projectKeys, showInFolderLabel } from '@/platform'
+import { keys, parentPath, projectKeys, showInFolderLabel } from '@/platform'
 
 /** Threads listed per project before a "show more" row. */
 const PAGE = 12
@@ -271,7 +271,7 @@ const ProjectNode = observer(({ project, index, expanded, onToggle }: { project:
                 <ProjectBadge name={project.name} size={16} className="rounded-[4px]" />
                 <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
                     <span className={cn('shrink-0 truncate text-gray-900', active && 'font-semibold')}>{project.name}</span>
-                    <span className="min-w-0 truncate text-[12px] text-gray-500">{shortPath(project.cwd).replace(/\/[^/]+$/, '') || '/'}</span>
+                    <span className="min-w-0 truncate text-[12px] text-gray-500">{parentPath(shortPath(project.cwd)) || '/'}</span>
                 </span>
                 <span className={cn('flex shrink-0 items-center', menuOpen ? 'hidden' : 'group-hover/row:hidden')}>
                     <ActivityBadge activity={activity} />

@@ -1,8 +1,9 @@
 // Tool call wording for the transcript (titles, one-line summaries, Input bodies), following
 // pi-cc-extensions, plus the path → highlight.js language map shared by code blocks and diffs.
+import { insideOf, isAbsolutePath, pathParts } from '../platform'
 
 export function basename(path: string): string {
-    const parts = path.split('/')
+    const parts = pathParts(path)
     return parts[parts.length - 1] || path
 }
 
@@ -18,12 +19,11 @@ export function tuiTitle(name: string): string {
 
 /** Absolute paths inside cwd become relative, like the TUI. */
 export function displayPath(path: string, cwd?: string): string {
-    if (!cwd || !path.startsWith('/'))
+    if (!cwd || !isAbsolutePath(path))
         return path
-    const base = cwd.endsWith('/') ? cwd : `${cwd}/`
     if (path === cwd)
         return '.'
-    return path.startsWith(base) ? path.slice(base.length) : path
+    return insideOf(path, cwd) ?? path
 }
 
 function oneLine(s: string): string {

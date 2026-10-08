@@ -79,3 +79,28 @@ describe('renderer platform', () => {
         expect((await import('./lib/filePreview')).previewOf('a.png')?.kind).toBe('image')
     })
 })
+
+describe('local paths', () => {
+    it('reads POSIX paths on macOS and Linux', async () => {
+        const p = await load('Macintosh')
+        expect(p.pathParts('/a/b\\c')).toEqual(['', 'a', 'b\\c'])
+        expect(p.insideOf('/repo/src/a.ts', '/repo')).toBe('src/a.ts')
+        expect(p.insideOf('/repository/a.ts', '/repo')).toBeUndefined()
+        expect(p.parentPath('~/code/app')).toBe('~/code')
+        expect(p.homeShort('/Users/me/code')).toBe('~/code')
+        expect(p.isAbsolutePath('C:\\x')).toBe(false)
+    })
+
+    it('reads Windows paths with either slash', async () => {
+        const p = await load('Windows NT')
+        expect(p.pathParts('C:\\Users\\me/app')).toEqual(['C:', 'Users', 'me', 'app'])
+        expect(p.isAbsolutePath('C:\\x')).toBe(true)
+        expect(p.isAbsolutePath('c:/x')).toBe(true)
+        expect(p.isAbsolutePath('\\\\server\\share')).toBe(true)
+        expect(p.isAbsolutePath('src\\a.ts')).toBe(false)
+        expect(p.insideOf('C:\\Repo\\src\\a.ts', 'c:\\repo')).toBe('src\\a.ts')
+        expect(p.insideOf('C:/repo/src/a.ts', 'C:\\repo\\')).toBe('src/a.ts')
+        expect(p.parentPath('~\\code\\app')).toBe('~\\code')
+        expect(p.homeShort('C:\\Users\\me\\code')).toBe('~\\code')
+    })
+})

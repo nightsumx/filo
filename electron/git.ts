@@ -33,9 +33,12 @@ export function parsePorcelain(output: string): { path: string, status: string, 
     return files
 }
 
+/** git's root path in this OS's form: git for Windows prints C:/x/y. */
+const toplevel = async (cwd: string) => path.resolve((await git(cwd, ['rev-parse', '--show-toplevel'])).trim())
+
 /** Repository root (as git reports it: symlinks resolved), or null outside a repo. */
 export async function gitRoot(cwd: string): Promise<string | null> {
-    return git(cwd, ['rev-parse', '--show-toplevel']).then(s => s.trim() || null, () => null)
+    return toplevel(cwd).then(s => s || null, () => null)
 }
 
 /** Uncommitted paths, relative to the root. */
@@ -81,7 +84,7 @@ function countLines(text: string): number {
 export async function gitStatus(cwd: string): Promise<GitStatus> {
     let root: string
     try {
-        root = (await git(cwd, ['rev-parse', '--show-toplevel'])).trim()
+        root = await toplevel(cwd)
     }
     catch {
         return { isRepo: false }
@@ -124,7 +127,7 @@ export async function gitBranch(cwd: string): Promise<string | null> {
 }
 
 export async function gitFileDiff(cwd: string, file: string, status: string): Promise<GitFileDiff> {
-    const root = (await git(cwd, ['rev-parse', '--show-toplevel'])).trim()
+    const root = await toplevel(cwd)
     const absolute = path.resolve(root, file)
     if (!absolute.startsWith(root + path.sep))
         throw new Error(tr('路径不在仓库内', 'Path is outside the repository'))
@@ -231,10 +234,8 @@ async function onSides<T>(cwd: string, file: string, status: string, origPath: s
  * makes thumbnails (platform.thumbnail); elsewhere both sides are null.
  */
 export async function gitFileThumbs(cwd: string, file: string, status: string, origPath?: string): Promise<GitFileThumbs> {
-    const thumbnail = platform.thumbnail
-    if (!thumbnail)
-        return { old: null, new: null, oldSize: 0, newSize: 0 }
-    return onSides(cwd, file, status, origPath, thumbnail)
+    // Without thumbnails (the renderer does not ask then) both sides are null; paths are still checked.
+    return onSides(cwd, file, status, origPath, platform.thumbnail ?? (async () => null))
 }
 
 /** Archives list at most this many entries per side. */
@@ -272,7 +273,8 @@ function inRepo(root: string, file: unknown): string {
     const absolute = path.resolve(root, file)
     if (!absolute.startsWith(root + path.sep))
         throw new Error(tr('路径不在仓库内', 'Path is outside the repository'))
-    return path.relative(root, absolute)
+    // git's own form (HEAD:<path> wants forward slashes on Windows too).
+    return path.relative(root, absolute).split(path.sep).join('/')
 }
 
 export interface DiscardFile { path: string, status: string, origPath?: string }

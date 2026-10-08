@@ -6,6 +6,10 @@ import process from 'node:process'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { parseEdits, repoEdits, resolveToolPath } from './edits'
 
+// This OS's absolute paths: /repo, or C:\repo on Windows.
+const repo = path.resolve('/repo')
+const elsewhere = path.resolve('/elsewhere/b.ts')
+
 const lines = (...records: object[]) => records.map(r => JSON.stringify(r)).join('\n')
 const header = (cwd: string) => ({ type: 'session', version: 3, id: 's', timestamp: '2026-01-01T00:00:00.000Z', cwd })
 const call = (id: string, at: string, name: string, args: object) => ({
@@ -27,28 +31,28 @@ const prompt = (text: string) => ({ type: 'message', id: 'u', parentId: null, ti
 describe('parseEdits', () => {
     it('keeps successful edit / write calls, resolved against the session cwd', () => {
         const text = lines(
-            header('/repo'),
+            header(repo),
             prompt('fix the build\nplease'),
             call('a', '2026-01-01T00:00:01.000Z', 'edit', { path: 'src/a.ts', oldText: 'x', newText: 'y' }),
             result('a', false),
-            call('b', '2026-01-01T00:00:02.000Z', 'write', { path: '/elsewhere/b.ts', content: '' }),
+            call('b', '2026-01-01T00:00:02.000Z', 'write', { path: elsewhere, content: '' }),
             call('c', '2026-01-01T00:00:02.000Z', 'edit', { path: 'failed.ts' }),
             result('c', true),
             call('d', '2026-01-01T00:00:02.000Z', 'read', { path: 'read-only.ts' }),
         )
         expect(parseEdits(text)).toEqual({
-            cwd: '/repo',
+            cwd: repo,
             title: 'fix the build',
             edits: [
-                { path: '/repo/src/a.ts', at: Date.parse('2026-01-01T00:00:01.000Z') },
-                { path: '/elsewhere/b.ts', at: Date.parse('2026-01-01T00:00:02.000Z') },
+                { path: path.join(repo, 'src', 'a.ts'), at: Date.parse('2026-01-01T00:00:01.000Z') },
+                { path: elsewhere, at: Date.parse('2026-01-01T00:00:02.000Z') },
             ],
         })
     })
 
     it('resolves @ and ~ like pi', () => {
-        expect(resolveToolPath('/repo', '@src/a.ts')).toBe('/repo/src/a.ts')
-        expect(resolveToolPath('/repo', '~/x.ts')).toBe(path.join(os.homedir(), 'x.ts'))
+        expect(resolveToolPath(repo, '@src/a.ts')).toBe(path.join(repo, 'src', 'a.ts'))
+        expect(resolveToolPath(repo, '~/x.ts')).toBe(path.join(os.homedir(), 'x.ts'))
     })
 })
 

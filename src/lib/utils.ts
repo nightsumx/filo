@@ -3,6 +3,7 @@ import type { ClassValue } from 'clsx'
 import { clsx } from 'clsx'
 import { twMerge } from 'tailwind-merge'
 import { lang, tr } from './i18n'
+import { homeShort, pathParts } from '../platform'
 
 export function cn(...inputs: ClassValue[]) {
     return twMerge(clsx(inputs))
@@ -26,7 +27,7 @@ export function formatCost(n: number): string {
 }
 
 export function basename(p: string): string {
-    const parts = p.split('/').filter(Boolean)
+    const parts = pathParts(p).filter(Boolean)
     return parts[parts.length - 1] || p
 }
 
@@ -86,5 +87,5 @@ export function readableError(text: string): string {
 
 /** "/Users/me/code/app" → "~/code/app" without needing the home dir from the main process. */
 export function shortPath(p: string): string {
-    return p.replace(/^\/(?:Users|home)\/[^/]+(?=\/|$)/, '~')
+    return homeShort(p)
 }

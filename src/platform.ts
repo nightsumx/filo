@@ -7,7 +7,7 @@
 // takes the ⌘ digits: projects (⌃1–9) are Alt+1–9, and the terminal's own shortcuts (⌘T/W/K/C/V) are
 // Ctrl+Shift+letter, as in Windows Terminal and GNOME Terminal.
 import type { CSSProperties } from 'react'
-import { tr } from '@/lib/i18n'
+import { tr } from './lib/i18n'
 
 export type Os = 'mac' | 'windows' | 'linux'
 
@@ -112,6 +112,40 @@ export function showInFolderLabel(): string {
     if (os === 'linux')
         return tr('在文件管理器中打开', 'Open in File Manager')
     return tr('在 Finder 中打开', 'Show in Finder')
+}
+
+const isWindows = os === 'windows'
+
+/** A local path's parts; Windows paths take both \\ and /. */
+export function pathParts(p: string): string[] {
+    return isWindows ? p.split(/[\\/]/) : p.split('/')
+}
+
+export function isAbsolutePath(p: string): boolean {
+    return isWindows ? /^(?:[a-z]:[\\/]|\\\\)/i.test(p) : p.startsWith('/')
+}
+
+/** `p` relative to the folder `dir` when it is inside it (case-insensitive on Windows), else undefined. */
+export function insideOf(p: string, dir: string): string | undefined {
+    if (!isWindows) {
+        const base = dir.endsWith('/') ? dir : `${dir}/`
+        return p.startsWith(base) ? p.slice(base.length) : undefined
+    }
+    const norm = (s: string) => s.replaceAll('/', '\\').toLowerCase()
+    const base = norm(dir).replace(/\\?$/, '\\')
+    return norm(p).startsWith(base) ? p.slice(base.length) : undefined
+}
+
+/** The folder holding `p`: "/a/b/c" → "/a/b". */
+export function parentPath(p: string): string {
+    return isWindows ? p.replace(/[\\/][^\\/]+$/, '') : p.replace(/\/[^/]+$/, '')
+}
+
+/** The home folder as ~: "/Users/me/code" → "~/code", "C:\\Users\\me\\code" → "~\\code". */
+export function homeShort(p: string): string {
+    return isWindows
+        ? p.replace(/^[a-z]:[\\/]Users[\\/][^\\/]+(?=[\\/]|$)/i, '~')
+        : p.replace(/^\/(?:Users|home)\/[^/]+(?=\/|$)/, '~')
 }
 
 /** QuickLook thumbnails (documents, HEIC, PSD...) exist only on macOS. */
