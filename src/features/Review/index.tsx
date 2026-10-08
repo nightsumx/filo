@@ -5,12 +5,14 @@ import { DiffBlock } from '@/components/toolPrimitives'
 import { buildChangeTree, dirPaths } from '@/lib/changeTree'
 import { confirm } from '@/lib/confirm'
 import { editedBy } from '@/lib/edits'
+import { previewOf } from '@/lib/filePreview'
 import { cn, relativeTime } from '@/lib/utils'
 import { appStore } from '@/store/app'
 import { ChevronRight, ChevronsDownUp, ChevronsUpDown, Columns2, Folder, FolderTree, GitBranch, List, Loader2, RefreshCw, Rows2, TriangleAlert, Undo2, X } from 'lucide-react'
 import { observer } from 'mobx-react-lite'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
+import { FilePreview } from './FilePreview'
 import { useGitStatus } from './useGitStatus'
 import { newThreadLabel, tr } from '@/lib/i18n'
 
@@ -107,10 +109,13 @@ const FileDiff = observer(function FileDiff({ file, ctx, defaultOpen, depth }: {
     const size = diff ? diff.oldText.length + diff.newText.length : 0
     const large = changedLines > LARGE_DIFF_LINES || size > LARGE_DIFF_BYTES
     const others = ctx.othersOf(file.path)
+    // Images, PDF and media show as themselves; SVG is text too, so it keeps its diff under the picture.
+    const preview = previewOf(file.path)
+    const textDiff = !file.binary && (!preview || preview.kind === 'svg')
 
     useEffect(() => {
         // Large files are not even fetched until the user asks for them.
-        if (!open || file.binary || (changedLines > LARGE_DIFF_LINES && !forced))
+        if (!open || !textDiff || (changedLines > LARGE_DIFF_LINES && !forced))
             return
         let cancelled = false
         window.pi.gitFileDiff(cwd, file.path, file.status)
@@ -119,7 +124,7 @@ const FileDiff = observer(function FileDiff({ file, ctx, defaultOpen, depth }: {
         return () => {
             cancelled = true
         }
-    }, [cwd, file.path, file.status, open, tick, file.binary, changedLines, forced])
+    }, [cwd, file.path, file.status, open, tick, textDiff, changedLines, forced])
 
     return (
         <div>
@@ -166,9 +171,10 @@ const FileDiff = observer(function FileDiff({ file, ctx, defaultOpen, depth }: {
                 <Totals additions={file.additions} deletions={file.deletions} />
             </div>
             {open && (
-                <div className="px-2 pb-2 pt-0.5">
-                    {file.binary
-                        ? <div className="px-1 py-2 text-[12px] text-gray-400">{tr('二进制文件', 'Binary file')}</div>
+                <div className="flex flex-col gap-2 px-2 pb-2 pt-0.5">
+                    {preview && <FilePreview cwd={cwd} file={file} kind={preview.kind} mime={preview.mime} tick={tick} />}
+                    {!textDiff
+                        ? !preview && <div className="px-1 py-2 text-[12px] text-gray-400">{tr('二进制文件', 'Binary file')}</div>
                         : error
                             ? <div className="px-1 py-2 text-[12px] text-red-500">{error}</div>
                             : large && !forced

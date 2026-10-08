@@ -16,7 +16,7 @@ import { AcpService } from './acp/service'
 import { AgentManager } from './agents'
 import { applySave, savedWindows, StateFile } from './appState'
 import { repoEdits } from './edits'
-import { gitBranch, gitCommit, gitDiscard, gitFileDiff, gitStatus } from './git'
+import { gitBranch, gitCommit, gitDiscard, gitFileBytes, gitFileDiff, gitStatus } from './git'
 import { mainLang, setMainLang, tr } from './i18n'
 import { compactionInfo, globalCompaction, setGlobalCompaction } from './piSettings'
 import { endpointSaveOf, helperLaunch, ProviderHelper, ProviderService } from './providers'
@@ -382,6 +382,8 @@ function registerIpc() {
         return Object.fromEntries(await Promise.all(list.map(async cwd => [cwd, await gitBranch(cwd)] as const)))
     })
     ipcMain.handle(IPC.gitFileDiff, (_e, cwd: string, file: string, status: string) => gitFileDiff(cwd, file, status))
+    ipcMain.handle(IPC.gitFileBytes, (_e, cwd: unknown, file: unknown, status: unknown, origPath: unknown) =>
+        gitFileBytes(absolutePath(cwd), String(file ?? ''), String(status ?? ''), typeof origPath === 'string' && origPath ? origPath : undefined))
     ipcMain.handle(IPC.repoEdits, async (_e, cwd: unknown) => repoEdits(absolutePath(cwd), await acp.mirrors(), file => acp.keyOfMirror(file)))
     ipcMain.handle(IPC.gitDiscard, (_e, cwd: unknown, files: unknown) => {
         if (!Array.isArray(files))

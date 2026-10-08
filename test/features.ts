@@ -2,6 +2,7 @@
 // built app, with real pi and a scripted model (no tokens spent):
 //   - the changes panel knows which thread edited what, and flags files two threads both changed
 //   - commit / roll back from the panel's IPC
+//   - changed images show both versions, a PDF shows in a frame
 //   - ⌘⇧F search finds a prompt and opens its thread
 //   - fork a prompt into a new tab, and ask again from a prompt in place
 //   - a terminal pi's presence file shows up in the project tree
@@ -20,6 +21,27 @@ const WORK = '/private/tmp/pi-gui-features'
 const SHOTS = process.env.SHOTS ?? ''
 
 const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8' }).trim()
+
+/** A one-page PDF with a line of text and a valid xref table. */
+function tinyPdf(): string {
+    const objects = [
+        '<< /Type /Catalog /Pages 2 0 R >>',
+        '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+        '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 120] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>',
+        '<< /Length 39 >>\nstream\nBT /F1 18 Tf 20 60 Td (Hello PDF) Tj ET\nendstream',
+        '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+    ]
+    let out = '%PDF-1.4\n'
+    const offsets = objects.map((body, i) => {
+        const at = out.length
+        out += `${i + 1} 0 obj\n${body}\nendobj\n`
+        return at
+    })
+    const xref = out.length
+    out += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n${offsets.map(o => `${String(o).padStart(10, '0')} 00000 n \n`).join('')}`
+    out += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`
+    return out
+}
 
 async function main() {
     await rm(WORK, { recursive: true, force: true })
@@ -59,7 +81,7 @@ async function main() {
         tabs: {},
         activeTabs: {},
         layout: 'single',
-        theme: 'dark',
+        theme: process.env.E2E_THEME ?? 'dark',
         lang: 'en',
         transcriptLang: 'en',
         capabilities: [],
@@ -120,6 +142,32 @@ async function main() {
         await page.evaluate(`window.pi.gitDiscard(${R}, [{ path: 'a.txt', status: ' M' }])`)
         check(await readFile(path.join(repo, 'a.txt'), 'utf8') === 'original\n', 'roll back restores a modified file')
         check(git(repo, 'status', '--porcelain') === '?? src/two.ts', 'and leaves the files it was not given')
+
+        // ---------------------------------------------------------------- previews: images, PDF
+        // A committed 3×2 PNG replaced by a 4×2 one shows both versions; a new PDF shows in a frame.
+        const png = (b64: string) => Buffer.from(b64, 'base64')
+        await writeFile(path.join(repo, 'logo.png'), png('iVBORw0KGgoAAAANSUhEUgAAAAMAAAACCAIAAAASFvFNAAAAFElEQVR4nGO8o6HBAAZMEIqBgQEAFggBMBhSqiYAAAAASUVORK5CYII='))
+        git(repo, 'add', 'logo.png')
+        git(repo, 'commit', '-q', '-m', 'logo')
+        await writeFile(path.join(repo, 'logo.png'), png('iVBORw0KGgoAAAANSUhEUgAAAAQAAAACCAIAAADwyuo0AAAAFElEQVR4nGPUqLjDAANMcBYDAwMAIzoBgAnDRVoAAAAASUVORK5CYII='))
+        await writeFile(path.join(repo, 'spec.pdf'), tinyPdf())
+        await page.evaluate(`document.querySelector('button[aria-label="Refresh"]').click()`)
+        const row = (file: string) => `document.querySelector('[role="button"][title=${JSON.stringify(file)}]')`
+        await until('preview rows', () => page.evaluate<boolean>(`!!${row('logo.png')} && !!${row('spec.pdf')}`))
+        await page.evaluate(`(() => { for (const f of ['logo.png', 'spec.pdf']) { const r = document.querySelector('[role="button"][title="' + f + '"]'); if (r.getAttribute('aria-expanded') !== 'true') r.click() } return true })()`)
+        const sizes = await until('both image versions', () => page.evaluate<string[] | null>(`(() => {
+            const imgs = [...document.querySelectorAll('aside img')].filter(i => i.src.startsWith('blob:') && i.complete && i.naturalWidth)
+            return imgs.length === 2 ? imgs.map(i => i.naturalWidth + 'x' + i.naturalHeight) : null
+        })()`))
+        check(sizes.join() === '3x2,4x2', 'a changed image shows the committed and the working version')
+        check(await page.evaluate<boolean>(`document.querySelector('aside').innerText.includes('Before') && document.querySelector('aside').innerText.includes('4 × 2')`), 'labelled Before / After, with their pixel size')
+        check(await page.evaluate<boolean>(`!!document.querySelector('aside iframe[src^="blob:"]')`), 'a new PDF shows in a frame')
+        if (SHOTS) {
+            await new Promise(r => setTimeout(r, 1500))
+            await page.screenshot(path.join(SHOTS, 'review-preview.png'))
+        }
+        git(repo, 'add', 'logo.png', 'spec.pdf')
+        git(repo, 'commit', '-q', '-m', 'previews')
 
         // ---------------------------------------------------------------- fork
         await page.evaluate(`window.__app.focus(${JSON.stringify(s1)})`)

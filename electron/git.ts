@@ -1,6 +1,6 @@
-import type { GitFileChange, GitFileDiff, GitStatus } from '@shared/ipc'
+import type { GitFileBytes, GitFileChange, GitFileDiff, GitStatus } from '@shared/ipc'
 import { execFile } from 'node:child_process'
-import { readFile } from 'node:fs/promises'
+import { readFile, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { promisify } from 'node:util'
 import { tr } from './i18n'
@@ -134,6 +134,48 @@ export async function gitFileDiff(cwd: string, file: string, status: string): Pr
         ? ''
         : await readFile(absolute, 'utf8').catch(() => '')
     return { oldText: oldText.slice(0, MAX_FILE_BYTES), newText: newText.slice(0, MAX_FILE_BYTES) }
+}
+
+/** Previews load whole files into the renderer; past this they show a notice instead. */
+export const MAX_PREVIEW_BYTES = 32 * 1024 * 1024
+
+/** Bytes of `HEAD:<file>`, or null when HEAD lacks it. Size first, so a huge blob is never read. */
+async function headBytes(root: string, file: string): Promise<{ bytes: Buffer | null, size: number }> {
+    const out = (await git(root, ['cat-file', '-s', `HEAD:${file}`]).catch(() => '')).trim()
+    if (!/^\d+$/.test(out))
+        return { bytes: null, size: 0 }
+    const size = Number(out)
+    if (size > MAX_PREVIEW_BYTES)
+        return { bytes: null, size }
+    const { stdout } = await execFileAsync('git', ['cat-file', 'blob', `HEAD:${file}`], { cwd: root, encoding: 'buffer', maxBuffer: MAX_PREVIEW_BYTES + 1024, timeout: 20_000 })
+    return { bytes: stdout, size }
+}
+
+async function workingBytes(absolute: string): Promise<{ bytes: Buffer | null, size: number }> {
+    const info = await stat(absolute).catch(() => null)
+    if (!info?.isFile())
+        return { bytes: null, size: 0 }
+    if (info.size > MAX_PREVIEW_BYTES)
+        return { bytes: null, size: info.size }
+    return { bytes: await readFile(absolute), size: info.size }
+}
+
+/** Both sides of a changed file as bytes, for image / PDF / media previews in the review panel. */
+export async function gitFileBytes(cwd: string, file: string, status: string, origPath?: string): Promise<GitFileBytes> {
+    const root = await gitRoot(cwd)
+    if (!root)
+        throw new Error(tr('不是 git 仓库', 'Not a git repository'))
+    const rel = inRepo(root, file)
+    const untracked = status === '??' || status[0] === 'A'
+    const before = untracked ? { bytes: null, size: 0 } : await headBytes(root, origPath ? inRepo(root, origPath) : rel)
+    const after = status.includes('D') ? { bytes: null, size: 0 } : await workingBytes(path.join(root, rel))
+    return {
+        old: before.bytes,
+        new: after.bytes,
+        oldSize: before.size,
+        newSize: after.size,
+        tooLarge: before.size > MAX_PREVIEW_BYTES || after.size > MAX_PREVIEW_BYTES,
+    }
 }
 
 /** git's own message for a failed command (hook output, "nothing to commit", ...), not node's wrapper. */

@@ -23,19 +23,23 @@ export function ImageThumb({ images, index, alt, className }: { images: ImageCon
             >
                 <img src={src(images[index])} alt={alt} className={className} draggable={false} />
             </button>
-            {open !== null && <ImageLightbox images={images} index={open} onIndex={setOpen} onClose={() => setOpen(null)} />}
+            {open !== null && <ImageLightbox srcs={images.map(src)} index={open} onIndex={setOpen} onClose={() => setOpen(null)} />}
         </>
     )
 }
 
-function ImageLightbox({ images, index, onIndex, onClose }: { images: ImageContent[], index: number, onIndex: (i: number) => void, onClose: () => void }) {
+/**
+ * Full-window viewer over a group of image URLs (data: or blob:); ←/→ step through the group.
+ * `labels` name each image in the counter (the review panel's "Before" / "After").
+ */
+export function ImageLightbox({ srcs, labels, index, onIndex, onClose }: { srcs: string[], labels?: string[], index: number, onIndex: (i: number) => void, onClose: () => void }) {
     // Fit to the window first; clicking the image shows it at its natural size and scrolls.
     const [actual, setActual] = useState(false)
     const [natural, setNatural] = useState({ w: 0, h: 0 })
-    const many = images.length > 1
+    const many = srcs.length > 1
     const step = (d: number) => {
         setActual(false)
-        onIndex((index + d + images.length) % images.length)
+        onIndex((index + d + srcs.length) % srcs.length)
     }
     // Zooming only means something when the fitted image is smaller than the file.
     const zoomable = natural.w > window.innerWidth - 96 || natural.h > window.innerHeight - 96
@@ -56,14 +60,14 @@ function ImageLightbox({ images, index, onIndex, onClose }: { images: ImageConte
                             step(1)
                     }}
                 >
-                    <DialogPrimitive.Title className="sr-only">{tr('图片', 'Image')} {index + 1} / {images.length}</DialogPrimitive.Title>
+                    <DialogPrimitive.Title className="sr-only">{labels?.[index] ?? `${tr('图片', 'Image')} ${index + 1} / ${srcs.length}`}</DialogPrimitive.Title>
                     <div
                         className={cn('absolute inset-0', actual ? 'overflow-auto' : 'flex items-center justify-center p-12')}
                         onClick={e => e.target === e.currentTarget && onClose()}
                     >
                         <img
                             key={index}
-                            src={src(images[index])}
+                            src={srcs[index]}
                             alt=""
                             draggable={false}
                             onLoad={e => setNatural({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })}
@@ -80,7 +84,7 @@ function ImageLightbox({ images, index, onIndex, onClose }: { images: ImageConte
                             <NavBtn side="left" label={tr('上一张', 'Previous')} onClick={() => step(-1)} />
                             <NavBtn side="right" label={tr('下一张', 'Next')} onClick={() => step(1)} />
                             <div className="pointer-events-none absolute bottom-4 left-1/2 -translate-x-1/2 rounded bg-always-black/50 px-2 py-0.5 text-[12px] tabular-nums text-always-white/80">
-                                {index + 1} / {images.length}
+                                {labels?.[index] ?? `${index + 1} / ${srcs.length}`}
                             </div>
                         </>
                     )}

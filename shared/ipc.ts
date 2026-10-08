@@ -105,6 +105,18 @@ export interface RepoEdits {
 
 export interface GitFileDiff { oldText: string, newText: string }
 
+/**
+ * Raw bytes of a changed file for previews (images, PDF, audio, video): the last commit's copy and
+ * the working copy. null where that side does not exist; `tooLarge` where it exceeds the preview cap.
+ */
+export interface GitFileBytes {
+    old: Uint8Array | null
+    new: Uint8Array | null
+    oldSize: number
+    newSize: number
+    tooLarge: boolean
+}
+
 /** Settings shared by every window; a change in one window reaches the others. */
 export interface GlobalPrefs {
     /** Project list order (cwds), including folders added manually. */
@@ -364,6 +376,8 @@ export interface PiBridge {
     /** Current branch per folder (null when not a repo); cheap, used by the project popup. */
     gitBranches: (cwds: string[]) => Promise<Record<string, string | null>>
     gitFileDiff: (cwd: string, path: string, status: string) => Promise<GitFileDiff>
+    /** Both sides of a changed file as bytes, for previews; a rename reads HEAD at `origPath`. */
+    gitFileBytes: (cwd: string, path: string, status: string, origPath?: string) => Promise<GitFileBytes>
     /** Which sessions edited each uncommitted file of the repository holding cwd. */
     repoEdits: (cwd: string) => Promise<RepoEdits>
     /** Rollback: tracked files back to HEAD; files HEAD lacks go to the Trash. */
@@ -438,6 +452,7 @@ export const IPC = {
     gitStatus: 'git:status',
     gitBranches: 'git:branches',
     gitFileDiff: 'git:file-diff',
+    gitFileBytes: 'git:file-bytes',
     repoEdits: 'git:repo-edits',
     gitDiscard: 'git:discard',
     gitCommit: 'git:commit',
