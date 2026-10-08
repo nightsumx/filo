@@ -2,7 +2,7 @@
     "name": "filo",
     "productName": "Filo",
     "private": true,
-    "version": "0.2.0",
+    "version": "0.3.0",
     "description": "编码 Agent 的 Mac 工作台：多项目多线程并行，改动归属到线程，独立审查，搜索所有会话",
     "author": "sum",
     "license": "MIT",
