@@ -53,6 +53,8 @@ export const ACP_AGENTS: readonly AcpAgentSpec[] = [
         protocol: 'codex-app-server',
         bin: 'codex',
         args: ['app-server'],
+        // The CLI itself speaks app-server; the version the adapter was checked against.
+        npm: '@openai/codex@0.160.1',
         cli: { bin: 'codex', env: 'CODEX_PATH' },
         inputIncludesCache: true,
         signIn: { zh: '在终端里运行 codex 完成登录', en: 'run codex in a terminal and sign in' },
