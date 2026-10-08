@@ -84,11 +84,30 @@ describe('win32', () => {
         expect(win32.ipcPath('C:\\Users\\A\\AppData\\Roaming\\pi-gui', 'terminals-1.sock')).toBe(a)
         expect(win32.ipcPath('C:\\Users\\b\\AppData\\Roaming\\pi-gui', 'terminals-1.sock')).not.toBe(a)
     })
+
+    it('writes launchers as batch files', () => {
+        const l = win32.launcher('node', { ELECTRON_RUN_AS_NODE: '1' }, ['C:\\Program Files\\Filo\\Filo.exe', '--require', 'C:\\100%\\preload.cjs'])
+        expect(l.file).toBe('node.cmd')
+        expect(l.text.split('\r\n')).toEqual([
+            '@echo off',
+            ':: The app\'s Electron as node, for agents it installed (electron/acp/node.ts).',
+            'setlocal',
+            'set "ELECTRON_RUN_AS_NODE=1"',
+            '"C:\\Program Files\\Filo\\Filo.exe" "--require" "C:\\100%%\\preload.cjs" %*',
+            '',
+        ])
+    })
 })
 
 describe('posix', () => {
     it('keeps socket paths under the length limit', () => {
         expect(darwin.ipcPath('/Users/a/Library/Application Support/pi-gui', 't.sock')).toBe('/Users/a/Library/Application Support/pi-gui/t.sock')
         expect(linux.ipcPath(`/home/${'x'.repeat(120)}`, 't.sock').length).toBeLessThan(100)
+    })
+
+    it('writes launchers as sh scripts', () => {
+        const l = darwin.launcher('npm', { A: 'it\'s' }, ['/a b/node', 'cli.js'])
+        expect(l.file).toBe('npm')
+        expect(l.text.split('\n').slice(2)).toEqual([`A='it'\\''s' exec '/a b/node' 'cli.js' "$@"`, ''])
     })
 })

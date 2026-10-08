@@ -44,7 +44,8 @@ export const desktopWindow: WindowPlatform = {
             submenu: [
                 { role: 'minimize', accelerator: '' },
                 mergeWindows,
-                { role: 'close', label: tr('关闭窗口', 'Close Window'), accelerator: 'Ctrl+Shift+W' },
+                // Alt+F4 closes the window; Ctrl+Shift+W closes a terminal (src/platform.ts).
+                { role: 'close', label: tr('关闭窗口', 'Close Window'), accelerator: '' },
             ],
         },
     ],
@@ -56,7 +57,7 @@ export const desktopWindow: WindowPlatform = {
                 win.flashFrame(true)
         }
     },
-    // The window icon comes from BrowserWindow's `icon` (main.ts) in development too.
+    // Packaged builds take the icon from the installer (.exe resources, the AppImage's .desktop entry).
     devIcon: () => {},
     // No app-level switcher entry to hide; each window keeps out of the taskbar instead.
     background: () => {},

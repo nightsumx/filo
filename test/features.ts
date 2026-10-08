@@ -12,10 +12,11 @@
 //
 //   bun run build && bun run e2e:features
 import { execFileSync, spawn } from 'node:child_process'
+import { existsSync } from 'node:fs'
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import process from 'node:process'
-import { check, launch, PORT, until, windows } from './app'
+import { check, COMMAND, launch, PORT, until, windows } from './app'
 import { startMockLlm } from './harness'
 
 const WORK = '/private/tmp/pi-gui-features'
@@ -188,10 +189,14 @@ async function main() {
             ],
         }))
         await writeFile(path.join(repo, 'face.woff2'), await readFile(path.join(process.cwd(), 'node_modules/@fontsource-variable/inter/files/inter-latin-wght-normal.woff2')))
-        await writeFile(path.join(repo, 'doc.rtf'), '{\\rtf1\\ansi{\\fonttbl\\f0 Helvetica;}\\f0\\fs48 Quick look}')
-        execFileSync('textutil', ['-convert', 'docx', '-output', 'doc.docx', 'doc.rtf'], { cwd: repo })
-        await rm(path.join(repo, 'doc.rtf'))
-        const more = ['notes.md', 'pack.zip', 'table.csv', 'page.html', 'nb.ipynb', 'face.woff2', 'doc.docx']
+        // QuickLook (and textutil to make the document) are macOS only.
+        const quickLook = existsSync('/usr/bin/textutil')
+        if (quickLook) {
+            await writeFile(path.join(repo, 'doc.rtf'), '{\\rtf1\\ansi{\\fonttbl\\f0 Helvetica;}\\f0\\fs48 Quick look}')
+            execFileSync('textutil', ['-convert', 'docx', '-output', 'doc.docx', 'doc.rtf'], { cwd: repo })
+            await rm(path.join(repo, 'doc.rtf'))
+        }
+        const more = ['notes.md', 'pack.zip', 'table.csv', 'page.html', 'nb.ipynb', 'face.woff2', ...quickLook ? ['doc.docx'] : []]
         await page.evaluate(`document.querySelector('button[aria-label="Refresh"]').click()`)
         await until('more preview rows', () => page.evaluate<boolean>(`${JSON.stringify(more)}.every(f => document.querySelector('[role="button"][title="' + f + '"]'))`))
         await page.evaluate(`(() => { for (const f of ${JSON.stringify(more)}) { const r = document.querySelector('[role="button"][title="' + f + '"]'); if (r.getAttribute('aria-expanded') !== 'true') r.click() } return true })()`)
@@ -209,8 +214,10 @@ async function main() {
         check(await page.evaluate<boolean>(`${aside}.innerText.includes('The quick brown fox')`), 'a font shows sample text in itself')
         await until('archive entries', () => page.evaluate<boolean>(`${aside}.innerText.includes('1 added')`))
         check(await page.evaluate<boolean>(`[...${aside}.querySelectorAll('.font-mono span')].some(s => s.textContent.includes('added logo.png'))`), 'an archive lists its entries, marking the added one')
-        await until('quicklook thumbnail', () => page.evaluate<boolean>(`[...${aside}.querySelectorAll('img[alt="doc.docx"]')].some(i => i.complete && i.naturalWidth > 0)`), 20_000)
-        check(true, 'a document gets its QuickLook thumbnail')
+        if (quickLook) {
+            await until('quicklook thumbnail', () => page.evaluate<boolean>(`[...${aside}.querySelectorAll('img[alt="doc.docx"]')].some(i => i.complete && i.naturalWidth > 0)`), 20_000)
+            check(true, 'a document gets its QuickLook thumbnail')
+        }
         if (SHOTS) {
             await new Promise(r => setTimeout(r, 1000))
             for (const f of more) {
@@ -270,8 +277,8 @@ async function main() {
         check(results.length === 1 && results[0].session === s1 && results[0].hits[0].role === 'user', 'search finds the prompt (case-insensitive), in the thread that has it')
         check((await page.evaluate<any[]>(`window.pi.searchSessions('changed by')`)).length === 0, 'tool calls and their output are not searched')
         await page.evaluate(`window.__app.focus(${JSON.stringify(fork.key)})`)
-        await page.call('Input.dispatchKeyEvent', { type: 'keyDown', key: 'f', code: 'KeyF', modifiers: 4 | 8, windowsVirtualKeyCode: 70 })
-        await page.call('Input.dispatchKeyEvent', { type: 'keyUp', key: 'f', code: 'KeyF', modifiers: 4 | 8, windowsVirtualKeyCode: 70 })
+        await page.call('Input.dispatchKeyEvent', { type: 'keyDown', key: 'f', code: 'KeyF', modifiers: COMMAND | 8, windowsVirtualKeyCode: 70 })
+        await page.call('Input.dispatchKeyEvent', { type: 'keyUp', key: 'f', code: 'KeyF', modifiers: COMMAND | 8, windowsVirtualKeyCode: 70 })
         await until('search dialog', () => page.evaluate<boolean>(`!!document.querySelector('[role="dialog"] input')`))
         await page.call('Input.insertText', { text: 'second question' })
         await until('search results', () => page.evaluate<boolean>(`document.querySelectorAll('[role="dialog"] [role="option"]').length >= 2`))

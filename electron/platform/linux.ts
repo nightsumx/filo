@@ -4,7 +4,7 @@ import type { Platform } from './types'
 import { execFile } from 'node:child_process'
 import process from 'node:process'
 import { promisify } from 'node:util'
-import { chmodPtyHelper, clearSocket, directCommand, findExecutable, loginShellEnv, posixShell, posixShellArgs, posixStopTree, restrictSocket, socketPath } from './posix'
+import { chmodPtyHelper, clearSocket, directCommand, findExecutable, loginShellEnv, posixShell, posixShellArgs, posixStopTree, restrictSocket, shLauncher, socketPath } from './posix'
 
 const execFileAsync = promisify(execFile)
 
@@ -23,6 +23,7 @@ export const linux: Platform = {
     findIn: findExecutable,
     command: directCommand,
     withPath: (env, value) => ({ ...env, PATH: value }),
+    launcher: shLauncher,
 
     stopTree: posixStopTree('ps'),
 

@@ -7,6 +7,8 @@ import process from 'node:process'
 
 const ROOT = path.resolve(import.meta.dirname, '..')
 export const PORT = 9336
+/** CDP modifier bits are 1 Alt, 2 Ctrl, 4 Meta, 8 Shift; the app's ⌘ is Ctrl off macOS (src/platform.ts). */
+export const COMMAND = process.platform === 'darwin' ? 4 : 2
 
 export class Page {
     private next = 0

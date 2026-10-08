@@ -4,7 +4,7 @@
 import type { TerminalDetails } from '@shared/capabilities'
 import type { PiEnv } from '@shared/ipc'
 import type { MockLlm, MockReply, MockRequest, PiSession } from './harness'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, realpathSync, rmSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeAll, describe, expect, it } from 'vitest'
@@ -104,7 +104,8 @@ describe.runIf(process.env.PI_GUI_SKIP_E2E !== '1')('terminal capability (real p
         expect(terminals.get(mine)?.exit).toBeUndefined()
     }, 60_000)
 
-    it('a request from pi\'s resolved cwd lands in the project as the window knows it', async () => {
+    // macOS: /tmp is a link to /private/tmp, which pi reports.
+    it.runIf(realpathSync('/tmp') !== '/tmp')('a request from pi\'s resolved cwd lands in the project as the window knows it', async () => {
         const terminals = new Terminals({ ptyDir: path.resolve('node_modules/node-pty'), onChange: () => {} })
         const tools = new TerminalTools(terminals, '/dev/null', () => ['/tmp'])
         cleanup.push(() => terminals.closeAll())

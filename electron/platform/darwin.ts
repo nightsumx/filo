@@ -5,7 +5,7 @@ import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import process from 'node:process'
 import { promisify } from 'node:util'
-import { chmodPtyHelper, clearSocket, directCommand, findExecutable, loginShellEnv, posixShell, posixShellArgs, posixStopTree, restrictSocket, socketPath } from './posix'
+import { chmodPtyHelper, clearSocket, directCommand, findExecutable, loginShellEnv, posixShell, posixShellArgs, posixStopTree, restrictSocket, shLauncher, socketPath } from './posix'
 
 const execFileAsync = promisify(execFile)
 
@@ -19,6 +19,7 @@ export const darwin: Platform = {
     findIn: findExecutable,
     command: directCommand,
     withPath: (env, value) => ({ ...env, PATH: value }),
+    launcher: shLauncher,
 
     stopTree: posixStopTree('/bin/ps'),
 

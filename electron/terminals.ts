@@ -392,7 +392,8 @@ export class Terminals {
                 continue
             let fg = ''
             try {
-                fg = entry.pty.process
+                // A name on macOS; on Linux the program's argv[0], which can be a path (/bin/bash).
+                fg = path.basename(entry.pty.process)
             }
             catch {}
             const shellName = path.basename(entry.shell)

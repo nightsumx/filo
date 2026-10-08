@@ -33,7 +33,7 @@ describe.runIf(process.env.PI_GUI_SKIP_E2E !== '1')('bundled pi', () => {
         process.env.PI_GUI_PI = 'bundled'
         const env = await findPi()
         expect(env?.bundled).toBeTruthy()
-        expect(env?.nodePath).toMatch(/Electron$/)
+        expect(env?.nodePath).toMatch(/electron(\.exe)?$/i)
         expect(env?.version).toMatch(/^\d+\.\d+\.\d+/)
 
         // The parent runs the probe, then delegates; the child runs it too.

@@ -1,4 +1,4 @@
-import { hasQuickLook } from '@/platform'
+import { hasQuickLook } from '../platform'
 
 /**
  * How the review panel shows a file besides its text diff:

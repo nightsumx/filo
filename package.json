@@ -7,9 +7,10 @@
     "author": "sum",
     "license": "MIT",
     "homepage": "https://filoapp.dev",
+    "desktopName": "filo.desktop",
     "type": "module",
     "main": "dist-electron/main/main.js",
-    "trustedDependencies": ["electron"],
+    "trustedDependencies": ["electron", "node-pty"],
     "workspaces": ["packages/*"],
     "scripts": {
         "dev": "vite",
@@ -116,31 +117,6 @@
                 "to": "piLauncher.mjs"
             },
             {
-                "from": "bundled-pi/node_modules",
-                "to": "pi/node_modules",
-                "filter": [
-                    "**/*",
-                    "!**/*.map",
-                    "!**/*.d.ts",
-                    "!**/*.d.mts",
-                    "!**/*.d.cts",
-                    "!**/prebuilds/{linux,win32}-*/**"
-                ]
-            },
-            {
-                "from": "node_modules/node-pty",
-                "to": "node-pty",
-                "filter": [
-                    "package.json",
-                    "lib/**/*.js",
-                    "!lib/**/*.test.js",
-                    "!lib/worker/**",
-                    "!lib/*windows*",
-                    "!lib/conpty*",
-                    "prebuilds/darwin-*/**"
-                ]
-            },
-            {
                 "from": "packages/capabilities",
                 "to": "capabilities",
                 "filter": [
@@ -153,6 +129,9 @@
             }
         ],
         "npmRebuild": false,
+        "toolsets": {
+            "appimage": "1.0.3"
+        },
         "mac": {
             "icon": "build/icon.icns",
             "category": "public.app-category.developer-tools",
@@ -161,16 +140,106 @@
             "target": [
                 "dmg",
                 "zip"
+            ],
+            "extraResources": [
+                {
+                    "from": "bundled-pi/node_modules",
+                    "to": "pi/node_modules",
+                    "filter": [
+                        "**/*",
+                        "!**/*.map",
+                        "!**/*.d.ts",
+                        "!**/*.d.mts",
+                        "!**/*.d.cts",
+                        "!**/prebuilds/{linux,win32}-*/**"
+                    ]
+                },
+                {
+                    "from": "node_modules/node-pty",
+                    "to": "node-pty",
+                    "filter": [
+                        "package.json",
+                        "lib/**/*.js",
+                        "!lib/**/*.test.js",
+                        "!lib/worker/**",
+                        "!lib/*windows*",
+                        "!lib/conpty*",
+                        "prebuilds/darwin-*/**"
+                    ]
+                }
             ]
         },
         "win": {
             "target": [
                 "nsis"
+            ],
+            "artifactName": "Filo-Setup-${arch}.${ext}",
+            "extraResources": [
+                {
+                    "from": "bundled-pi/node_modules",
+                    "to": "pi/node_modules",
+                    "filter": [
+                        "**/*",
+                        "!**/*.map",
+                        "!**/*.d.ts",
+                        "!**/*.d.mts",
+                        "!**/*.d.cts",
+                        "!**/prebuilds/{darwin,linux}-*/**"
+                    ]
+                },
+                {
+                    "from": "node_modules/node-pty",
+                    "to": "node-pty",
+                    "filter": [
+                        "package.json",
+                        "lib/**/*.js",
+                        "!lib/**/*.test.js",
+                        "prebuilds/win32-*/**",
+                        "!**/*.pdb"
+                    ]
+                }
             ]
+        },
+        "nsis": {
+            "oneClick": true,
+            "perMachine": false,
+            "shortcutName": "Filo"
         },
         "linux": {
             "target": [
                 "AppImage"
+            ],
+            "icon": "build/icon.png",
+            "category": "Development",
+            "executableName": "filo",
+            "syncDesktopName": true,
+            "artifactName": "Filo-${arch}.${ext}",
+            "extraResources": [
+                {
+                    "from": "bundled-pi/node_modules",
+                    "to": "pi/node_modules",
+                    "filter": [
+                        "**/*",
+                        "!**/*.map",
+                        "!**/*.d.ts",
+                        "!**/*.d.mts",
+                        "!**/*.d.cts",
+                        "!**/prebuilds/{darwin,win32}-*/**"
+                    ]
+                },
+                {
+                    "from": "node_modules/node-pty",
+                    "to": "node-pty",
+                    "filter": [
+                        "package.json",
+                        "lib/**/*.js",
+                        "!lib/**/*.test.js",
+                        "!lib/worker/**",
+                        "!lib/*windows*",
+                        "!lib/conpty*",
+                        "build/Release/pty.node"
+                    ]
+                }
             ]
         }
     }

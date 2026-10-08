@@ -13,6 +13,7 @@
 import { access, chmod, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import process from 'node:process'
+import { platform } from '../platform'
 
 export interface AppNode {
     /** Where the scripts go (rewritten when the app moves). */
@@ -48,12 +49,11 @@ export async function withAppNode(searchPath: string): Promise<string> {
     return bin ? [...searchPath.split(path.delimiter).filter(Boolean), bin].join(path.delimiter) : searchPath
 }
 
-const quote = (s: string) => `'${s.replaceAll('\'', '\'\\\'\'')}'`
-
 async function writeScripts({ dir, electron, npm }: AppNode): Promise<string> {
     const bin = path.join(dir, 'bin')
-    const node = path.join(bin, 'node')
     const preload = path.join(dir, 'preload.cjs')
+    const nodeLauncher = platform.launcher('node', { ELECTRON_RUN_AS_NODE: '1' }, [electron, '--require', preload])
+    const node = path.join(bin, nodeLauncher.file)
     await mkdir(bin, { recursive: true })
     await put(preload, [
         '// Loaded by bin/node before the script it runs (electron/acp/node.ts).',
@@ -62,20 +62,19 @@ async function writeScripts({ dir, electron, npm }: AppNode): Promise<string> {
         'process.argv[0] = process.execPath',
         '',
     ].join('\n'))
-    await put(node, script(`ELECTRON_RUN_AS_NODE=1 exec ${quote(electron)} --require ${quote(preload)} "$@"`), true)
+    await put(node, nodeLauncher.text, true)
     // A development build has it only after scripts/bundle-pi.sh.
     const hasNpm = !!npm && await access(path.join(npm, 'bin', 'npm-cli.js')).then(() => true, () => false)
     for (const [name, cli] of [['npm', 'npm-cli.js'], ['npx', 'npx-cli.js']]) {
-        const file = path.join(bin, name)
-        if (npm && hasNpm)
-            await put(file, script(`exec ${quote(node)} ${quote(path.join(npm, 'bin', cli))} "$@"`), true)
+        const launcher = platform.launcher(name, {}, [node, path.join(npm ?? '', 'bin', cli)])
+        const file = path.join(bin, launcher.file)
+        if (hasNpm)
+            await put(file, launcher.text, true)
         else
             await rm(file, { force: true })
     }
     return bin
 }
-
-const script = (line: string) => `#!/bin/sh\n# The app's Electron as node, for agents it installed (electron/acp/node.ts).\n${line}\n`
 
 /** Writes a file unless it holds this already; whole (a running agent may be reading it). */
 async function put(file: string, text: string, executable = false) {

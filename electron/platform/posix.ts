@@ -1,6 +1,6 @@
 // What macOS and Linux share: a login shell knows the user's PATH, programs are files with the
 // executable bit, processes form a tree `ps` lists and signals end, local servers are unix sockets.
-import type { Command, Platform, ShellEnv } from './types'
+import type { Command, Launcher, Platform, ShellEnv } from './types'
 import { execFile } from 'node:child_process'
 import { accessSync, chmodSync, constants, realpathSync, rmSync, statSync } from 'node:fs'
 import { access } from 'node:fs/promises'
@@ -131,6 +131,14 @@ export function posixStopTree(ps: string): Platform['stopTree'] {
         }
         await Promise.race([exited, sleep(500)])
     }
+}
+
+const shQuote = (s: string) => `'${s.replaceAll('\'', '\'\\\'\'')}'`
+
+/** A /bin/sh script; the caller makes it executable. */
+export function shLauncher(name: string, env: Record<string, string>, argv: readonly string[]): Launcher {
+    const vars = Object.entries(env).map(([k, v]) => `${k}=${shQuote(v)} `).join('')
+    return { file: name, text: `#!/bin/sh\n# The app's Electron as node, for agents it installed (electron/acp/node.ts).\n${vars}exec ${argv.map(shQuote).join(' ')} "$@"\n` }
 }
 
 /** Socket paths are capped (104 bytes on macOS, 108 on Linux); a long home folder falls back to the temp folder. */

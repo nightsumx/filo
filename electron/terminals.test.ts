@@ -6,6 +6,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterAll, afterEach, describe, expect, it } from 'vitest'
 import { IPC } from '@shared/ipc'
+import { platform } from './platform'
 import { descendants } from './platform/posix'
 import { terminalEnv, Terminals } from './terminals'
 
@@ -122,7 +123,7 @@ describe('terminals', () => {
 
     it('tells a busy shell from an idle one by its foreground program', async () => {
         const t = terminals.create({ cwd: dir })
-        await until(() => terminals.get(t.id)?.title === path.basename(process.env.SHELL || '/bin/zsh'), 4000)
+        await until(() => terminals.get(t.id)?.title === path.basename(platform.userShell()), 4000)
         terminals.write(t.id, 'sleep 30\r')
         await until(() => terminals.get(t.id)?.busy === true && terminals.get(t.id)?.title === 'sleep', 5000)
         expect(terminals.busyIn([dir])).toBe(1)
