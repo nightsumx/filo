@@ -1,6 +1,7 @@
-import type { GitFileBytes, GitFileChange, GitFileDiff, GitStatus } from '@shared/ipc'
+import type { GitFileBytes, GitFileChange, GitFileDiff, GitFileEntries, GitFileThumbs, GitStatus } from '@shared/ipc'
 import { execFile } from 'node:child_process'
-import { readFile, stat } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import os from 'node:os'
 import path from 'node:path'
 import { promisify } from 'node:util'
 import { tr } from './i18n'
@@ -175,6 +176,91 @@ export async function gitFileBytes(cwd: string, file: string, status: string, or
         oldSize: before.size,
         newSize: after.size,
         tooLarge: before.size > MAX_PREVIEW_BYTES || after.size > MAX_PREVIEW_BYTES,
+    }
+}
+
+/**
+ * Runs `fn` on each side of a changed file as a path on disk, for tools that read files (QuickLook,
+ * tar): the working copy where it is, the committed copy written to a temp file of the same name,
+ * since both go by the extension. `scratch` is an empty folder for the tool's output. A side that
+ * does not exist, or a committed copy over the preview cap, is null.
+ */
+async function onSides<T>(cwd: string, file: string, status: string, origPath: string | undefined, fn: (absolute: string, scratch: string) => Promise<T>) {
+    const root = await gitRoot(cwd)
+    if (!root)
+        throw new Error(tr('不是 git 仓库', 'Not a git repository'))
+    const rel = inRepo(root, file)
+    const head = origPath ? inRepo(root, origPath) : rel
+    const tmp = await mkdtemp(path.join(os.tmpdir(), 'filo-preview-'))
+    const scratch = async (name: string) => {
+        const dir = path.join(tmp, name)
+        await mkdir(dir)
+        return dir
+    }
+    try {
+        let old: T | null = null
+        let oldSize = 0
+        if (status !== '??' && status[0] !== 'A') {
+            const before = await headBytes(root, head)
+            oldSize = before.size
+            if (before.bytes) {
+                const copy = path.join(await scratch('head'), path.basename(head))
+                await writeFile(copy, before.bytes)
+                old = await fn(copy, await scratch('head-out'))
+            }
+        }
+        let neu: T | null = null
+        let newSize = 0
+        const absolute = path.join(root, rel)
+        const info = status.includes('D') ? null : await stat(absolute).catch(() => null)
+        if (info?.isFile()) {
+            newSize = info.size
+            neu = await fn(absolute, await scratch('work-out'))
+        }
+        return { old, new: neu, oldSize, newSize }
+    }
+    finally {
+        await rm(tmp, { recursive: true, force: true })
+    }
+}
+
+/**
+ * QuickLook thumbnails (what Finder shows) of both sides, as PNG: Office and iWork documents, RTF,
+ * HEIC, TIFF, PSD, camera RAW, USDZ... qlmanage waits forever on a type it has no generator for, so
+ * the renderer only asks for known types and this gives up after a few seconds.
+ */
+export async function gitFileThumbs(cwd: string, file: string, status: string, origPath?: string): Promise<GitFileThumbs> {
+    return onSides(cwd, file, status, origPath, async (absolute, out) => {
+        try {
+            await execFileAsync('/usr/bin/qlmanage', ['-t', '-s', '1200', '-o', out, absolute], { timeout: 10_000 })
+            return await readFile(path.join(out, `${path.basename(absolute)}.png`))
+        }
+        catch {
+            return null
+        }
+    })
+}
+
+/** Archives list at most this many entries per side. */
+export const MAX_ARCHIVE_ENTRIES = 5000
+
+/** Entry names of both sides of an archive (zip, jar, tar, tgz, 7z, rar... whatever bsdtar reads). */
+export async function gitFileEntries(cwd: string, file: string, status: string, origPath?: string): Promise<GitFileEntries> {
+    const sides = await onSides(cwd, file, status, origPath, async (absolute) => {
+        try {
+            const { stdout } = await execFileAsync('/usr/bin/tar', ['-tf', absolute], { timeout: 20_000, maxBuffer: 64 * 1024 * 1024 })
+            return stdout.split('\n').filter(Boolean)
+        }
+        catch (error: any) {
+            const why = String(error?.stderr || error?.message || error).trim().split('\n')[0]
+            throw new Error(tr(`无法读取归档：${why}`, `Cannot read the archive: ${why}`))
+        }
+    })
+    return {
+        old: sides.old?.slice(0, MAX_ARCHIVE_ENTRIES) ?? null,
+        new: sides.new?.slice(0, MAX_ARCHIVE_ENTRIES) ?? null,
+        oldCount: sides.old?.length ?? 0,
+        newCount: sides.new?.length ?? 0,
     }
 }
 

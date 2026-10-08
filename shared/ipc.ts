@@ -117,6 +117,22 @@ export interface GitFileBytes {
     tooLarge: boolean
 }
 
+/** QuickLook thumbnails (PNG) of both sides of a changed file; null where a side or a thumbnail is missing. */
+export interface GitFileThumbs {
+    old: Uint8Array | null
+    new: Uint8Array | null
+    oldSize: number
+    newSize: number
+}
+
+/** Entry names of both sides of a changed archive, capped; the counts are the full totals. */
+export interface GitFileEntries {
+    old: string[] | null
+    new: string[] | null
+    oldCount: number
+    newCount: number
+}
+
 /** Settings shared by every window; a change in one window reaches the others. */
 export interface GlobalPrefs {
     /** Project list order (cwds), including folders added manually. */
@@ -378,6 +394,10 @@ export interface PiBridge {
     gitFileDiff: (cwd: string, path: string, status: string) => Promise<GitFileDiff>
     /** Both sides of a changed file as bytes, for previews; a rename reads HEAD at `origPath`. */
     gitFileBytes: (cwd: string, path: string, status: string, origPath?: string) => Promise<GitFileBytes>
+    /** QuickLook thumbnails of both sides (documents, HEIC, PSD...), for types the browser cannot show. */
+    gitFileThumbs: (cwd: string, path: string, status: string, origPath?: string) => Promise<GitFileThumbs>
+    /** Entry lists of both sides of an archive. */
+    gitFileEntries: (cwd: string, path: string, status: string, origPath?: string) => Promise<GitFileEntries>
     /** Which sessions edited each uncommitted file of the repository holding cwd. */
     repoEdits: (cwd: string) => Promise<RepoEdits>
     /** Rollback: tracked files back to HEAD; files HEAD lacks go to the Trash. */
@@ -453,6 +473,8 @@ export const IPC = {
     gitBranches: 'git:branches',
     gitFileDiff: 'git:file-diff',
     gitFileBytes: 'git:file-bytes',
+    gitFileThumbs: 'git:file-thumbs',
+    gitFileEntries: 'git:file-entries',
     repoEdits: 'git:repo-edits',
     gitDiscard: 'git:discard',
     gitCommit: 'git:commit',

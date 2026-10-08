@@ -2,7 +2,8 @@
 // built app, with real pi and a scripted model (no tokens spent):
 //   - the changes panel knows which thread edited what, and flags files two threads both changed
 //   - commit / roll back from the panel's IPC
-//   - changed images show both versions, a PDF shows in a frame
+//   - previews: changed images show both versions, PDF in a frame, Markdown / CSV / HTML / notebooks
+//     rendered, fonts as samples, archives as entry lists, documents as QuickLook thumbnails
 //   - ⌘⇧F search finds a prompt and opens its thread
 //   - fork a prompt into a new tab, and ask again from a prompt in place
 //   - a terminal pi's presence file shows up in the project tree
@@ -168,6 +169,58 @@ async function main() {
         }
         git(repo, 'add', 'logo.png', 'spec.pdf')
         git(repo, 'commit', '-q', '-m', 'previews')
+
+        // Rendered text (Markdown, CSV, HTML, notebook), a font, an archive and a QuickLook document.
+        await writeFile(path.join(repo, 'notes.md'), '# Old title\n')
+        execFileSync('zip', ['-q', 'pack.zip', 'a.txt'], { cwd: repo })
+        git(repo, 'add', 'notes.md', 'pack.zip')
+        git(repo, 'commit', '-q', '-m', 'docs')
+        await writeFile(path.join(repo, 'notes.md'), '# New title\n\n- **bold** item\n')
+        await rm(path.join(repo, 'pack.zip'))
+        execFileSync('zip', ['-q', 'pack.zip', 'a.txt', 'logo.png'], { cwd: repo })
+        await writeFile(path.join(repo, 'table.csv'), 'name,qty\n"Widget, large",3\nBolt,12\n')
+        await writeFile(path.join(repo, 'page.html'), '<h1>Hello page</h1><script>parent.__ran = true</script>')
+        await writeFile(path.join(repo, 'nb.ipynb'), JSON.stringify({
+            metadata: { language_info: { name: 'python' } },
+            cells: [
+                { cell_type: 'markdown', source: ['## Notebook heading'] },
+                { cell_type: 'code', execution_count: 1, source: ['print(6 * 7)'], outputs: [{ output_type: 'stream', name: 'stdout', text: ['42\n'] }] },
+            ],
+        }))
+        await writeFile(path.join(repo, 'face.woff2'), await readFile(path.join(process.cwd(), 'node_modules/@fontsource-variable/inter/files/inter-latin-wght-normal.woff2')))
+        await writeFile(path.join(repo, 'doc.rtf'), '{\\rtf1\\ansi{\\fonttbl\\f0 Helvetica;}\\f0\\fs48 Quick look}')
+        execFileSync('textutil', ['-convert', 'docx', '-output', 'doc.docx', 'doc.rtf'], { cwd: repo })
+        await rm(path.join(repo, 'doc.rtf'))
+        const more = ['notes.md', 'pack.zip', 'table.csv', 'page.html', 'nb.ipynb', 'face.woff2', 'doc.docx']
+        await page.evaluate(`document.querySelector('button[aria-label="Refresh"]').click()`)
+        await until('more preview rows', () => page.evaluate<boolean>(`${JSON.stringify(more)}.every(f => document.querySelector('[role="button"][title="' + f + '"]'))`))
+        await page.evaluate(`(() => { for (const f of ${JSON.stringify(more)}) { const r = document.querySelector('[role="button"][title="' + f + '"]'); if (r.getAttribute('aria-expanded') !== 'true') r.click() } return true })()`)
+        // Text formats open on their diff; switch every one to the rendering.
+        await until('preview switches', () => page.evaluate<boolean>(`document.querySelectorAll('aside [aria-label="Show as"] button').length >= 6`))
+        await page.evaluate(`[...document.querySelectorAll('aside [aria-label="Show as"] button')].filter(b => b.textContent === 'Preview' && b.getAttribute('aria-pressed') !== 'true').forEach(b => b.click())`)
+        const aside = `document.querySelector('aside')`
+        await until('markdown rendered', () => page.evaluate<boolean>(`[...${aside}.querySelectorAll('.markdown-body h1')].some(h => h.textContent === 'New title')`))
+        check(await page.evaluate<boolean>(`${aside}.innerText.includes('Before') && !!${aside}.querySelector('.markdown-body strong')`), 'Markdown renders, with a Before / After switch')
+        check(await page.evaluate<boolean>(`[...${aside}.querySelectorAll('td')].some(td => td.textContent === 'Widget, large')`), 'CSV shows as a table, quoted commas kept')
+        const frame = await until('html frame', () => page.evaluate<{ sandbox: string, srcdoc: boolean } | null>(`(() => { const f = ${aside}.querySelector('iframe[srcdoc]'); return f ? { sandbox: f.getAttribute('sandbox'), srcdoc: f.srcdoc.includes('Hello page') } : null })()`))
+        check(frame.sandbox === '' && frame.srcdoc && !(await page.evaluate<boolean>('!!window.__ran')), 'HTML renders in a sandboxed frame, its scripts do not run')
+        check(await page.evaluate<boolean>(`${aside}.innerText.includes('Notebook heading') && ${aside}.innerText.includes('In [1]') && ${aside}.innerText.includes('42')`), 'a notebook shows its cells and outputs')
+        await until('font loaded', () => page.evaluate<boolean>(`[...document.fonts].some(f => f.family.startsWith('filo-preview') && f.status === 'loaded')`))
+        check(await page.evaluate<boolean>(`${aside}.innerText.includes('The quick brown fox')`), 'a font shows sample text in itself')
+        await until('archive entries', () => page.evaluate<boolean>(`${aside}.innerText.includes('1 added')`))
+        check(await page.evaluate<boolean>(`[...${aside}.querySelectorAll('.font-mono span')].some(s => s.textContent.includes('added logo.png'))`), 'an archive lists its entries, marking the added one')
+        await until('quicklook thumbnail', () => page.evaluate<boolean>(`[...${aside}.querySelectorAll('img[alt="doc.docx"]')].some(i => i.complete && i.naturalWidth > 0)`), 20_000)
+        check(true, 'a document gets its QuickLook thumbnail')
+        if (SHOTS) {
+            await new Promise(r => setTimeout(r, 1000))
+            for (const f of more) {
+                await page.evaluate(`(() => { /* the row's wrapper: the header itself is sticky */ const r = document.querySelector('[role="button"][title="${f}"]'); const list = r.closest('.overflow-y-auto'); list.scrollTop += r.parentElement.getBoundingClientRect().top - list.getBoundingClientRect().top; return true })()`)
+                await new Promise(r => setTimeout(r, 300))
+                await page.screenshot(path.join(SHOTS, `review-preview-${f}.png`))
+            }
+        }
+        git(repo, 'add', ...more)
+        git(repo, 'commit', '-q', '-m', 'more previews')
 
         // ---------------------------------------------------------------- fork
         await page.evaluate(`window.__app.focus(${JSON.stringify(s1)})`)

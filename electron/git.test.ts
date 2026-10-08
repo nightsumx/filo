@@ -3,7 +3,7 @@ import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { gitCommit, gitDiscard, gitFileBytes, gitStatus, MAX_PREVIEW_BYTES, parseNumstat, parsePorcelain } from './git'
+import { gitCommit, gitDiscard, gitFileBytes, gitFileEntries, gitFileThumbs, gitStatus, MAX_PREVIEW_BYTES, parseNumstat, parsePorcelain } from './git'
 
 describe('parsePorcelain', () => {
     it('parses modified, untracked and renamed entries', () => {
@@ -136,5 +136,35 @@ describe('gitFileBytes', () => {
     it('refuses paths outside the repository', async () => {
         await expect(gitFileBytes(repo, '../etc/passwd', '??')).rejects.toThrow()
         await expect(gitFileBytes(repo, 'a.png', ' M', '../x')).rejects.toThrow()
+        await expect(gitFileThumbs(repo, '../x.docx', '??')).rejects.toThrow()
+        await expect(gitFileEntries(repo, 'a.zip', ' M', '../x.zip')).rejects.toThrow()
+    })
+
+    it('lists both sides of an archive, the committed one from a temp copy', async () => {
+        await writeFile(path.join(repo, 'one.txt'), '1')
+        await writeFile(path.join(repo, 'two.txt'), '2')
+        run('add', '-A')
+        run('commit', '-qm', 'files')
+        execFileSync('zip', ['-q', 'pack.zip', 'one.txt'], { cwd: repo })
+        run('add', 'pack.zip')
+        run('commit', '-qm', 'zip')
+        await rm(path.join(repo, 'pack.zip'))
+        execFileSync('zip', ['-q', 'pack.zip', 'one.txt', 'two.txt'], { cwd: repo })
+        expect(await gitFileEntries(repo, 'pack.zip', ' M')).toEqual({ old: ['one.txt'], new: ['one.txt', 'two.txt'], oldCount: 1, newCount: 2 })
+        await writeFile(path.join(repo, 'broken.zip'), 'not an archive')
+        await expect(gitFileEntries(repo, 'broken.zip', '??')).rejects.toThrow(/archive/)
+    })
+
+    it('makes QuickLook thumbnails of both sides', { timeout: 30_000 }, async () => {
+        // An RTF document: QuickLook renders it, the browser cannot.
+        const rtf = (word: string) => `{\\rtf1\\ansi{\\fonttbl\\f0 Helvetica;}\\f0\\fs48 ${word}}`
+        await writeFile(path.join(repo, 'doc.rtf'), rtf('before'))
+        run('add', 'doc.rtf')
+        run('commit', '-qm', 'doc')
+        await writeFile(path.join(repo, 'doc.rtf'), rtf('after'))
+        const thumbs = await gitFileThumbs(repo, 'doc.rtf', ' M')
+        const isPng = (b: Uint8Array | null) => !!b && Buffer.from(b.subarray(0, 4)).equals(Buffer.from([0x89, 0x50, 0x4E, 0x47]))
+        expect(isPng(thumbs.old) && isPng(thumbs.new)).toBe(true)
+        expect(Buffer.from(thumbs.old!).equals(Buffer.from(thumbs.new!))).toBe(false)
     })
 })

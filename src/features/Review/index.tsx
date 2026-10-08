@@ -5,7 +5,7 @@ import { DiffBlock } from '@/components/toolPrimitives'
 import { buildChangeTree, dirPaths } from '@/lib/changeTree'
 import { confirm } from '@/lib/confirm'
 import { editedBy } from '@/lib/edits'
-import { previewOf } from '@/lib/filePreview'
+import { previewOf, TEXT_PREVIEWS } from '@/lib/filePreview'
 import { cn, relativeTime } from '@/lib/utils'
 import { appStore } from '@/store/app'
 import { ChevronRight, ChevronsDownUp, ChevronsUpDown, Columns2, Folder, FolderTree, GitBranch, List, Loader2, RefreshCw, Rows2, TriangleAlert, Undo2, X } from 'lucide-react'
@@ -13,6 +13,8 @@ import { observer } from 'mobx-react-lite'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { FilePreview } from './FilePreview'
+import { Segmented } from './previewParts'
+import { TextPreview } from './TextPreview'
 import { useGitStatus } from './useGitStatus'
 import { newThreadLabel, tr } from '@/lib/i18n'
 
@@ -109,13 +111,18 @@ const FileDiff = observer(function FileDiff({ file, ctx, defaultOpen, depth }: {
     const size = diff ? diff.oldText.length + diff.newText.length : 0
     const large = changedLines > LARGE_DIFF_LINES || size > LARGE_DIFF_BYTES
     const others = ctx.othersOf(file.path)
-    // Images, PDF and media show as themselves; SVG is text too, so it keeps its diff under the picture.
+    // Binary formats show as themselves; text formats (Markdown, SVG, CSV, RTF...) switch between
+    // their diff and the rendered file. So does a text file under a QuickLook name (a PEM .key).
     const preview = previewOf(file.path)
-    const textDiff = !file.binary && (!preview || preview.kind === 'svg')
+    const switchable = !!preview && !file.binary && (TEXT_PREVIEWS.has(preview.kind) || preview.kind === 'quicklook')
+    const [view, setView] = useState<'diff' | 'preview'>(preview?.kind === 'svg' || preview?.kind === 'notebook' ? 'preview' : 'diff')
+    const textDiff = !file.binary && (!preview || switchable)
+    const showPreview = !!preview && (!switchable || view === 'preview')
+    const showDiff = textDiff && (!switchable || view === 'diff')
 
     useEffect(() => {
-        // Large files are not even fetched until the user asks for them.
-        if (!open || !textDiff || (changedLines > LARGE_DIFF_LINES && !forced))
+        // Large files are not even fetched until the user asks for them (or for their rendering).
+        if (!open || !textDiff || (changedLines > LARGE_DIFF_LINES && !forced && !(switchable && view === 'preview')))
             return
         let cancelled = false
         window.pi.gitFileDiff(cwd, file.path, file.status)
@@ -124,7 +131,7 @@ const FileDiff = observer(function FileDiff({ file, ctx, defaultOpen, depth }: {
         return () => {
             cancelled = true
         }
-    }, [cwd, file.path, file.status, open, tick, textDiff, changedLines, forced])
+    }, [cwd, file.path, file.status, open, tick, textDiff, changedLines, forced, switchable, view])
 
     return (
         <div>
@@ -172,10 +179,23 @@ const FileDiff = observer(function FileDiff({ file, ctx, defaultOpen, depth }: {
             </div>
             {open && (
                 <div className="flex flex-col gap-2 px-2 pb-2 pt-0.5">
-                    {preview && <FilePreview cwd={cwd} file={file} kind={preview.kind} mime={preview.mime} tick={tick} />}
-                    {!textDiff
-                        ? !preview && <div className="px-1 py-2 text-[12px] text-gray-400">{tr('二进制文件', 'Binary file')}</div>
+                    {switchable && (
+                        <Segmented
+                            options={[{ value: 'diff', label: tr('改动', 'Changes') }, { value: 'preview', label: tr('预览', 'Preview') }]}
+                            value={view}
+                            onChange={setView}
+                            label={tr('显示方式', 'Show as')}
+                        />
+                    )}
+                    {showPreview && preview && (preview.kind === 'svg' || !TEXT_PREVIEWS.has(preview.kind)
+                        ? <FilePreview cwd={cwd} file={file} kind={preview.kind} mime={preview.mime} tick={tick} />
                         : error
+                            ? <div className="px-1 py-2 text-[12px] text-red-500">{error}</div>
+                            : diff
+                                ? <TextPreview kind={preview.kind} name={file.path.slice(slash + 1)} diff={diff} added={file.status === '??' || file.status[0] === 'A'} deleted={file.status.includes('D')} />
+                                : <div className="px-1 py-2 text-[12px] text-gray-400">{tr('加载中…', 'Loading…')}</div>)}
+                    {!preview && file.binary && <div className="px-1 py-2 text-[12px] text-gray-400">{tr('二进制文件', 'Binary file')}</div>}
+                    {showDiff && (error
                             ? <div className="px-1 py-2 text-[12px] text-red-500">{error}</div>
                             : large && !forced
                                 ? (
@@ -186,7 +206,7 @@ const FileDiff = observer(function FileDiff({ file, ctx, defaultOpen, depth }: {
                                     )
                                 : diff
                                     ? <DiffBlock path={file.path} oldStr={diff.oldText} newStr={diff.newText} mode={mode} highlight={size <= HIGHLIGHT_MAX_BYTES} />
-                                    : <div className="px-1 py-2 text-[12px] text-gray-400">{tr('加载中…', 'Loading…')}</div>}
+                                    : <div className="px-1 py-2 text-[12px] text-gray-400">{tr('加载中…', 'Loading…')}</div>)}
                 </div>
             )}
         </div>
