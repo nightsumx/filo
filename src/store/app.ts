@@ -372,7 +372,7 @@ class AppStore implements ThreadHost {
         // Main tells other windows (project lists, Dock badge, close prompt) what this one is doing.
         reaction(() => this.windowReport, report => void api().reportWindow(report), { fireImmediately: true, equals: (a, b) => JSON.stringify(a) === JSON.stringify(b) })
         reaction(() => this.project?.name, (name) => {
-            document.title = name ?? 'Pi'
+            document.title = name ?? 'Filo'
         }, { fireImmediately: true })
         await api().windowReady()
     }

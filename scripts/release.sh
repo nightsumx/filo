@@ -8,7 +8,7 @@ set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$root"
-repo=nightsumx/pi-kit
+repo=nightsumx/filo
 version="$(node -p "require('./package.json').version")"
 tag="v$version"
 
@@ -17,7 +17,7 @@ if git rev-parse -q --verify "refs/tags/$tag" >/dev/null || gh release view "$ta
     exit 1
 fi
 
-snap="$(mktemp -d)/pi-kit"
+snap="$(mktemp -d)/filo"
 trap 'rm -rf "$(dirname "$snap")"' EXIT
 mkdir -p "$snap"
 git archive HEAD | tar -x -C "$snap"
@@ -31,13 +31,13 @@ done
 
 (cd "$snap" && bun run dist)
 
-app="$snap/release/mac-arm64/Pi.app"
+app="$snap/release/mac-arm64/Filo.app"
 codesign --verify --deep --strict "$app"
 out="$root/release/publish"
 rm -rf "$out"
 mkdir -p "$out"
-cp "$snap/release/Pi-$version-arm64-mac.zip" "$out/Pi-arm64-mac.zip"
-cp "$snap/release/Pi-$version-arm64.dmg" "$out/Pi-arm64.dmg"
+cp "$snap/release/Filo-$version-arm64-mac.zip" "$out/Filo-arm64-mac.zip"
+cp "$snap/release/Filo-$version-arm64.dmg" "$out/Filo-arm64.dmg"
 cp scripts/install.sh "$out/install.sh"
 
 # Pushing the tag publishes HEAD's commits under it without moving any branch.
@@ -48,14 +48,14 @@ notes="$(cat <<EOF
 Install or update (Apple Silicon):
 
 \`\`\`
-curl -fsSL https://pi.flowsrun.com/install.sh | bash
+curl -fsSL https://filoapp.dev/install.sh | bash
 \`\`\`
 
-More at https://pi.flowsrun.com.
+More at https://filoapp.dev.
 
 The app is not notarized. Opening the .dmg or .zip downloaded with a browser needs one extra step: open it once, then System Settings → Privacy & Security → Open Anyway.
 EOF
 )"
-gh release create "$tag" -R "$repo" --verify-tag --latest --title "Pi $version" --notes "$notes" \
-    "$out/Pi-arm64-mac.zip" "$out/Pi-arm64.dmg" "$out/install.sh"
+gh release create "$tag" -R "$repo" --verify-tag --latest --title "Filo $version" --notes "$notes" \
+    "$out/Filo-arm64-mac.zip" "$out/Filo-arm64.dmg" "$out/install.sh"
 echo "Published $tag"

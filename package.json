@@ -1,11 +1,11 @@
 {
-    "name": "pi-kit",
-    "productName": "Pi",
+    "name": "filo",
+    "productName": "Filo",
     "private": true,
     "version": "0.2.0",
-    "description": "pi 编码 Agent 的桌面客户端：多项目多线程并行，实时状态，对话内提问",
+    "description": "编码 Agent 的 Mac 工作台：多项目多线程并行，改动归属到线程，独立审查，搜索所有会话",
     "author": "sum",
-    "homepage": "https://pi.dev",
+    "homepage": "https://filoapp.dev",
     "type": "module",
     "main": "dist-electron/main/main.js",
     "trustedDependencies": ["electron"],
@@ -82,8 +82,8 @@
         "vitest": "3.1.3"
     },
     "build": {
-        "appId": "dev.nightsumx.pi",
-        "productName": "Pi",
+        "appId": "dev.nightsumx.filo",
+        "productName": "Filo",
         "directories": {
             "output": "release",
             "buildResources": "build"

@@ -3,17 +3,17 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Pi · pi coding agent 的 Mac 桌面端</title>
-<meta name="description" content="Pi is a native Mac app for the pi coding agent: threads side by side, changes tied to the thread that made them, an independent read-only review, and search across every session.">
+<title>Filo · 编码 Agent 的 Mac 工作台</title>
+<meta name="description" content="Filo is a Mac app for coding agents: run pi, Codex, Claude Code and more in threads side by side, see which thread made each change, get an independent read-only review, and search every session.">
 <meta name="theme-color" content="#1e1f22">
-<link rel="canonical" href="https://pi.flowsrun.com/">
+<link rel="canonical" href="https://filoapp.dev/">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <meta property="og:type" content="website">
-<meta property="og:title" content="Pi · the pi coding agent on your Mac">
-<meta property="og:description" content="Threads side by side, changes tied to the thread that made them, an independent review, search across every session.">
-<meta property="og:url" content="https://pi.flowsrun.com/">
-<meta property="og:image" content="https://pi.flowsrun.com/og.png">
+<meta property="og:title" content="Filo · coding agents side by side on your Mac">
+<meta property="og:description" content="pi, Codex, Claude Code and more in threads side by side, changes tied to the thread that made them, an independent review, search across every session.">
+<meta property="og:url" content="https://filoapp.dev/">
+<meta property="og:image" content="https://filoapp.dev/og.png">
 <meta name="twitter:card" content="summary_large_image">
 <script>
     // Before first paint, so the page never flashes the other language. ?lang= wins, then the last choice, then the browser.
@@ -31,11 +31,11 @@
 <body>
 <header class="bar">
     <div class="wrap bar-inner">
-        <a class="brand" href="/"><img src="/favicon.svg" alt="" width="22" height="22">Pi</a>
+        <a class="brand" href="/"><img src="/favicon.svg" alt="" width="22" height="22">Filo</a>
         <nav>
             <a href="#features"><span lang="zh">功能</span><span lang="en">Features</span></a>
             <a href="#install"><span lang="zh">安装</span><span lang="en">Install</span></a>
-            <a href="https://github.com/nightsumx/pi-kit">GitHub</a>
+            <a href="https://github.com/nightsumx/filo">GitHub</a>
             <button type="button" class="lang" id="lang" aria-label="Switch language / 切换语言"><span lang="zh">EN</span><span lang="en">中文</span></button>
         </nav>
     </div>
@@ -43,30 +43,34 @@
 
 <main>
     <section class="hero wrap">
-        <p class="kicker"><span lang="zh">pi coding agent 的 Mac 桌面端</span><span lang="en">A Mac app for the pi coding agent</span></p>
-        <h1><span lang="zh">pi，在桌面上</span><span lang="en">pi, on the desktop</span></h1>
+        <p class="kicker"><span lang="zh">编码 Agent 的 Mac 工作台</span><span lang="en">A Mac app for coding agents</span></p>
+        <h1><span lang="zh">多个 Agent，并排干活</span><span lang="en">Coding agents, side by side</span></h1>
         <p class="lede">
-            <span lang="zh">多个线程并排跑，每处改动都知道是哪个线程做的，另起一个只读的 pi 审查结果，所有会话都能搜。和终端里的 pi 用同一份会话和配置，随时切回终端。</span>
-            <span lang="en">Run threads side by side, see which thread made each change, have a separate read-only pi review the work, and search every session. It shares sessions and settings with pi in your terminal, so you can switch back any time.</span>
+            <span lang="zh">pi、Codex、Claude Code 等 Agent 在多个线程里并排跑，每处改动都知道是哪个线程做的，另起一个只读的 pi 审查结果，所有会话都能搜。和终端里的 pi 用同一份会话和配置，随时切回终端。</span>
+            <span lang="en">Run pi, Codex, Claude Code and other agents in threads side by side, see which thread made each change, have a separate read-only pi review the work, and search every session. It shares sessions and settings with pi in your terminal, so you can switch back any time.</span>
         </p>
         <div class="install" role="group" aria-label="Install command">
-            <code id="cmd">curl -fsSL https://pi.flowsrun.com/install.sh | bash</code>
+            <code id="cmd">curl -fsSL https://filoapp.dev/install.sh | bash</code>
             <button type="button" class="copy" data-copy="cmd" aria-live="polite"><span class="idle"><span lang="zh">复制</span><span lang="en">Copy</span></span><span class="ok"><span lang="zh">已复制</span><span lang="en">Copied</span></span></button>
         </div>
         <p class="meta">
             <span lang="zh">在终端里运行 · Apple Silicon · macOS 11 及以上 · 再运行一次就是更新</span>
             <span lang="en">Run it in Terminal · Apple Silicon · macOS 11 or later · run it again to update</span>
             <span class="sep">·</span>
-            <a href="https://github.com/nightsumx/pi-kit/releases/latest/download/Pi-arm64.dmg"><span lang="zh">下载 .dmg</span><span lang="en">Download .dmg</span></a>
+            <a href="https://github.com/nightsumx/filo/releases/latest/download/Filo-arm64.dmg"><span lang="zh">下载 .dmg</span><span lang="en">Download .dmg</span></a>
         </p>
     </section>
 
     <figure class="shot hero-shot wrap">
-        <img lang="zh" src="/shots/zh/main.webp" width="2880" height="1800" alt="Pi 的主窗口：左侧项目树，中间是一个线程的对话和改动的 diff，右侧改动面板按文件夹列出这次改的文件">
-        <img lang="en" src="/shots/en/main.webp" width="2880" height="1800" alt="Pi's main window: the project tree on the left, a thread's conversation and its diffs in the middle, the changes panel listing the changed files on the right">
+        <img lang="zh" src="/shots/zh/main.webp" width="2880" height="1800" alt="Filo 的主窗口：左侧项目树，中间是一个线程的对话和改动的 diff，右侧改动面板按文件夹列出这次改的文件">
+        <img lang="en" src="/shots/en/main.webp" width="2880" height="1800" alt="Filo's main window: the project tree on the left, a thread's conversation and its diffs in the middle, the changes panel listing the changed files on the right">
     </figure>
 
     <section id="features" class="wrap features">
+        <article>
+            <h3><span lang="zh">不止 pi</span><span lang="en">Not just pi</span></h3>
+            <p><span lang="zh">Codex、Claude Code、Grok Build、OpenCode、Gemini CLI、GitHub Copilot 和 Cursor 通过 Agent Client Protocol 跑在同样的线程里。没装的在选择器里一键装好，它们自己的历史会话也能列出、能搜。</span><span lang="en">Codex, Claude Code, Grok Build, OpenCode, Gemini CLI, GitHub Copilot and Cursor run in the same threads over the Agent Client Protocol. The picker installs any you don't have, and their own past sessions are listed and searchable.</span></p>
+        </article>
         <article>
             <h3><span lang="zh">一个项目一个窗口</span><span lang="en">One window per project</span></h3>
             <p><span lang="zh">像 JetBrains 一样按项目分窗口，也能合并到一起。标签可以拖到别的窗口，或者拖出来单开，正在跑的 pi 不会中断。</span><span lang="en">Like JetBrains: each project gets its own window, or merge them. Drag a tab to another window or out into a new one; the pi running in it keeps going.</span></p>
@@ -94,10 +98,6 @@
         <article>
             <h3><span lang="zh">不弹窗</span><span lang="en">No pop-ups</span></h3>
             <p><span lang="zh">工具审批、Agent 的提问、计划确认都在对话里原地处理，不打断你正在看的内容。</span><span lang="en">Tool approvals, the agent's questions and plan sign-off are handled inline in the conversation, so nothing interrupts what you're reading.</span></p>
-        </article>
-        <article>
-            <h3><span lang="zh">保留终端的信息密度</span><span lang="en">Terminal density</span></h3>
-            <p><span lang="zh">工具调用、diff、耗时、token 用量和终端里一样紧凑。深色扁平，没有多余的边框。</span><span lang="en">Tool calls, diffs, timings and token use are as compact as in the terminal. Dark, flat, no extra chrome.</span></p>
         </article>
     </section>
 
@@ -129,19 +129,19 @@
             <div>
                 <h3><span lang="zh">一行命令（推荐）</span><span lang="en">One command (recommended)</span></h3>
                 <div class="install">
-                    <code id="cmd2">curl -fsSL https://pi.flowsrun.com/install.sh | bash</code>
+                    <code id="cmd2">curl -fsSL https://filoapp.dev/install.sh | bash</code>
                     <button type="button" class="copy" data-copy="cmd2" aria-live="polite"><span class="idle"><span lang="zh">复制</span><span lang="en">Copy</span></span><span class="ok"><span lang="zh">已复制</span><span lang="en">Copied</span></span></button>
                 </div>
                 <ul>
                     <li><span lang="zh">从 GitHub 下载最新版，先校验签名，再装到 /Applications。没有管理员权限的话装到 ~/Applications。</span><span lang="en">Downloads the latest release from GitHub, checks its signature, and installs to /Applications (or ~/Applications without admin rights).</span></li>
-                    <li><span lang="zh">不需要 Node.js 或 pi 命令行：Pi 自带一份 pi。你装了自己的 pi，就用你的。</span><span lang="en">No Node.js or pi CLI needed: Pi comes with its own pi, and uses yours if you have one.</span></li>
-                    <li><span lang="zh">要更新，再运行一次同样的命令。运行前请先退出 Pi。</span><span lang="en">To update, run the same command again. Quit Pi first.</span></li>
+                    <li><span lang="zh">不需要 Node.js 或 pi 命令行：Filo 自带一份 pi。你装了自己的 pi，就用你的。</span><span lang="en">No Node.js or pi CLI needed: Filo comes with its own pi, and uses yours if you have one.</span></li>
+                    <li><span lang="zh">要更新，再运行一次同样的命令。运行前请先退出 Filo。</span><span lang="en">To update, run the same command again. Quit Filo first.</span></li>
                     <li><a href="/install.sh"><span lang="zh">先看看脚本内容</span><span lang="en">Read the script first</span></a></li>
                 </ul>
             </div>
             <div>
                 <h3><span lang="zh">手动下载</span><span lang="en">Manual download</span></h3>
-                <p><a class="button" href="https://github.com/nightsumx/pi-kit/releases/latest/download/Pi-arm64.dmg"><span lang="zh">下载 Pi-arm64.dmg</span><span lang="en">Download Pi-arm64.dmg</span></a></p>
+                <p><a class="button" href="https://github.com/nightsumx/filo/releases/latest/download/Filo-arm64.dmg"><span lang="zh">下载 Filo-arm64.dmg</span><span lang="en">Download Filo-arm64.dmg</span></a></p>
                 <ul>
                     <li><span lang="zh">应用没有经过 Apple 公证，第一次打开会被拦下。先双击打开一次，再到「系统设置 → 隐私与安全性」，点「仍要打开」。</span><span lang="en">The app isn't notarized by Apple, so macOS blocks the first launch. Open it once, then go to System Settings → Privacy &amp; Security and click Open Anyway.</span></li>
                     <li><span lang="zh">想在终端里也用 pi，再装命令行，两边共用同一份配置和会话：</span><span lang="en">For pi in the terminal too, install the CLI; both share the same setup and sessions:</span><code class="block">npm install -g @earendil-works/pi-coding-agent</code></li>
@@ -153,7 +153,7 @@
 </main>
 
 <footer class="wrap foot">
-    <span><span lang="zh">开源，代码在</span><span lang="en">Open source on</span> <a href="https://github.com/nightsumx/pi-kit">GitHub</a></span>
+    <span><span lang="zh">开源，代码在</span><span lang="en">Open source on</span> <a href="https://github.com/nightsumx/filo">GitHub</a></span>
     <span><span lang="zh">基于</span><span lang="en">Built on</span> <a href="https://github.com/earendil-works/pi">pi</a></span>
 </footer>
 

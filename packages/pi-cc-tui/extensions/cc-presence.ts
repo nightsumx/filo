@@ -7,7 +7,7 @@ import { ENV, PRESENCE_DIR, type Presence, type PresenceState } from "pi-capabil
 const WAITING_TOOLS = new Set(["ask", "propose_plan"]);
 
 /**
- * Tells the Pi desktop app what this terminal pi is doing: idle, running, or waiting for an answer.
+ * Tells the Filo desktop app what this terminal pi is doing: idle, running, or waiting for an answer.
  * The app lists terminal sessions next to its own threads; with this they get the same status dot.
  */
 export default function (pi: ExtensionAPI) {

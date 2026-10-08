@@ -45,8 +45,8 @@ function piTitle(env: PiEnvResult | null | undefined) {
     if (!env.env.bundled)
         return `${app}\n${tr(`使用你安装的 pi：${env.env.piPath}`, `Using your pi: ${env.env.piPath}`)}`
     const why = env.env.note
-        ? tr(`你安装的 pi 无法启动，暂用 Pi 自带的版本。\n${env.env.note}`, `Your pi failed to start, so the one built into Pi is used.\n${env.env.note}`)
-        : tr('没有找到你安装的 pi，使用 Pi 自带的版本。安装 pi 后会改用你的。', 'No pi installed, so the one built into Pi is used. Install pi and Pi switches to it.')
+        ? tr(`你安装的 pi 无法启动，暂用 Filo 自带的版本。\n${env.env.note}`, `Your pi failed to start, so the one built into Filo is used.\n${env.env.note}`)
+        : tr('没有找到你安装的 pi，使用 Filo 自带的版本。安装 pi 后会改用你的。', 'No pi installed, so the one built into Filo is used. Install pi and Filo switches to it.')
     return `${app}\n${why}`
 }
 

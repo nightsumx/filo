@@ -34,7 +34,7 @@ export function childExtensionArgs(argv: string[]): string[] {
     return out
 }
 
-/** Set by the Pi app's launcher when pi runs on the app's Electron as node (the app's bundled pi). */
+/** Set by the Filo app's launcher when pi runs on the app's Electron as node (the app's bundled pi). */
 const LAUNCHER_ENV = 'PI_KIT_PI_LAUNCHER'
 
 /** How to start pi again: this process's runtime plus its CLI script when it is one. */

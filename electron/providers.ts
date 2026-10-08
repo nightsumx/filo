@@ -206,7 +206,7 @@ export class ProviderHelper {
 export function helperLaunch(env: PiEnv, script: string): HelperLaunch {
     const entry = piEntry(env.piPath)
     if (!entry || !env.nodePath)
-        throw new Error(tr('这个 pi 安装没有附带 SDK，无法在 Pi 里配置供应商。请在终端运行 pi，然后用 /login。', 'This pi install has no SDK, so providers can\'t be set up here. Run pi in a terminal and use /login.'))
+        throw new Error(tr('这个 pi 安装没有附带 SDK，无法在 Filo 里配置供应商。请在终端运行 pi，然后用 /login。', 'This pi install has no SDK, so providers can\'t be set up here. Run pi in a terminal and use /login.'))
     return { node: env.nodePath, script, entry, env: piSpawnEnv(env) }
 }
 

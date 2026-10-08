@@ -14,7 +14,7 @@ import {
 	type DialogRequest,
 } from "pi-capabilities/protocol";
 
-// Lets the Pi desktop app join this terminal pi instead of starting a second one on the same session
+// Lets the Filo desktop app join this terminal pi instead of starting a second one on the same session
 // file (two processes appending to one file fork the conversation). It listens on a unix socket next
 // to cc-presence's file and speaks pi's RPC protocol there, as `pi --mode rpc` does on stdio: the app
 // sees the run live, token by token, and its prompts, stops, model and mode changes go to this
