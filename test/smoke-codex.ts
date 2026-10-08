@@ -2,7 +2,6 @@
 // Quick smoke test: can we start a Codex native adapter and get initialize response?
 
 import { spawn } from 'node:child_process'
-import { randomUUID } from 'node:crypto'
 
 const child = spawn('codex', ['app-server'], { stdio: ['pipe', 'pipe', 'inherit'] })
 
@@ -32,12 +31,12 @@ child.stdout.on('data', (chunk) => {
     }
 })
 
-function send(msg) {
+function send(msg: any) {
     child.stdin.write(JSON.stringify(msg) + '\n')
     console.log('→ ', JSON.stringify(msg).slice(0, 200))
 }
 
-function rpc(method, params) {
+function rpc(method: string, params?: any) {
     return new Promise((resolve, reject) => {
         const id = nextId++
         pending.set(id, { resolve, reject })
@@ -56,19 +55,19 @@ async function main() {
         const init = await rpc('initialize', {
             clientInfo: { name: 'smoke-test', version: '1.0.0' },
             capabilities: { experimentalApi: true },
-        })
+        }) as any
         console.log('✓ initialize:', Object.keys(init))
 
         send({ method: 'initialized' })
         console.log('✓ initialized sent')
 
-        const models = await rpc('model/list', {})
+        const models = await rpc('model/list', {}) as any
         console.log('✓ model/list:', models.data?.length, 'models')
 
         console.log('\n✓ Codex adapter can start and respond')
         child.kill()
         process.exit(0)
-    } catch (err) {
+    } catch (err: any) {
         console.error('✗ Failed:', err.message)
         child.kill()
         process.exit(1)
