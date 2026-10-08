@@ -6,7 +6,8 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterAll, afterEach, describe, expect, it } from 'vitest'
 import { IPC } from '@shared/ipc'
-import { descendants, terminalEnv, Terminals } from './terminals'
+import { descendants } from './platform/posix'
+import { terminalEnv, Terminals } from './terminals'
 
 const ptyDir = path.resolve('node_modules/node-pty')
 const dir = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'filo-term-')))

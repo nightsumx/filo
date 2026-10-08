@@ -1,10 +1,11 @@
 import type { PiEnv, PiEnvResult } from '@shared/ipc'
 import { execFile } from 'node:child_process'
-import { existsSync, realpathSync } from 'node:fs'
+import { existsSync } from 'node:fs'
 import path from 'node:path'
 import process from 'node:process'
 import { promisify } from 'node:util'
 import { tr } from './i18n'
+import { platform } from './platform'
 
 const execFileAsync = promisify(execFile)
 
@@ -14,9 +15,8 @@ const execFileAsync = promisify(execFile)
  * runs on the app's Electron as node. Both read and write the same ~/.pi/agent (sign-ins, models,
  * settings, sessions), so installing pi later changes nothing but the program.
  *
- * GUI apps on macOS do not inherit the user's shell PATH, and version managers like fnm put
- * `node`/`pi` behind per-shell symlinks that disappear later. So: ask a login shell once,
- * resolve the real files immediately, and remember the PATH that shell had.
+ * GUI apps on macOS and Linux do not inherit the user's shell PATH, so a login shell is asked once
+ * and the PATH it had remembered (platform.shellEnv; Windows apps do get the user's environment).
  *
  * PI_GUI_PI / PI_GUI_NODE pick a pi explicitly; PI_GUI_PI=bundled forces the shipped one.
  */
@@ -53,10 +53,10 @@ export function piSpawnEnv(env: PiEnv): Record<string, string> {
     const base = { ...process.env as Record<string, string> }
     delete base.ELECTRON_RUN_AS_NODE
     if (env.bundled)
-        return { ...base, PATH: shellPath, ELECTRON_RUN_AS_NODE: '1' }
+        return { ...platform.withPath(base, shellPath), ELECTRON_RUN_AS_NODE: '1' }
     const nodeBin = path.dirname(env.nodePath)
-    const parts = [nodeBin, ...shellPath.split(':').filter(p => p && p !== nodeBin)]
-    return { ...base, PATH: parts.join(':') }
+    const parts = [nodeBin, ...shellPath.split(path.delimiter).filter(p => p && p !== nodeBin)]
+    return platform.withPath(base, parts.join(path.delimiter))
 }
 
 /** pi's bin is usually a JS file run by node; a compiled binary is spawned directly. */
@@ -65,7 +65,7 @@ export function piCommand(env: PiEnv, args: string[]): { file: string, args: str
         return { file: env.nodePath, args: [env.bundled.launcher, env.piPath, ...args] }
     return /\.[cm]?js$/.test(env.piPath)
         ? { file: env.nodePath, args: [env.piPath, ...args] }
-        : { file: env.piPath, args }
+        : platform.command(env.piPath, args)
 }
 
 async function resolveUncached(): Promise<PiEnvResult> {
@@ -120,7 +120,7 @@ async function loadShellPath() {
     if (shellLoaded)
         return
     shellLoaded = true
-    const fromShell = await queryLoginShell().catch(() => undefined)
+    const fromShell = await platform.shellEnv().catch(() => undefined)
     if (fromShell?.path)
         shellPath = fromShell.path
 }
@@ -132,7 +132,7 @@ async function resolveLocal(): Promise<PiEnvResult & { found?: boolean }> {
 
     if (!nodePath || !piPath) {
         shellLoaded = true
-        const fromShell = await queryLoginShell().catch(() => ({ node: '', pi: '', path: '' }))
+        const fromShell = await platform.shellEnv().catch(() => ({ node: '', pi: '', path: undefined }))
         nodePath ||= fromShell.node
         piPath ||= fromShell.pi
         if (fromShell.path)
@@ -144,25 +144,4 @@ async function resolveLocal(): Promise<PiEnvResult & { found?: boolean }> {
     if (/\.[cm]?js$/.test(piPath) && (!nodePath || !existsSync(nodePath)))
         return { ok: false, found: true, error: tr('找不到 node。pi 需要 Node.js 22.19 以上，或设置环境变量 PI_GUI_NODE。', 'node not found. pi needs Node.js 22.19 or later; or set PI_GUI_NODE.') }
     return { ...await checkVersion({ nodePath, piPath, version: '' }), found: true }
-}
-
-async function queryLoginShell(): Promise<{ node: string, pi: string, path: string }> {
-    const shell = process.env.SHELL || '/bin/zsh'
-    // Markers make the output robust against banners printed by interactive shell configs.
-    const script = [
-        'printf "\\n__NODE__=%s\\n" "$(command -v node)"',
-        'printf "__PI__=%s\\n" "$(command -v pi)"',
-        'printf "__PATH__=%s\\n" "$PATH"',
-    ].join('; ')
-    const { stdout } = await execFileAsync(shell, ['-ilc', script], { timeout: 15_000 })
-    const read = (key: string) => stdout.match(new RegExp(`^__${key}__=(.*)$`, 'm'))?.[1]?.trim() ?? ''
-    const real = (p: string) => {
-        try {
-            return p ? realpathSync(p) : ''
-        }
-        catch {
-            return p
-        }
-    }
-    return { node: real(read('NODE')), pi: real(read('PI')), path: read('PATH') }
 }

@@ -1,7 +1,7 @@
 // Terminal pi sessions, as reported by pi-cc-tui's presence extension: one JSON file per process
 // (see PRESENCE_DIR in packages/capabilities/protocol.ts). Watched here, pushed to every window.
 import type { Presence } from '@shared/capabilities'
-import { BRIDGE_SOCKET_SUFFIX, PRESENCE_DIR } from '@shared/capabilities'
+import { BRIDGE_PIPE_SUFFIX, BRIDGE_SOCKET_SUFFIX, PRESENCE_DIR } from '@shared/capabilities'
 import { watch } from 'node:fs'
 import { mkdir, readdir, readFile, rm, stat } from 'node:fs/promises'
 import os from 'node:os'
@@ -50,8 +50,8 @@ export async function readPresence(dir: string): Promise<Presence[]> {
     const out: Presence[] = []
     const sockets = new Set(names.filter(n => n.endsWith(BRIDGE_SOCKET_SUFFIX)))
     for (const name of names) {
-        const socket = name.match(/^(\d+)\.sock$/)
-        // A killed pi leaves its bridge socket behind too.
+        const socket = name.match(/^(\d+)\.(sock|pipe)$/)
+        // A killed pi leaves its bridge socket (or pipe file) behind too.
         if (socket && !alive(Number(socket[1])))
             await rm(path.join(dir, name), { force: true }).catch(() => {})
         if (!/^\d+\.json$/.test(name))
@@ -69,6 +69,14 @@ export async function readPresence(dir: string): Promise<Presence[]> {
         const bridge = path.join(dir, `${pid}${BRIDGE_SOCKET_SUFFIX}`)
         if (sockets.has(`${pid}${BRIDGE_SOCKET_SUFFIX}`) && (await stat(bridge).catch(() => null))?.isSocket())
             p.bridge = bridge
+        // Windows: a named pipe, announced with the token it wants first.
+        if (names.includes(`${pid}${BRIDGE_PIPE_SUFFIX}`)) {
+            const pipe = await readFile(path.join(dir, `${pid}${BRIDGE_PIPE_SUFFIX}`), 'utf8').then(JSON.parse).catch(() => null)
+            if (typeof pipe?.path === 'string' && typeof pipe.token === 'string') {
+                p.bridge = pipe.path
+                p.bridgeToken = pipe.token
+            }
+        }
         out.push(p)
     }
     return out.sort((a, b) => a.pid - b.pid)
@@ -127,6 +135,7 @@ export class PresenceWatcher {
             return
         this.list = list
         this.json = json
-        this.onChange(list)
+        // Bridge tokens stay in main.
+        this.onChange(list.map(({ bridgeToken: _, ...p }) => p))
     }
 }

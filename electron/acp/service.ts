@@ -7,13 +7,14 @@ import type { SessionItem, SessionSnapshot, SessionSummary } from '@shared/ipc'
 import type { AgentAdapter, AgentAdapterCallbacks } from '../acp/adapter'
 import type { AcpLaunch } from './agent'
 import { ACP_AGENTS, acpAgent, acpSessionKey, parseAcpSessionKey } from '@shared/agents'
-import { constants, readFileSync } from 'node:fs'
-import { access, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { readFileSync } from 'node:fs'
+import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import process from 'node:process'
 import { tr } from '../i18n'
 import { loginShellPath } from '../pi-env'
+import { platform } from '../platform'
 import { agentDir } from '../piSettings'
 import { AcpAgent } from './agent'
 import { installAgent, installedAgent, installSource } from './install'
@@ -43,19 +44,6 @@ const IMPORT_EVERY_MS = 2 * 60_000
 const FIRST_IMPORT_WAIT_MS = 6000
 const MIRROR_DELAY_MS = 200
 
-async function findIn(bin: string, dirs: string[]): Promise<string | undefined> {
-    for (const dir of dirs) {
-        if (!dir)
-            continue
-        const file = path.join(dir, bin)
-        try {
-            await access(file, constants.X_OK)
-            return file
-        }
-        catch {}
-    }
-    return undefined
-}
 
 const expandHome = (dir: string) => dir.replace(/^~(?=\/)/, os.homedir())
 
@@ -63,7 +51,7 @@ const expandHome = (dir: string) => dir.replace(/^~(?=\/)/, os.homedir())
 function findCli(spec: AcpAgentSpec, searchPath: string): Promise<string | undefined> {
     if (!spec.cli)
         return Promise.resolve(undefined)
-    return findIn(spec.cli.bin, [...searchPath.split(path.delimiter), ...(spec.cli.dirs ?? []).map(expandHome)])
+    return platform.findIn(spec.cli.bin, [...searchPath.split(path.delimiter), ...(spec.cli.dirs ?? []).map(expandHome)])
 }
 
 /** PI_GUI_ACP_<ID>='["node","/path/agent.mjs"]' replaces the adapter command (tests, local builds). */
@@ -117,7 +105,7 @@ export class AgentNotInstalled extends Error {
  */
 export async function resolveLaunch(spec: AcpAgentSpec, appRoot?: string): Promise<AcpLaunch> {
     const searchPath = await loginShellPath()
-    const env: Record<string, string> = { ...process.env as Record<string, string>, PATH: searchPath }
+    const env = platform.withPath({ ...process.env as Record<string, string> }, searchPath)
     delete env.ELECTRON_RUN_AS_NODE
     // The user's own CLI: same version and sign-in as in their terminal.
     if (spec.cli && !env[spec.cli.env]) {
@@ -134,12 +122,12 @@ export async function resolveLaunch(spec: AcpAgentSpec, appRoot?: string): Promi
     if (override)
         return { file: override[0], args: override.slice(1), env, via: 'override' }
     const dirs = [...searchPath.split(path.delimiter), ...(spec.dirs ?? []).map(expandHome)]
-    const adapter = await findIn(spec.bin, dirs)
+    const adapter = await platform.findIn(spec.bin, dirs)
     if (adapter)
-        return { file: adapter, args: spec.args ?? [], env, via: 'path' }
+        return { ...platform.command(adapter, spec.args ?? []), bin: adapter, env, via: 'path' }
     const installed = appRoot ? await installedAgent(appRoot, spec) : undefined
     if (installed)
-        return { file: installed.file, args: spec.args ?? [], env, via: 'app', outdated: installed.outdated }
+        return { ...platform.command(installed.file, spec.args ?? []), bin: installed.file, env, via: 'app', outdated: installed.outdated }
     throw new AgentNotInstalled(spec, !!appRoot && !!installSource(spec))
 }
 
@@ -199,7 +187,8 @@ export class AcpService {
             const base = { id: spec.id, label: spec.label, installing: this.installs.has(spec.id) }
             try {
                 const launch = await this.launchOf(spec)
-                const command = launch.via === 'app' ? launch.file : [path.basename(launch.file), ...launch.args].join(' ')
+                const bin = launch.bin ?? launch.file
+                const command = launch.via === 'app' ? bin : [path.basename(bin), ...(launch.bin ? spec.args ?? [] : launch.args)].join(' ')
                 return { ...base, available: true, via: launch.via, command, outdated: launch.outdated, installable: launch.outdated }
             }
             catch (error: any) {
@@ -220,7 +209,7 @@ export class AcpService {
         if (!running) {
             running = (async () => {
                 const searchPath = await loginShellPath()
-                const env: Record<string, string> = { ...process.env as Record<string, string>, PATH: searchPath }
+                const env = platform.withPath({ ...process.env as Record<string, string> }, searchPath)
                 delete env.ELECTRON_RUN_AS_NODE
                 await installAgent(root, installSpec(spec), { searchPath, env, fetch: this.download })
             })().finally(() => {

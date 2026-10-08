@@ -5,6 +5,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { promisify } from 'node:util'
 import { tr } from './i18n'
+import { platform } from './platform'
 
 const execFileAsync = promisify(execFile)
 const MAX_FILE_BYTES = 1024 * 1024
@@ -226,30 +227,24 @@ async function onSides<T>(cwd: string, file: string, status: string, origPath: s
 
 /**
  * QuickLook thumbnails (what Finder shows) of both sides, as PNG: Office and iWork documents, RTF,
- * HEIC, TIFF, PSD, camera RAW, USDZ... qlmanage waits forever on a type it has no generator for, so
- * the renderer only asks for known types and this gives up after a few seconds.
+ * HEIC, TIFF, PSD, camera RAW, USDZ... The renderer only asks for known types, and only where the OS
+ * makes thumbnails (platform.thumbnail); elsewhere both sides are null.
  */
 export async function gitFileThumbs(cwd: string, file: string, status: string, origPath?: string): Promise<GitFileThumbs> {
-    return onSides(cwd, file, status, origPath, async (absolute, out) => {
-        try {
-            await execFileAsync('/usr/bin/qlmanage', ['-t', '-s', '1200', '-o', out, absolute], { timeout: 10_000 })
-            return await readFile(path.join(out, `${path.basename(absolute)}.png`))
-        }
-        catch {
-            return null
-        }
-    })
+    const thumbnail = platform.thumbnail
+    if (!thumbnail)
+        return { old: null, new: null, oldSize: 0, newSize: 0 }
+    return onSides(cwd, file, status, origPath, thumbnail)
 }
 
 /** Archives list at most this many entries per side. */
 export const MAX_ARCHIVE_ENTRIES = 5000
 
-/** Entry names of both sides of an archive (zip, jar, tar, tgz, 7z, rar... whatever bsdtar reads). */
+/** Entry names of both sides of an archive (zip, jar, tar, tgz, 7z, rar... whatever the OS's tar reads). */
 export async function gitFileEntries(cwd: string, file: string, status: string, origPath?: string): Promise<GitFileEntries> {
     const sides = await onSides(cwd, file, status, origPath, async (absolute) => {
         try {
-            const { stdout } = await execFileAsync('/usr/bin/tar', ['-tf', absolute], { timeout: 20_000, maxBuffer: 64 * 1024 * 1024 })
-            return stdout.split('\n').filter(Boolean)
+            return await platform.archiveEntries(absolute)
         }
         catch (error: any) {
             const why = String(error?.stderr || error?.message || error).trim().split('\n')[0]

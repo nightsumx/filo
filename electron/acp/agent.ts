@@ -32,6 +32,8 @@ export const ACP_PROTOCOL_VERSION = 1
 export interface AcpLaunch {
     file: string
     args: string[]
+    /** The command as found, when `file` is what runs it (Windows: node for an npm .cmd shim). */
+    bin?: string
     env: Record<string, string>
     via?: 'path' | 'app' | 'override'
     /** The app's install predates the pinned version. */

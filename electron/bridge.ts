@@ -8,6 +8,7 @@ import type { Socket } from 'node:net'
 import type { AgentCallbacks, ManagedAgent } from './agents'
 import { randomUUID } from 'node:crypto'
 import { createConnection } from 'node:net'
+import { BRIDGE_HELLO } from '@shared/capabilities'
 import { tr } from './i18n'
 import { JsonlSplitter } from './jsonl'
 
@@ -27,8 +28,8 @@ export class BridgeAgent implements ManagedAgent {
 
     private constructor(private socket: Socket, readonly pid: number) {}
 
-    /** Connects to the bridge socket; rejects when nobody listens there. */
-    static connect(socketPath: string, pid: number, callbacks: AgentCallbacks): Promise<BridgeAgent> {
+    /** Connects to the bridge socket (or pipe, with its token); rejects when nobody listens there. */
+    static connect(socketPath: string, pid: number, callbacks: AgentCallbacks, token?: string): Promise<BridgeAgent> {
         return new Promise((resolve, reject) => {
             const socket = createConnection(socketPath)
             const timer = setTimeout(() => {
@@ -41,6 +42,8 @@ export class BridgeAgent implements ManagedAgent {
             })
             socket.once('connect', () => {
                 clearTimeout(timer)
+                if (token)
+                    socket.write(`${JSON.stringify({ type: BRIDGE_HELLO, token })}\n`)
                 const agent = new BridgeAgent(socket, pid)
                 agent.listen(callbacks)
                 resolve(agent)

@@ -5,14 +5,14 @@
 import type { BrowserWindow } from 'electron'
 import process from 'node:process'
 import { app } from 'electron'
+import { windowPlatform } from './platform/window'
 
 export const BACKGROUND = process.env.PI_GUI_BACKGROUND === '1'
 
 if (BACKGROUND) {
     app.commandLine.appendSwitch('disable-renderer-backgrounding')
     app.commandLine.appendSwitch('disable-backgrounding-occluded-windows')
-    if (process.platform === 'darwin')
-        app.setActivationPolicy('accessory')
+    windowPlatform.background()
 }
 
 /** Shows a window, focused or not; in background mode it stays invisible and never takes focus. */
@@ -25,5 +25,6 @@ export function reveal(win: BrowserWindow, focus: boolean) {
     }
     win.setOpacity(0)
     win.setIgnoreMouseEvents(true)
+    windowPlatform.backgroundWindow(win)
     win.showInactive()
 }

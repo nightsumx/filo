@@ -6,9 +6,10 @@ import os from 'node:os'
 import path from 'node:path'
 import process from 'node:process'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { platform as host } from '../platform'
 import { archiveFor, installAgent, installedAgent } from './install'
 
-const platform = `${process.platform}-${process.arch}`
+const platform = host.target
 const tools = (fetch: (url: string) => Promise<Response>) => ({ searchPath: process.env.PATH ?? '', env: { ...process.env } as Record<string, string>, fetch })
 
 describe('agent installs', () => {

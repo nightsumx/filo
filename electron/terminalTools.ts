@@ -9,10 +9,10 @@ import type { TerminalInfo } from '@shared/ipc'
 import { ENV } from '@shared/capabilities'
 import type { Terminals } from './terminals'
 import { randomBytes, timingSafeEqual } from 'node:crypto'
-import { chmodSync, realpathSync, rmSync, statSync } from 'node:fs'
+import { realpathSync } from 'node:fs'
 import net from 'node:net'
-import os from 'node:os'
 import path from 'node:path'
+import { platform } from './platform'
 
 const MAX_REQUEST = 64 * 1024
 const MAX_OUTPUT_CHARS = 12_000
@@ -41,12 +41,6 @@ function tail(text: string): string {
     const cut = text.slice(-MAX_OUTPUT_CHARS)
     const nl = cut.indexOf('\n')
     return `[… earlier output cut]\n${nl === -1 ? cut : cut.slice(nl + 1)}`
-}
-
-/** macOS caps socket paths at 104 bytes; a long home folder falls back to the temp folder. */
-export function socketPath(dir: string, name: string): string {
-    const preferred = path.join(dir, name)
-    return Buffer.byteLength(preferred) < 100 ? preferred : path.join(os.tmpdir(), name)
 }
 
 function realpath(dir: string): string {
@@ -83,9 +77,7 @@ export class TerminalTools {
     }
 
     async start() {
-        // A socket file left by a crashed run would make listen fail with EADDRINUSE.
-        if (statSync(this.socketPath, { throwIfNoEntry: false })?.isSocket())
-            rmSync(this.socketPath, { force: true })
+        platform.clearIpc(this.socketPath)
         const server = net.createServer(socket => this.connection(socket))
         await new Promise<void>((resolve, reject) => {
             server.once('error', reject)
@@ -94,7 +86,7 @@ export class TerminalTools {
                 resolve()
             })
         })
-        chmodSync(this.socketPath, 0o600)
+        platform.restrict(this.socketPath)
         this.server = server
     }
 
@@ -108,7 +100,7 @@ export class TerminalTools {
             return
         this.server.close()
         this.server = null
-        rmSync(this.socketPath, { force: true })
+        platform.clearIpc(this.socketPath)
     }
 
     private connection(socket: net.Socket) {

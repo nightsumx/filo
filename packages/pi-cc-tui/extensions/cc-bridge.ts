@@ -1,15 +1,18 @@
-import { randomUUID } from "node:crypto";
-import { chmodSync, mkdirSync, rmSync } from "node:fs";
+import { randomBytes, randomUUID } from "node:crypto";
+import { chmodSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server, type Socket } from "node:net";
-import { join } from "node:path";
+import { join as joinPath } from "node:path";
 import { getAgentDir, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
+	BRIDGE_HELLO,
+	BRIDGE_PIPE_SUFFIX,
 	BRIDGE_SOCKET_SUFFIX,
 	DIALOG_EVENTS,
 	ENV,
 	GUI_EVENTS,
 	GUI_STATUS,
 	PRESENCE_DIR,
+	type BridgePipe,
 	type DialogAnswer,
 	type DialogRequest,
 } from "pi-capabilities/protocol";
@@ -19,7 +22,8 @@ import {
 // to cc-presence's file and speaks pi's RPC protocol there, as `pi --mode rpc` does on stdio: the app
 // sees the run live, token by token, and its prompts, stops, model and mode changes go to this
 // process. A client that joins mid-run first gets the run so far. Only the user's own processes can
-// connect (mode 0600 in their agent dir), the same ones that could start pi themselves.
+// connect (mode 0600 in their agent dir), the same ones that could start pi themselves. On Windows it
+// is a named pipe announced by a file there, and a client must first send that file's token.
 //
 // Built on the extension API, so some RPC commands have no equivalent here (fork, queue editing);
 // they answer with an error and the app keeps those for its own pi.
@@ -108,6 +112,9 @@ export default function (pi: ExtensionAPI) {
 	let ctx: ExtensionContext | null = null;
 	let server: Server | null = null;
 	let socketPath: string | null = null;
+	/** Windows: the `<pid>.pipe` file, and the token a client sends first. */
+	let pipeFile: string | null = null;
+	let token: string | null = null;
 	const clients = new Set<Socket>();
 
 	// What a client joining mid-run needs to catch up.
@@ -317,8 +324,15 @@ export default function (pi: ExtensionAPI) {
 		if (response && !client.destroyed) client.write(line(response));
 	};
 
-	const accept = (client: Socket) => {
+	const join = (client: Socket) => {
 		clients.add(client);
+		for (const record of catchUp()) client.write(line(record));
+	};
+
+	const accept = (client: Socket) => {
+		// With a token (Windows), a client hears nothing until it sent it.
+		let joined = !token;
+		if (joined) clients.add(client);
 		client.setEncoding("utf8");
 		let buffer = "";
 		client.on("data", (chunk: string) => {
@@ -327,20 +341,37 @@ export default function (pi: ExtensionAPI) {
 			while (newline >= 0) {
 				const text = buffer.slice(0, newline).replace(/\r$/, "");
 				buffer = buffer.slice(newline + 1);
-				if (text.trim()) void onLine(client, text);
 				newline = buffer.indexOf("\n");
+				if (!text.trim()) continue;
+				if (joined) {
+					void onLine(client, text);
+					continue;
+				}
+				let hello: Json;
+				try {
+					hello = JSON.parse(text);
+				} catch {
+					hello = null;
+				}
+				if (hello?.type !== BRIDGE_HELLO || hello.token !== token) {
+					client.destroy();
+					return;
+				}
+				joined = true;
+				join(client);
 			}
 		});
 		const drop = () => clients.delete(client);
 		client.on("close", drop);
 		client.on("error", drop);
-		for (const record of catchUp()) client.write(line(record));
+		if (joined) for (const record of catchUp()) client.write(line(record));
 	};
 
 	// ------------------------------------------------------------ lifecycle
 
 	const removeSocket = () => {
-		if (socketPath) rmSync(socketPath, { force: true });
+		if (pipeFile) rmSync(pipeFile, { force: true });
+		else if (socketPath) rmSync(socketPath, { force: true });
 	};
 	const stop = () => {
 		for (const client of clients) client.destroy();
@@ -349,6 +380,8 @@ export default function (pi: ExtensionAPI) {
 		server = null;
 		removeSocket();
 		socketPath = null;
+		pipeFile = null;
+		token = null;
 		process.off("exit", removeSocket);
 	};
 
@@ -357,21 +390,35 @@ export default function (pi: ExtensionAPI) {
 		ctx = c;
 		running = !c.isIdle();
 		stop();
-		const dir = join(getAgentDir(), PRESENCE_DIR);
-		const path = join(dir, `${process.pid}${BRIDGE_SOCKET_SUFFIX}`);
-		if (path.length > MAX_SOCKET_PATH) return;
+		const dir = joinPath(getAgentDir(), PRESENCE_DIR);
+		const windows = process.platform === "win32";
+		const path = windows
+			? `\\\\.\\pipe\\pi-cc-bridge-${process.pid}-${randomUUID()}`
+			: joinPath(dir, `${process.pid}${BRIDGE_SOCKET_SUFFIX}`);
+		if (!windows && path.length > MAX_SOCKET_PATH) return;
 		try {
 			mkdirSync(dir, { recursive: true });
-			rmSync(path, { force: true });
+			if (!windows) rmSync(path, { force: true });
 		} catch {
 			return;
 		}
 		socketPath = path;
+		if (windows) token = randomBytes(24).toString("hex");
 		const next = createServer(accept);
 		next.on("error", () => {
 			if (server === next) stop();
 		});
 		next.listen(path, () => {
+			if (server !== next) return;
+			if (token) {
+				// Announced once it listens, so the app never finds a pipe nobody serves.
+				const file = joinPath(dir, `${process.pid}${BRIDGE_PIPE_SUFFIX}`);
+				try {
+					writeFileSync(file, JSON.stringify({ path, token } satisfies BridgePipe), { mode: 0o600 });
+					pipeFile = file;
+				} catch {}
+				return;
+			}
 			try {
 				chmodSync(path, 0o600);
 			} catch {}

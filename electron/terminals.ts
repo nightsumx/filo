@@ -9,19 +9,15 @@
 // it is current to, and the window drops the ones it already has.
 import type { TerminalCreate, TerminalInfo, TerminalSnapshot } from '@shared/ipc'
 import type { IPty } from 'node-pty'
-import { execFile } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { accessSync, chmodSync, constants, statSync } from 'node:fs'
+import { statSync } from 'node:fs'
 import { createRequire } from 'node:module'
-import os from 'node:os'
 import path from 'node:path'
 import process from 'node:process'
-import { promisify } from 'node:util'
 import { SerializeAddon } from '@xterm/addon-serialize'
 import { Terminal as Headless } from '@xterm/headless'
 import { IPC } from '@shared/ipc'
-
-const execFileAsync = promisify(execFile)
+import { platform } from './platform'
 
 type NodePty = typeof import('node-pty')
 
@@ -45,7 +41,7 @@ const SCROLLBACK = 10_000
 const FLUSH_MS = 8
 const FLUSH_BYTES = 256 * 1024
 const POLL_MS = 1000
-/** Processes that outlive SIGHUP/SIGTERM get SIGKILL after this. */
+/** Processes that outlive SIGHUP/SIGTERM get SIGKILL after this (platform.stopTree). */
 const KILL_GRACE_MS = 1500
 const DEFAULT_COLS = 100
 const DEFAULT_ROWS = 24
@@ -69,12 +65,6 @@ interface Entry {
     exited: Set<() => void>
 }
 
-/** The user's shell; GUI apps usually have SHELL, else the account's. */
-export function userShell(): string {
-    const shell = process.env.SHELL || os.userInfo().shell
-    return shell && path.isAbsolute(shell) ? shell : '/bin/zsh'
-}
-
 /**
  * The environment a terminal starts with: the app's own, minus what only concerns the app (Electron
  * flags, dev-server and test variables, which would leak into a dev server started there), plus what
@@ -96,54 +86,6 @@ export function terminalEnv(base: NodeJS.ProcessEnv, version?: string): Record<s
     if (!env.LANG && !env.LC_ALL && !env.LC_CTYPE)
         env.LANG = 'en_US.UTF-8'
     return env
-}
-
-/** Every process below `pid`, deepest last (from one `ps` listing). */
-export async function descendants(pid: number): Promise<number[]> {
-    let stdout = ''
-    try {
-        stdout = (await execFileAsync('/bin/ps', ['-axo', 'pid=,ppid='], { timeout: 5000, maxBuffer: 8 * 1024 * 1024 })).stdout
-    }
-    catch {
-        return []
-    }
-    const children = new Map<number, number[]>()
-    for (const line of stdout.split('\n')) {
-        const [child, parent] = line.trim().split(/\s+/).map(Number)
-        if (!Number.isInteger(child) || !Number.isInteger(parent))
-            continue
-        const list = children.get(parent)
-        if (list)
-            list.push(child)
-        else
-            children.set(parent, [child])
-    }
-    const out: number[] = []
-    const queue = [pid]
-    while (queue.length) {
-        for (const child of children.get(queue.shift()!) ?? []) {
-            out.push(child)
-            queue.push(child)
-        }
-    }
-    return out
-}
-
-const alive = (pid: number) => {
-    try {
-        process.kill(pid, 0)
-        return true
-    }
-    catch {
-        return false
-    }
-}
-
-const signal = (pid: number, sig: NodeJS.Signals) => {
-    try {
-        process.kill(pid, sig)
-    }
-    catch {}
 }
 
 /**
@@ -179,18 +121,7 @@ export class Terminals {
     private loadPty(): NodePty {
         if (this.pty)
             return this.pty
-        // node-pty 1.1.0 ships spawn-helper without its executable bit; every spawn fails with
-        // "posix_spawnp failed" until it has one. Packaged builds get it at build time.
-        const helper = path.join(this.options.ptyDir, 'prebuilds', `${process.platform}-${process.arch}`, 'spawn-helper')
-        try {
-            accessSync(helper, constants.X_OK)
-        }
-        catch {
-            try {
-                chmodSync(helper, statSync(helper).mode | 0o111)
-            }
-            catch {}
-        }
+        platform.preparePty(this.options.ptyDir)
         this.pty = createRequire(import.meta.url)(this.options.ptyDir) as NodePty
         return this.pty
     }
@@ -210,7 +141,7 @@ export class Terminals {
             throw new Error(`not a folder: ${cwd}`)
         const cols = clampSize(create.cols, DEFAULT_COLS)
         const rows = clampSize(create.rows, DEFAULT_ROWS)
-        const shell = userShell()
+        const shell = platform.userShell()
         const headless = new Headless({ cols, rows, scrollback: SCROLLBACK, allowProposedApi: true })
         const serializer = new SerializeAddon()
         headless.loadAddon(serializer as never)
@@ -246,10 +177,7 @@ export class Terminals {
 
     private spawn(entry: Entry) {
         const { command } = entry.info
-        // A login shell, so PATH and the rest come from the user's profile, as in Terminal.app.
-        // A command runs in an interactive one too: version managers (fnm, nvm) set up in .zshrc.
-        const args = command ? ['-i', '-l', '-c', command] : ['-l']
-        const pty = this.loadPty().spawn(entry.shell, args, {
+        const pty = this.loadPty().spawn(entry.shell, platform.shellArgs(entry.shell, command), {
             name: 'xterm-256color',
             cols: entry.cols,
             rows: entry.rows,
@@ -395,21 +323,8 @@ export class Terminals {
         const pty = entry.pty
         if (!pty)
             return
-        // Collected first: once the shell is gone its children belong to launchd and the tree is lost.
-        const below = await descendants(pty.pid)
         const gone = new Promise<void>(resolve => entry.exited.add(resolve))
-        // SIGHUP is what closing a terminal sends; shells pass it on to their jobs.
-        try {
-            pty.kill('SIGHUP')
-        }
-        catch {}
-        below.forEach(pid => signal(pid, 'SIGTERM'))
-        await Promise.race([gone, sleep(KILL_GRACE_MS)])
-        for (const pid of [pty.pid, ...below]) {
-            if (alive(pid))
-                signal(pid, 'SIGKILL')
-        }
-        await Promise.race([gone, sleep(500)])
+        await platform.stopTree(pty.pid, sig => pty.kill(sig), gone, KILL_GRACE_MS)
     }
 
     async close(id: string) {
@@ -512,4 +427,3 @@ function commandTitle(command: string) {
     return line.length > 40 ? `${line.slice(0, 39)}…` : line
 }
 
-const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))

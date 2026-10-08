@@ -23,7 +23,9 @@ import { compactionInfo, globalCompaction, setGlobalCompaction } from './piSetti
 import { endpointSaveOf, helperLaunch, ProviderHelper, ProviderService } from './providers'
 import { resolvePiEnv, setBundledPi } from './pi-env'
 import { assertInSessionsDir, listSessions, readSession } from './sessions'
-import { socketPath, TerminalTools } from './terminalTools'
+import { platform } from './platform'
+import { windowPlatform } from './platform/window'
+import { TerminalTools } from './terminalTools'
 import { Terminals } from './terminals'
 import { Windows } from './windows'
 
@@ -86,7 +88,7 @@ const terminals = new Terminals({
  * The agent's terminal tools (the terminal capability) reach the terminals through this socket. Named
  * per app process, so a second instance (a test run, a dev build) has its own.
  */
-const terminalTools = new TerminalTools(terminals, socketPath(app.getPath('userData'), `terminals-${process.pid}.sock`), () => shownProjects)
+const terminalTools = new TerminalTools(terminals, platform.ipcPath(app.getPath('userData'), `terminals-${process.pid}.sock`), () => shownProjects)
 
 /**
  * A project no window shows any more takes its terminals with it. Checked a moment later, so a
@@ -192,8 +194,8 @@ function showNotice(notice: unknown) {
     })
     shown.on('close', drop)
     shown.show()
-    if (n.urgent === true && process.platform === 'darwin')
-        app.dock?.bounce('informational')
+    if (n.urgent === true)
+        windowPlatform.attention()
 }
 
 function isSafeExternalUrl(url: string) {
@@ -208,6 +210,8 @@ function isSafeExternalUrl(url: string) {
 /** Matches the renderer's surface colour so there is no white flash before first paint. */
 // Window frame colour behind the islands (--ide-frame), so resizing never flashes another colour.
 const windowBackground = () => (nativeTheme.shouldUseDarkColors ? '#26282c' : '#e9eaee')
+/** The frame's colours: the toolbar's background, and caption buttons (Windows, Linux) readable on it. */
+const frameColors = () => ({ background: windowBackground(), symbols: nativeTheme.shouldUseDarkColors ? '#dfe1e5' : '#1d1d1f' })
 
 function applyTheme(theme: unknown) {
     nativeTheme.themeSource = THEME_PREFS.includes(theme as ThemePref) ? (theme as ThemePref) : DEFAULT_THEME
@@ -237,9 +241,7 @@ function createWindow(bounds: Partial<WindowBounds>): BrowserWindow {
         minWidth: 880,
         minHeight: 560,
         title: APP_INFO.name,
-        titleBarStyle: 'hiddenInset',
-        // Centred in the 38px main toolbar.
-        trafficLightPosition: { x: 14, y: 12 },
+        ...windowPlatform.frame(frameColors()),
         backgroundColor: windowBackground(),
         show: false,
         webPreferences: {
@@ -390,7 +392,7 @@ function registerIpc() {
         const terminal = options.sessionPath ? presence.current.find(p => p.session === options.sessionPath && p.bridge) : undefined
         if (terminal?.bridge) {
             try {
-                const agentId = await agents.attach(terminal.bridge, terminal.pid)
+                const agentId = await agents.attach(terminal.bridge, terminal.pid, terminal.bridgeToken)
                 windows.addAgent(agentId, e.sender, options.cwd)
                 return agentId
             }
@@ -509,68 +511,25 @@ const attachedSenders = new Set<number>()
 
 /**
  * App menu without a ⌘W "Close Window" item: ⌘W, ⌘T, ⌘1–9 and ⌘\ are tab shortcuts handled by the
- * renderer. Edit roles stay so copy/paste and undo keep working in text fields.
+ * renderer. Each OS lays it out its own way (platform/darwin.ts, platform/desktop.ts).
  */
 function buildMenu() {
-    const isMac = process.platform === 'darwin'
-    const settings = {
-        label: tr('设置…', 'Settings…'),
-        accelerator: 'CmdOrCtrl+,',
-        click: () => windows.focusedWebContents()?.send(IPC.openSettings),
-    }
-    Menu.setApplicationMenu(Menu.buildFromTemplate([
-        ...(isMac
-            ? [{
-                    label: app.name,
-                    submenu: [
-                        { role: 'about' as const },
-                        { type: 'separator' as const },
-                        settings,
-                        { type: 'separator' as const },
-                        { role: 'services' as const },
-                        { type: 'separator' as const },
-                        { role: 'hide' as const },
-                        { role: 'hideOthers' as const },
-                        { role: 'unhide' as const },
-                        { type: 'separator' as const },
-                        { role: 'quit' as const },
-                    ],
-                }]
-            : [{ label: tr('文件', 'File'), submenu: [settings, { type: 'separator' as const }, { role: 'quit' as const }] }]),
-        { role: 'editMenu' },
-        {
-            label: tr('视图', 'View'),
-            submenu: [
-                { role: 'reload' },
-                { role: 'toggleDevTools' },
-                { type: 'separator' },
-                { role: 'resetZoom' },
-                { role: 'zoomIn' },
-                { role: 'zoomOut' },
-                { type: 'separator' },
-                { role: 'togglefullscreen' },
-            ],
+    Menu.setApplicationMenu(Menu.buildFromTemplate(windowPlatform.menu({
+        settings: {
+            label: tr('设置…', 'Settings…'),
+            accelerator: 'CmdOrCtrl+,',
+            click: () => windows.focusedWebContents()?.send(IPC.openSettings),
         },
-        {
-            label: tr('窗口', 'Window'),
-            submenu: [
-                { role: 'minimize' },
-                { role: 'zoom' },
-                { type: 'separator' },
-                {
-                    // WebStorm's "Merge All Project Windows": the other windows' projects join this one.
-                    label: tr('合并所有窗口', 'Merge All Windows'),
-                    click: () => {
-                        const target = windows.focusedWebContents()
-                        if (target)
-                            void windows.mergeAll(target).catch(error => dialog.showErrorBox(tr('合并窗口失败', 'Could not merge windows'), String(error?.message ?? error)))
-                    },
-                },
-                { role: 'close', label: tr('关闭窗口', 'Close Window'), accelerator: 'CmdOrCtrl+Shift+W' },
-                ...(isMac ? [{ type: 'separator' as const }, { role: 'front' as const }] : []),
-            ],
+        mergeWindows: {
+            // WebStorm's "Merge All Project Windows": the other windows' projects join this one.
+            label: tr('合并所有窗口', 'Merge All Windows'),
+            click: () => {
+                const target = windows.focusedWebContents()
+                if (target)
+                    void windows.mergeAll(target).catch(error => dialog.showErrorBox(tr('合并窗口失败', 'Could not merge windows'), String(error?.message ?? error)))
+            },
         },
-    ]))
+    })))
 }
 
 app.whenReady().then(async () => {
@@ -578,12 +537,13 @@ app.whenReady().then(async () => {
     const state = await store.load()
     applyTheme(state.theme)
     nativeTheme.on('updated', () => {
-        for (const w of BrowserWindow.getAllWindows())
+        for (const w of BrowserWindow.getAllWindows()) {
             w.setBackgroundColor(windowBackground())
+            windowPlatform.restyle(w, frameColors())
+        }
     })
-    // Packaged builds take the icon from build/icon.icns; in dev the Dock would show Electron's.
-    if (process.platform === 'darwin' && !app.isPackaged && !BACKGROUND)
-        app.dock?.setIcon(path.join(__dirname, '../../build/icon.png'))
+    if (!app.isPackaged && !BACKGROUND)
+        windowPlatform.devIcon(path.join(__dirname, '../../build/icon.png'))
     applyLang(state.lang)
     registerIpc()
     // Before the first window, so the first threads' pi already gets the socket.
@@ -611,6 +571,6 @@ app.on('before-quit', (event) => {
 })
 
 app.on('window-all-closed', () => {
-    if (process.platform !== 'darwin')
+    if (windowPlatform.quitWithLastWindow)
         app.quit()
 })

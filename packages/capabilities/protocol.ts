@@ -123,6 +123,8 @@ export interface Presence {
     since: number
     /** Not in the file: the app sets it when pi-cc-tui's bridge listens for this pid (BRIDGE_SOCKET_SUFFIX). */
     bridge?: string
+    /** Not in the file: what the bridge wants first (BRIDGE_HELLO), when it is a pipe (Windows). Main-process only. */
+    bridgeToken?: string
 }
 
 // ---------------------------------------------------------------- bridge
@@ -135,6 +137,19 @@ export interface Presence {
  * process, so nothing forks. Its get_state adds `terminalPid`.
  */
 export const BRIDGE_SOCKET_SUFFIX = '.sock'
+
+/**
+ * Windows has no unix sockets in the agent dir: the bridge listens on a named pipe and announces it
+ * with `<agent dir>/PRESENCE_DIR/<pid>.pipe`, a BridgePipe as JSON. Pipe names are visible to every
+ * user and a pipe's default ACL lets anyone read it, so a client first sends `{ type: BRIDGE_HELLO,
+ * token }` with the file's token; the bridge sends nothing to a client before that.
+ */
+export const BRIDGE_PIPE_SUFFIX = '.pipe'
+export const BRIDGE_HELLO = 'bridge_hello'
+export interface BridgePipe {
+    path: string
+    token: string
+}
 
 /**
  * A capability's terminal dialog, mirrored to the app over the bridge (`pi.events`):

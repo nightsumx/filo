@@ -21,7 +21,7 @@ export interface AcpAgentSpec {
     dirs?: string[]
     /** What the app installs (into its own folder) when `bin` is not on PATH: a pinned npm package. */
     npm?: string
-    /** Or a pinned archive per platform (`process.platform-process.arch`), with the command inside it. */
+    /** Or a pinned archive per platform (`<os>-<arch>`, platform.target), with the command inside it. */
     archive?: Partial<Record<string, AgentArchive>>
     /**
      * The agent's own CLI, passed to the adapter so it uses the user's install and sign-in. Agents

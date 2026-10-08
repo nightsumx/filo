@@ -160,14 +160,14 @@ export class AgentManager {
     }
 
     /** Joins a terminal pi over its bridge socket instead of starting one; rejects if it does not answer. */
-    async attach(socketPath: string, pid: number): Promise<string> {
+    async attach(socketPath: string, pid: number, token?: string): Promise<string> {
         const agent = await BridgeAgent.connect(socketPath, pid, {
             onEvent: this.callbacks.onEvent,
             onExit: (id, info) => {
                 this.agents.delete(id)
                 this.callbacks.onExit(id, info)
             },
-        })
+        }, token)
         this.agents.set(agent.id, agent)
         return agent.id
     }
