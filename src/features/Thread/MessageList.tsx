@@ -273,7 +273,7 @@ export const MessageList = observer(({ thread }: { thread: Thread }) => {
                         stick.current = true
                         toBottom()
                     }}
-                    className="absolute bottom-3 left-1/2 z-10 inline-flex h-8 w-8 -translate-x-1/2 items-center justify-center rounded-md border border-gray-200 bg-elevated text-gray-600 shadow-md transition-all duration-200 animate-in fade-in slide-in-from-bottom-2 hover:text-gray-900"
+                    className="absolute bottom-3 left-1/2 z-10 inline-flex h-8 w-8 -translate-x-1/2 items-center justify-center rounded-md border border-gray-200 light:border-transparent bg-elevated text-gray-600 shadow-md transition-all duration-200 animate-in fade-in slide-in-from-bottom-2 hover:text-gray-900"
                     aria-label={tr('滚动到底部', 'Scroll to bottom')}
                 >
                     <ArrowDown size={15} strokeWidth={1.8} />

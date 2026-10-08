@@ -25,9 +25,9 @@
            #f5f5f7, separators #e8e8ed / #d2d2d7, text #1d1d1f / #6e6e73 / #86868b, blue #0071e3.
            Fills are its ink (29 29 31) at low alpha. Dark = Islands Dark.
            Same layout, different surface rules: a grey step on white reads weaker and dirtier than
-           the same step on #1e1f22, so light does not separate areas by fill alone. It has two
-           surface levels (frame + project panel grey, everything else white) and draws edges with
-           hairlines and faint shadows (--ide-island-edge, the block outline, --ide-float-shadow). */
+           the same step on #1e1f22. Light keeps it to two greys: frame, project panel and filled
+           blocks are apple.com's #f5f5f7, everything else white. Like dark it is borderless: areas,
+           blocks, fields and buttons separate by fill; floating layers by shadow alone. */
         --ide-frame: #f5f5f7;
         /* Tool windows on the editor's level: the tab strip and the changes panel. */
         --ide-panel: #ffffff;
@@ -43,14 +43,10 @@
         /* Active tab: a grey pill on the white strip (dark: a raised tab). */
         --ide-tab: rgba(29, 29, 31, 0.05);
         --ide-tab-shadow: none;
-        /* White islands on the grey frame: a hairline and a faint drop. */
-        --ide-island-edge: 0 0 0 1px rgba(29, 29, 31, 0.07), 0 1px 3px rgba(0, 0, 0, 0.04);
-        /* Filled block on the editor (code, tool output, diff, todo, queued): a near-white fill with a
-           hairline outline (see .bg-ide-block below). Dark: fill alone. */
-        --ide-block: #fafafc;
-        /* Composer: a white field with a hairline and a faint drop. */
-        --ide-input: #ffffff;
-        --ide-input-shadow: 0 2px 6px -1px rgba(0, 0, 0, 0.05);
+        /* Filled block on the editor (code, tool output, diff, todo, queued): apple.com's tile grey. */
+        --ide-block: #f5f5f7;
+        /* Composer field. */
+        --ide-input: #f5f5f7;
         /* User message bubble: apple.com's tile grey. Filled, no outline. */
         --ide-prompt: #f5f5f7;
         /* Menus, popovers, tooltips. Dark keeps each component's own shadow. */
@@ -149,9 +145,7 @@
         --ide-frame: #26282c;
         --ide-panel: #191a1c;
         --ide-side: #191a1c;
-        --ide-island-edge: none;
         --ide-input: #2b2d30;
-        --ide-input-shadow: 0 0 #0000;
         --ide-editor: #1e1f22;
         --ide-border: #141517;
         --ide-line: #2b2d30;
@@ -419,26 +413,17 @@ ul {
     user-select: text;
 }
 
-/* Island: a rounded panel floating on the window frame (WebStorm 2025 "Islands" UI). Light draws
-   its edge (--ide-island-edge); dark separates by fill alone. An island that is part of the frame
-   clears it with [--ide-island-edge:none]. */
+/* Island: a rounded panel floating on the window frame (WebStorm 2025 "Islands" UI), separated
+   from it by fill alone in both themes. */
 .ide-island {
     border-radius: var(--ide-radius);
     overflow: hidden;
-    box-shadow: var(--ide-island-edge);
-}
-
-/* Light: filled blocks get a hairline. An inset outline paints over the block's children, so tinted
-   diff rows and code lines don't break it. Dark is fill alone. */
-:root:not(.dark) .bg-ide-block {
-    outline: 1px solid var(--ide-line);
-    outline-offset: -1px;
 }
 
 /* Review panel diffs (@git-diff-view) in light: its GitHub palette (mint rows, saturated line-number
    cells, blue hunk bars) replaced by the transcript diff's tints (TuiDiff), on the block fill. */
 html .diff-tailwindcss-wrapper[data-theme='light'] .diff-style-root {
-    --diff-border--: var(--ide-line);
+    --diff-border--: transparent;
     --diff-add-content--: var(--diff-add-row);
     --diff-del-content--: var(--diff-del-row);
     --diff-add-lineNumber--: var(--diff-add-row);

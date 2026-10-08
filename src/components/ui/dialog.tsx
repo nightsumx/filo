@@ -70,7 +70,7 @@ const DialogContent = observer(React.forwardRef<
                             className={cn(
                                 // 不要 animate zoom/slide（会写 transform）；GSI 登录在 transform 祖先下 iframe=0×0
                                 // macOS window look: 10px corners, hairline border, soft shadow.
-                                'pointer-events-auto relative flex flex-col w-full max-w-[1200px] gap-4 rounded-[10px] border border-[var(--jb-dialog-border)] bg-[var(--jb-dialog-bg)] p-6 shadow-[var(--jb-dialog-shadow)] outline-none select-text',
+                                'pointer-events-auto relative flex flex-col w-full max-w-[1200px] gap-4 rounded-[10px] border border-[var(--jb-dialog-border)] light:border-transparent bg-[var(--jb-dialog-bg)] p-6 shadow-[var(--jb-dialog-shadow)] outline-none select-text',
                                 className,
                             )}
                             {...props}

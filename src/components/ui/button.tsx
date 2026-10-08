@@ -12,14 +12,14 @@ const buttonVariants = cva(
                 default:
                     'bg-black/[0.06] text-gray-900 hover:bg-black/[0.08] active:bg-black/[0.12]',
                 // Disabled: a faded blue in dark; on white that reads as a pastel button, so light uses
-                // JetBrains' disabled look (grey outline and text) instead.
+                // a grey fill and grey text instead.
                 primary:
-                    'border border-ide-accent bg-ide-accent text-always-white hover:border-ide-accent-hover hover:bg-ide-accent-hover disabled:opacity-40 light:disabled:border-[var(--jb-disabled-border)] light:disabled:bg-transparent light:disabled:text-[var(--jb-disabled-fg)] light:disabled:opacity-100',
+                    'border border-ide-accent bg-ide-accent text-always-white hover:border-ide-accent-hover hover:bg-ide-accent-hover disabled:opacity-40 light:disabled:border-transparent light:disabled:bg-[var(--jb-fill)] light:disabled:text-[var(--jb-disabled-fg)] light:disabled:opacity-100',
                 destructive:
                     'bg-[#FF3B30] text-always-white hover:bg-[#FF453A] active:bg-[#FF2D1F]',
-                // JetBrains secondary button.
+                // Secondary button: JetBrains' outlined one in dark, a grey fill in light.
                 outline:
-                    'border border-[var(--jb-field-border)] bg-[var(--jb-secondary-bg)] text-gray-900 hover:bg-[var(--jb-secondary-hover)] disabled:opacity-100 disabled:border-[var(--jb-disabled-border)] disabled:text-[var(--jb-disabled-fg)]',
+                    'border border-[var(--jb-field-border)] bg-[var(--jb-secondary-bg)] text-gray-900 hover:bg-[var(--jb-secondary-hover)] disabled:opacity-100 disabled:border-[var(--jb-disabled-border)] disabled:text-[var(--jb-disabled-fg)] light:border-transparent light:bg-[var(--jb-fill)] light:hover:bg-[var(--jb-fill-hover)] light:disabled:border-transparent',
                 secondary:
                     'bg-black/[0.04] text-gray-900 hover:bg-black/[0.06] active:bg-black/[0.08]',
                 ghost: 'text-gray-900 hover:bg-black/[0.04] active:bg-black/[0.06]',

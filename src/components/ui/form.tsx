@@ -69,7 +69,7 @@ export function Segmented<T extends string>({ value, options, onChange, labelled
                     onClick={() => onChange(o.value)}
                     className={cn(
                         'h-6 rounded-[4px] px-3 text-[12px] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ide-accent/50',
-                        value === o.value ? 'bg-[var(--jb-dialog-bg)] text-gray-900 shadow-[0_0_0_1px_var(--jb-dialog-border),0_1px_2px_rgba(0,0,0,0.06)]' : 'text-gray-600 hover:text-gray-900',
+                        value === o.value ? 'bg-[var(--jb-dialog-bg)] text-gray-900 shadow-[0_0_0_1px_var(--jb-dialog-border),0_1px_2px_rgba(0,0,0,0.06)] light:shadow-[0_1px_3px_rgba(0,0,0,0.1)]' : 'text-gray-600 hover:text-gray-900',
                     )}
                 >
                     {o.label}
