@@ -92,12 +92,12 @@ export const StatusBar = observer(() => {
                 <button
                     type="button"
                     aria-pressed={terminalOpen}
+                    aria-label={tr('终端', 'Terminal')}
                     className={cn(widget, terminalOpen && 'bg-black/[0.08] text-gray-900')}
                     title={terminalOpen ? tr(`隐藏终端（${keys('⌃`')}）`, `Hide terminal (${keys('⌃`')})`) : tr(`打开终端（${keys('⌃`')}）`, `Open terminal (${keys('⌃`')})`)}
                     onClick={() => (terminalOpen ? terminalStore.hide() : terminalStore.show())}
                 >
-                    <SquareTerminal size={12} />
-                    {tr('终端', 'Terminal')}
+                    <SquareTerminal size={12} aria-hidden />
                     {terminalsBusy > 0 && (
                         <>
                             <span className="h-1.5 w-1.5 rounded-full bg-[#99d58f]" aria-hidden />

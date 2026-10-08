@@ -59,7 +59,7 @@ async function main() {
         const tabsBefore = await threadTabs()
 
         // The status bar button is there with no terminal yet; it opens one and closes the panel again.
-        const statusButton = `[...document.querySelectorAll('footer button')].find(b => b.textContent.startsWith('Terminal'))`
+        const statusButton = `document.querySelector('footer button[aria-label="Terminal"]')`
         check(await page.evaluate<boolean>(`!!${statusButton} && window.__terminals.list.length === 0`), 'the status bar has a Terminal button before any terminal exists')
         await page.evaluate(`${statusButton}.click()`)
         await until('panel from the status bar', () => page.evaluate<boolean>(`!!document.querySelector("section[aria-label=Terminal] .xterm") && ${statusButton}.getAttribute('aria-pressed') === 'true'`))
