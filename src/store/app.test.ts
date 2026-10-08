@@ -82,7 +82,7 @@ describe('tabs and auto split', () => {
 describe('capabilities', () => {
     beforeEach(() => {
         reset()
-        appStore.setCapabilities(['todo', 'ask', 'approval', 'plan', 'review'])
+        appStore.setCapabilities(['todo', 'ask', 'approval', 'plan', 'review', 'autopilot'])
     })
     const restore = (state: object) => {
         ;(appStore as any).restoreState(state)
@@ -91,7 +91,7 @@ describe('capabilities', () => {
     const saved = () => (appStore as any).prefsSnapshot().capabilities
 
     it('defaults to the standard preset and returns plain, cloneable arrays', () => {
-        expect(appStore.enabledCapabilities).toEqual(['todo', 'ask', 'approval', 'plan', 'review'])
+        expect(appStore.enabledCapabilities).toEqual(['todo', 'ask', 'approval', 'plan', 'review', 'autopilot'])
         appStore.setCapabilities(['ask', 'bogus' as any, 'todo'])
         const ids = appStore.enabledCapabilities
         expect(ids).toEqual(['todo', 'ask'])
@@ -102,29 +102,29 @@ describe('capabilities', () => {
     })
 
     it('saves a preset by its id, so later additions to it reach users who chose it', () => {
-        appStore.setCapabilities(['todo', 'ask', 'approval', 'plan', 'review'])
+        appStore.setCapabilities(['todo', 'ask', 'approval', 'plan', 'review', 'autopilot'])
         expect(saved()).toBe('standard')
         expect(appStore.capabilityPreset).toBe('standard')
         appStore.setCapabilities(['todo', 'plan'])
         expect(saved()).toEqual(['todo', 'plan'])
         expect(appStore.capabilityPreset).toBeUndefined()
-        expect(restore({ capabilities: 'full' })).toEqual(['todo', 'ask', 'approval', 'plan', 'subagent', 'review'])
+        expect(restore({ capabilities: 'full' })).toEqual(['todo', 'ask', 'approval', 'plan', 'subagent', 'review', 'autopilot'])
         expect(appStore.capabilityPreset).toBe('full')
         expect(restore({ capabilities: 'lean' })).toEqual([])
-        expect(restore({ capabilities: 'gone' })).toEqual(['todo', 'ask', 'approval', 'plan', 'review'])
+        expect(restore({ capabilities: 'gone' })).toEqual(['todo', 'ask', 'approval', 'plan', 'review', 'autopilot'])
     })
 
     it('nothing saved is the standard preset', () => {
-        expect(restore({})).toEqual(['todo', 'ask', 'approval', 'plan', 'review'])
+        expect(restore({})).toEqual(['todo', 'ask', 'approval', 'plan', 'review', 'autopilot'])
         expect(appStore.capabilityPreset).toBe('standard')
     })
 
     it('a list saved before presets were saved by id becomes the preset it was', () => {
-        // Those builds could not offer review, so a list without it still matches.
-        expect(restore({ capabilities: ['todo', 'ask', 'approval', 'plan', 'subagent'] })).toEqual(['todo', 'ask', 'approval', 'plan', 'subagent', 'review'])
+        // Those builds could not offer review or autopilot, so a list without them still matches.
+        expect(restore({ capabilities: ['todo', 'ask', 'approval', 'plan', 'subagent'] })).toEqual(['todo', 'ask', 'approval', 'plan', 'subagent', 'review', 'autopilot'])
         expect(appStore.capabilityPreset).toBe('full')
-        expect(restore({ capabilities: ['todo', 'ask', 'approval', 'plan'] })).toEqual(['todo', 'ask', 'approval', 'plan', 'review'])
-        expect(restore({ capabilities: ['todo', 'ask', 'approval', 'plan', 'review'] })).toEqual(['todo', 'ask', 'approval', 'plan', 'review'])
+        expect(restore({ capabilities: ['todo', 'ask', 'approval', 'plan'] })).toEqual(['todo', 'ask', 'approval', 'plan', 'review', 'autopilot'])
+        expect(restore({ capabilities: ['todo', 'ask', 'approval', 'plan', 'review', 'autopilot'] })).toEqual(['todo', 'ask', 'approval', 'plan', 'review', 'autopilot'])
         // Lean stays lean, and other lists stay as they are.
         expect(restore({ capabilities: [] })).toEqual([])
         expect(appStore.capabilityPreset).toBe('lean')

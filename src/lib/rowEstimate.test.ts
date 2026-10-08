@@ -1,3 +1,4 @@
+import type { AutopilotCard, AutopilotDecision } from '@shared/capabilities'
 import type { Step, Turn } from './timeline'
 import type { TranscriptRow } from './transcriptRows'
 import { describe, expect, it } from 'vitest'
@@ -45,5 +46,18 @@ describe('estimateRow', () => {
         const text = (t: string) => item({ kind: 'text', key: 'k', text: t, streaming: false })
         expect(estimateRow(text('ok'), WIDTH)).toBe(34)
         expect(estimateRow(text(Array.from({ length: 20 }, (_, i) => `- item ${i}`).join('\n')), WIDTH)).toBeGreaterThan(450)
+    })
+
+    it('an autopilot decision is its line and reason; a card folds to one line once answered', () => {
+        const decision: AutopilotDecision = { kind: 'autopilot', id: 'ap', status: 'done', next: 'continue', reason: 'Tests pass.', rules: [], cards: [], workTools: 1, commands: [], startedAt: 0, endedAt: 1 }
+        expect(estimateRow(item({ kind: 'autopilot', key: 'd', decision, settled: false }), WIDTH)).toBe(12 + 24 + 20)
+        expect(estimateRow(item({ kind: 'autopilot', key: 'd', decision: { ...decision, valve: 'Stopped: R05 three times in a row.' }, settled: false }), WIDTH)).toBe(12 + 24 + 40)
+
+        const card: AutopilotCard = { kind: 'autopilot-card', id: 'c', category: 'taste', title: 'Colour', question: 'Which?', options: [{ id: 'A', label: 'Red' }, { id: 'B', label: 'Blue' }], createdAt: 0 }
+        const pending = estimateRow(item({ kind: 'autopilot-card', key: 'c', card }), WIDTH)
+        // Line, question, two option rows and the own-words field.
+        expect(pending).toBe(12 + 24 + 20 + 2 * 28 + 40)
+        expect(estimateRow(item({ kind: 'autopilot-card', key: 'c', card: { ...card, options: [...card.options, { id: 'C', label: 'Green' }] } }), WIDTH)).toBe(pending + 28)
+        expect(estimateRow(item({ kind: 'autopilot-card', key: 'c', card, answer: { cardId: 'c', choice: 'A', via: 'app', at: 1 } }), WIDTH)).toBe(12 + 24)
     })
 })

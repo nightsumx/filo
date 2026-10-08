@@ -5,6 +5,7 @@ import { cn } from '@/lib/utils'
 import { Archive, GitBranch, Puzzle } from 'lucide-react'
 import { memo } from 'react'
 import { AskStep } from './capabilities/AskStep'
+import { AutopilotCardStep, AutopilotDecisionStep } from './capabilities/AutopilotStep'
 import { PlanStep } from './capabilities/PlanStep'
 import { ReviewStep } from './capabilities/ReviewStep'
 import { SubagentStep } from './capabilities/SubagentStep'
@@ -99,6 +100,10 @@ export const StepView = memo(({ step }: { step: Step }) => {
             return <BashExecution id={step.key} message={step.message} />
         case 'review':
             return <ReviewStep id={step.key} report={step.report} applied={step.applied} />
+        case 'autopilot':
+            return <AutopilotDecisionStep id={step.key} decision={step.decision} settled={step.settled} />
+        case 'autopilot-card':
+            return <AutopilotCardStep card={step.card} answer={step.answer} />
         case 'note':
             return <NoteBlock id={step.key} variant={step.variant} title={step.title} text={step.text} />
         case 'error':

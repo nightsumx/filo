@@ -1,6 +1,6 @@
 import type { SessionItem, SessionSnapshot, SessionSummary } from '@shared/ipc'
 import type { AgentMessage } from '@shared/pi'
-import { REVIEW_TYPES } from '@shared/capabilities'
+import { isShownEntry } from '@shared/entries'
 import { open, readdir, readFile, stat } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
@@ -124,9 +124,10 @@ function toMessage(entry: any): AgentMessage | null {
             return entry.display
                 ? { role: 'custom', customType: entry.customType, content: entry.content, display: true, details: entry.details, timestamp }
                 : null
-        // Review reports are entries outside the model's context; the transcript shows them as cards.
+        // Review reports and autopilot decisions, cards and answers are entries outside the model's
+        // context; the transcript shows them as cards.
         case 'custom':
-            return entry.customType === REVIEW_TYPES.report && entry.data?.kind === 'review'
+            return isShownEntry(entry)
                 ? { role: 'custom', customType: entry.customType, content: '', display: true, details: entry.data, timestamp }
                 : null
         default:

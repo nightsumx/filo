@@ -68,12 +68,13 @@ function describeStep(step: Step | undefined, cwd?: string): string {
     return thinking()
 }
 
-export type WaitingKind = 'question' | 'approval' | 'plan'
+export type WaitingKind = 'question' | 'approval' | 'plan' | 'cards'
 
 const WAITING_LABEL: Record<WaitingKind, Localized> = {
     question: { zh: '等你回答', en: 'Waiting for your answer' },
     approval: { zh: '等你确认', en: 'Waiting for approval' },
     plan: { zh: '等你审阅计划', en: 'Waiting for plan review' },
+    cards: { zh: '等你决定', en: 'Waiting for your decision' },
 }
 
 export const waitingLabel = (kind: WaitingKind = 'question') => tr(WAITING_LABEL[kind])

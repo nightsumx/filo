@@ -17,6 +17,8 @@ function status(agent: AgentAvailability | undefined): { label: string, tone: 'o
         return { label: tr('检查中…', 'Checking…'), tone: 'note' }
     if (agent.installing)
         return { label: tr('安装中…', 'Installing…'), tone: 'note' }
+    if (!agent.available && agent.cli)
+        return { label: tr('缺 ACP 适配器', 'Needs ACP adapter'), tone: 'note' }
     if (!agent.available)
         return { label: tr('未安装', 'Not installed'), tone: 'off' }
     if (agent.outdated)
@@ -60,6 +62,11 @@ export const AgentsPage = observer(() => {
                             </span>
                         )}
                     >
+                        {agent && !agent.available && agent.cli && (
+                            <Comment className="mt-1 [overflow-wrap:anywhere]">
+                                {tr(`已找到 ${agent.cli}。应用会另装一个 ACP 适配器来连接它，CLI 本身不变。`, `Found ${agent.cli}. The app installs an ACP adapter to connect to it; the CLI stays as is.`)}
+                            </Comment>
+                        )}
                         {agent?.available && agent.command && (
                             <Comment className="mt-1 font-mono [overflow-wrap:anywhere]">{agent.command}</Comment>
                         )}

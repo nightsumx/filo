@@ -91,6 +91,21 @@ describe('parseSession', () => {
         expect(items[2].message).toMatchObject({ role: 'custom', details: { reviewId: 'rv-1', items: ['R1'] } })
     })
 
+    it('shows autopilot decisions, cards and answers, but not its on/off switch', () => {
+        const card = { kind: 'autopilot-card', id: 'card-1', category: 'taste', title: 't', question: 'q', options: [], createdAt: 0 }
+        const text = lines(
+            header,
+            user('u1', null, 'q'),
+            { type: 'custom', id: 'mode', parentId: 'u1', timestamp: header.timestamp, customType: 'pi-kit-autopilot-mode', data: { on: true } },
+            { type: 'custom', id: 'c', parentId: 'mode', timestamp: header.timestamp, customType: 'pi-kit-autopilot-card', data: card },
+            { type: 'custom', id: 'd', parentId: 'c', timestamp: header.timestamp, customType: 'pi-kit-autopilot', data: { kind: 'autopilot', id: 'ap-1', next: 'wait', cards: ['card-1'] } },
+            { type: 'custom', id: 'a', parentId: 'd', timestamp: header.timestamp, customType: 'pi-kit-autopilot-answer', data: { cardId: 'card-1', choice: 'A' } },
+        )
+        const items = parseSession(text, '/s/a.jsonl').items
+        expect(items.map(i => i.entryId)).toEqual(['u1', 'c', 'd', 'a'])
+        expect(items[1].message).toMatchObject({ role: 'custom', customType: 'pi-kit-autopilot-card', details: card })
+    })
+
     it('stops on a parent cycle instead of looping', () => {
         const text = lines(header, { ...user('a', 'b', 'x') }, { ...user('b', 'a', 'y') })
         expect(parseSession(text, '/s/a.jsonl').items.length).toBe(2)

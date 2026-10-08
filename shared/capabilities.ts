@@ -1,7 +1,7 @@
 // Capabilities are pi extensions from the pi-capabilities workspace package, loaded per project with
 // `-e`. This file is the app's catalog of them (labels, presets); the wire protocol they speak lives
 // in the package and is re-exported here.
-import type { ReviewDetails as ReviewDetailsOf, SubagentDetails as SubagentDetailsOf } from 'pi-capabilities/protocol'
+import type { AutopilotDecision as AutopilotDecisionOf, ReviewDetails as ReviewDetailsOf, SubagentDetails as SubagentDetailsOf } from 'pi-capabilities/protocol'
 import type { Localized } from './i18n'
 import type { AgentMessage, AssistantMessage } from './pi'
 import type { CapabilityId } from 'pi-capabilities/protocol'
@@ -9,6 +9,7 @@ import type { CapabilityId } from 'pi-capabilities/protocol'
 export * from 'pi-capabilities/protocol'
 export type SubagentDetails = SubagentDetailsOf<AgentMessage, AssistantMessage>
 export type ReviewDetails = ReviewDetailsOf<AgentMessage, AssistantMessage>
+export type AutopilotDecision = AutopilotDecisionOf<AgentMessage, AssistantMessage>
 
 export interface Capability {
     id: CapabilityId
@@ -71,6 +72,14 @@ export const CAPABILITIES: readonly Capability[] = [
         tools: [],
         contextTokens: 0,
     },
+    {
+        id: 'autopilot',
+        label: { zh: '自动驾驶', en: 'Autopilot' },
+        description: { zh: '打开后，每轮结束由一个独立的 pi 按你的规则库检查结果并替你回复；花钱、发布、删除和需要你拍板的事会变成卡片等你决定。', en: 'When on, a separate pi checks each finished turn against your rulebook and replies for you; spending, releases, deletions and calls only you can make become cards that wait for you.' },
+        entry: 'autopilot.ts',
+        tools: [],
+        contextTokens: 0,
+    },
 ]
 
 export interface CapabilityPreset {
@@ -82,8 +91,8 @@ export interface CapabilityPreset {
 
 export const PRESETS: readonly CapabilityPreset[] = [
     { id: 'lean', label: { zh: '精简', en: 'Lean' }, hint: { zh: '只用 pi 本身的能力，上下文最小。', en: 'Only what pi has built in; the smallest context.' }, capabilities: [] },
-    { id: 'standard', label: { zh: '标准', en: 'Standard' }, hint: { zh: '适合日常开发。', en: 'For everyday development.' }, capabilities: ['todo', 'ask', 'approval', 'plan', 'review'] },
-    { id: 'full', label: { zh: '完整', en: 'Full' }, hint: { zh: '再加上子 Agent，适合大任务。', en: 'Adds subagents, for large tasks.' }, capabilities: ['todo', 'ask', 'approval', 'plan', 'subagent', 'review'] },
+    { id: 'standard', label: { zh: '标准', en: 'Standard' }, hint: { zh: '适合日常开发。', en: 'For everyday development.' }, capabilities: ['todo', 'ask', 'approval', 'plan', 'review', 'autopilot'] },
+    { id: 'full', label: { zh: '完整', en: 'Full' }, hint: { zh: '再加上子 Agent，适合大任务。', en: 'Adds subagents, for large tasks.' }, capabilities: ['todo', 'ask', 'approval', 'plan', 'subagent', 'review', 'autopilot'] },
 ]
 
 export const DEFAULT_CAPABILITIES: readonly CapabilityId[] = PRESETS.find(p => p.id === 'standard')!.capabilities
@@ -99,7 +108,7 @@ export function presetOf(ids: readonly CapabilityId[]): CapabilityPreset | undef
  * Capabilities added after Settings started saving presets by id. A list saved by an older build
  * could not include them, so it is still the preset it was without them.
  */
-const NEWER_THAN_LISTS: readonly CapabilityId[] = ['review']
+const NEWER_THAN_LISTS: readonly CapabilityId[] = ['review', 'autopilot']
 
 /** A saved choice (preset id, list, or anything unreadable) → the ids it enables. */
 export function resolveCapabilities(saved: unknown): { ids: CapabilityId[], preset?: string } {
@@ -112,7 +121,7 @@ export function resolveCapabilities(saved: unknown): { ids: CapabilityId[], pres
         return { ids: [...DEFAULT_CAPABILITIES], preset: preset?.id }
     }
     const list = normalizeCapabilities(saved)
-    const preset = presetOf(list) ?? PRESETS.find(p => p.capabilities.length && sameSet(p.capabilities.filter(id => !NEWER_THAN_LISTS.includes(id)), list))
+    const preset = presetOf(list) ?? PRESETS.find(p => p.capabilities.length && sameSet(p.capabilities.filter(id => !NEWER_THAN_LISTS.includes(id) || list.includes(id)), list))
     return preset ? { ids: [...preset.capabilities], preset: preset.id } : { ids: list }
 }
 

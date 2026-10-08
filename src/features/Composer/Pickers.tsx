@@ -5,7 +5,7 @@ import type { Thread, ThreadMode } from '@/store/thread'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { cn, formatTokens } from '@/lib/utils'
-import { Bot, Brain, Check, ChevronDown, ClipboardList, Cpu, Download, FilePen, KeyRound, Loader2, ShieldCheck, SlidersHorizontal, Zap } from 'lucide-react'
+import { Bot, Brain, Check, ChevronDown, ClipboardList, Cpu, Download, FilePen, KeyRound, Loader2, Plane, ShieldCheck, SlidersHorizontal, Zap } from 'lucide-react'
 import { observable, runInAction } from 'mobx'
 import { observer } from 'mobx-react-lite'
 import { useEffect, useRef, useState } from 'react'
@@ -291,6 +291,8 @@ export const ConfigPickers = observer(({ thread }: { thread: Thread }) => {
 function agentHint(agent: AgentAvailability): string | undefined {
     if (agent.installing)
         return tr('安装中…', 'Installing…')
+    if (!agent.available && agent.installable && agent.cli)
+        return tr('已装 CLI，缺 ACP 适配器，选中后自动安装', 'CLI found; pick it to add the ACP adapter')
     if (!agent.available)
         return agent.installable ? tr('未安装，选中后自动安装', 'Not installed; pick it to install') : agent.error
     if (agent.via === 'app')
@@ -300,6 +302,15 @@ function agentHint(agent: AgentAvailability): string | undefined {
 
 /** The agent a thread is waiting on an install for, by thread key. */
 const installingFor = observable.map<string, AgentKind>()
+
+/**
+ * The agent this thread waits on an install for. Sending meanwhile would go to pi and pin the
+ * thread to it, so the composer holds the message until the install ends.
+ */
+export function installingAgentLabel(thread: Thread): string | undefined {
+    const pending = installingFor.get(thread.key)
+    return pending && (agentsStore.get(pending)?.label ?? pending)
+}
 
 async function pickAgent(thread: Thread, agent: AgentAvailability | undefined, id: AgentKind) {
     if (id === 'pi' || agent?.available) {
@@ -368,5 +379,37 @@ export const AgentPicker = observer(({ thread }: { thread: Thread }) => {
                 })}
             </DropdownMenuContent>
         </DropdownMenu>
+    )
+})
+
+/**
+ * Autopilot on/off for this thread (a supervisor answers the agent in the user's place), with what
+ * it is doing: a pulsing dot while it judges a run, the cards waiting for the user.
+ */
+export const AutopilotToggle = observer(({ thread }: { thread: Thread }) => {
+    if (!thread.autopilotAvailable)
+        return null
+    const status = thread.autopilot
+    const on = !!status && status.phase !== 'off'
+    const pending = status?.pending ?? 0
+    const hint = on
+        ? status!.phase === 'supervising'
+            ? tr(`监督者在判断上一轮${status!.last ? `：${status!.last}` : ''}`, `The supervisor is judging the last run${status!.last ? `: ${status!.last}` : ''}`)
+            : tr('已开：每轮结束后由监督者替你回复，只有要你拍板的事才停下。点击关闭', 'On: after each run a supervisor replies for you, stopping only for what you decide. Click to turn off')
+        : tr('每轮结束后由一个只读的监督者替你回复，只有要你拍板的事才停下等你', 'After each run a read-only supervisor replies for you, stopping only for what you decide')
+    return (
+        <button
+            type="button"
+            role="switch"
+            aria-checked={on}
+            onClick={() => void thread.setAutopilot(!on)}
+            title={hint}
+            className={cn(pill, on && 'text-ide-accent hover:text-ide-accent')}
+        >
+            <Plane size={13} />
+            <span>{tr('自动驾驶', 'Autopilot')}</span>
+            {status?.phase === 'supervising' && <span aria-label={tr('监督中', 'Supervising')} className="size-1.5 shrink-0 animate-pulse rounded-full bg-ide-accent" />}
+            {pending > 0 && <span className="tabular-nums text-amber-600 dark:text-amber-400">{tr(`${pending} 张卡片`, `${pending} card${pending === 1 ? '' : 's'}`)}</span>}
+        </button>
     )
 })

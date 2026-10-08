@@ -56,7 +56,14 @@ async function findIn(bin: string, dirs: string[]): Promise<string | undefined> 
     return undefined
 }
 
-const findOnPath = (bin: string, searchPath: string) => findIn(bin, searchPath.split(path.delimiter))
+const expandHome = (dir: string) => dir.replace(/^~(?=\/)/, os.homedir())
+
+/** The agent's own CLI (codex, claude): the login shell's PATH, then its usual install folders. */
+function findCli(spec: AcpAgentSpec, searchPath: string): Promise<string | undefined> {
+    if (!spec.cli)
+        return Promise.resolve(undefined)
+    return findIn(spec.cli.bin, [...searchPath.split(path.delimiter), ...(spec.cli.dirs ?? []).map(expandHome)])
+}
 
 /** PI_GUI_ACP_<ID>='["node","/path/agent.mjs"]' replaces the adapter command (tests, local builds). */
 function overrideOf(spec: AcpAgentSpec): string[] | undefined {
@@ -113,7 +120,7 @@ export async function resolveLaunch(spec: AcpAgentSpec, appRoot?: string): Promi
     delete env.ELECTRON_RUN_AS_NODE
     // The user's own CLI: same version and sign-in as in their terminal.
     if (spec.cli && !env[spec.cli.env]) {
-        const cli = await findOnPath(spec.cli.bin, searchPath)
+        const cli = await findCli(spec, searchPath)
         if (cli)
             env[spec.cli.env] = cli
     }
@@ -125,7 +132,7 @@ export async function resolveLaunch(spec: AcpAgentSpec, appRoot?: string): Promi
     const override = overrideOf(spec)
     if (override)
         return { file: override[0], args: override.slice(1), env, via: 'override' }
-    const dirs = [...searchPath.split(path.delimiter), ...(spec.dirs ?? []).map(d => d.replace(/^~(?=\/)/, os.homedir()))]
+    const dirs = [...searchPath.split(path.delimiter), ...(spec.dirs ?? []).map(expandHome)]
     const adapter = await findIn(spec.bin, dirs)
     if (adapter)
         return { file: adapter, args: spec.args ?? [], env, via: 'path' }
@@ -195,7 +202,9 @@ export class AcpService {
                 return { ...base, available: true, via: launch.via, command, outdated: launch.outdated, installable: launch.outdated }
             }
             catch (error: any) {
-                return { ...base, available: false, error: String(error?.message ?? error), installable: error instanceof AgentNotInstalled && error.installable }
+                // Codex / Claude Code may be installed with only the ACP adapter missing.
+                const cli = error instanceof AgentNotInstalled ? await findCli(spec, await loginShellPath()) : undefined
+                return { ...base, available: false, cli, error: String(error?.message ?? error), installable: error instanceof AgentNotInstalled && error.installable }
             }
         }))
     }

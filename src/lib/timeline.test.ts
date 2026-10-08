@@ -1,7 +1,7 @@
 import type { AgentMessage } from '@shared/pi'
 import type { TimelineMessage } from './timeline'
 import { describe, expect, it } from 'vitest'
-import { blockTimeKey, buildTurns, groupSteps } from './timeline'
+import { blockTimeKey, buildTurns, groupSteps, pendingCards } from './timeline'
 import { readableError } from './utils'
 
 let n = 0
@@ -149,5 +149,57 @@ describe('readableError', () => {
             // Still running: it shows in the run's turn for now.
             expect(buildTurns(messages, { running: true }).map(t => t.steps.map(s => s.kind))).toEqual([['tool', 'text', 'review']])
         })
+    })
+})
+
+describe('autopilot', () => {
+    const reply = (text: string, timestamp = 2000): AgentMessage => ({ role: 'assistant', content: [{ type: 'text', text }], stopReason: 'stop', timestamp })
+    const custom = (customType: string, details: object, timestamp: number, content = ''): AgentMessage => ({ role: 'custom', customType, content, display: true, details, timestamp })
+    const card = (id: string, timestamp = 3000) => custom('pi-kit-autopilot-card', {
+        kind: 'autopilot-card', id, category: 'taste', title: `Card ${id}`, question: 'Which one?',
+        options: [{ id: 'A', label: 'Left' }, { id: 'B', label: 'Right' }], recommended: 'A', createdAt: timestamp,
+    }, timestamp)
+    const decision = (next: 'continue' | 'wait' | 'done', cards: string[] = [], timestamp = 3100) => custom('pi-kit-autopilot', {
+        kind: 'autopilot', id: `ap-${timestamp}`, status: 'done', next, reason: 'checked', rules: ['R05'], cards,
+        workTools: 1, commands: [], startedAt: 0, endedAt: 1,
+    }, timestamp)
+    const answer = (cardId: string, choice: string, timestamp = 4000) => custom('pi-kit-autopilot-answer', { cardId, choice, via: 'app', at: timestamp }, timestamp)
+    const message = (from: string, text: string, timestamp = 4100) => custom('pi-kit-autopilot-message', { from, rules: ['R05'] }, timestamp, text)
+
+    it('a supervisor message starts a turn of its own, marked as autopilot', () => {
+        const turns = buildTurns([m(user('build it')), m(reply('done')), m(decision('continue')), m(message('supervisor', 'now run the tests')), m(reply('tests pass', 5000))])
+        expect(turns.map(t => t.steps.map(s => s.kind))).toEqual([['text'], ['autopilot'], ['text']])
+        expect(turns[1].user).toBeUndefined()
+        expect(turns[2].user).toMatchObject({ text: 'now run the tests', autopilot: { from: 'supervisor', rules: ['R05'] } })
+    })
+
+    it('a waiting decision stands with its cards after it; a card is pending until answered', () => {
+        const before = [m(user('go')), m(reply('two options')), m(card('c1')), m(decision('wait', ['c1']))]
+        const pending = buildTurns(before)
+        expect(pending.map(t => t.steps.map(s => s.kind))).toEqual([['text'], ['autopilot', 'autopilot-card']])
+        expect(pending[1].steps[1]).toMatchObject({ kind: 'autopilot-card', card: { id: 'c1' }, answer: undefined })
+        expect(pendingCards(before).map(c => c.id)).toEqual(['c1'])
+
+        const after = [...before, m(answer('c1', 'B')), m(message('user', '用户对「Card c1」的决定：Right')), m(reply('going right', 5000))]
+        const answered = buildTurns(after)
+        expect(answered.map(t => t.steps.map(s => s.kind))).toEqual([['text'], ['autopilot', 'autopilot-card'], ['text']])
+        expect(answered[1].steps[1]).toMatchObject({ kind: 'autopilot-card', answer: { cardId: 'c1', choice: 'B' } })
+        expect(pending[1].steps[0]).toMatchObject({ kind: 'autopilot', settled: false })
+        expect(answered[1].steps[0]).toMatchObject({ kind: 'autopilot', settled: true })
+        expect(answered[2].user?.autopilot?.from).toBe('user')
+        expect(pendingCards(after)).toEqual([])
+    })
+
+    it('a gate card landing mid-run waits for the run to end', () => {
+        const tool = call('c1', 'bash', { command: 'git push' })
+        const messages = [
+            m(user('ship')),
+            m({ role: 'assistant', content: [tool], stopReason: 'toolUse', timestamp: 2000 }),
+            m(card('gate', 2100)),
+            m({ role: 'toolResult', toolCallId: 'c1', toolName: 'bash', content: [], isError: true, timestamp: 2200 }),
+            m(reply('blocked', 2300)),
+        ]
+        expect(buildTurns(messages, { running: true }).map(t => t.steps.map(s => s.kind))).toEqual([['tool', 'text', 'autopilot-card']])
+        expect(buildTurns([...messages, m(decision('wait', [], 2400))]).map(t => t.steps.map(s => s.kind))).toEqual([['tool', 'text'], ['autopilot-card', 'autopilot']])
     })
 })

@@ -2,13 +2,14 @@ import type {
     AgentMessage,
     AssistantMessage,
     BashExecutionMessage,
+    CustomMessage,
     ImageContent,
     TextContent,
     ToolCall,
     ToolResultMessage,
 } from '@shared/pi'
-import type { ReviewDetails, ReviewFeedbackDetails } from '@shared/capabilities'
-import { CAPABILITY_TOOLS, REVIEW_TYPES } from '@shared/capabilities'
+import type { AutopilotAnswerEntry, AutopilotCard, AutopilotDecision, AutopilotMessageDetails, ReviewDetails, ReviewFeedbackDetails } from '@shared/capabilities'
+import { AUTOPILOT_TYPES, CAPABILITY_TOOLS, REVIEW_TYPES } from '@shared/capabilities'
 import { readableError } from './utils'
 
 /** One message in display order. Snapshot items carry their session entry id. */
@@ -61,6 +62,10 @@ export type Step =
     | { kind: 'error', key: string, text: string, aborted: boolean }
     /** A review report; `applied` lists its item ids already sent back to the agent. */
     | { kind: 'review', key: string, report: ReviewDetails, applied: string[] }
+    /** One autopilot supervisor decision after a run; `settled` once the user answered all its cards. */
+    | { kind: 'autopilot', key: string, decision: AutopilotDecision, settled: boolean }
+    /** A decision waiting for the user; `answer` once one is on the branch. */
+    | { kind: 'autopilot-card', key: string, card: AutopilotCard, answer?: AutopilotAnswerEntry }
 
 export interface UserPrompt {
     text: string
@@ -69,6 +74,8 @@ export interface UserPrompt {
     pending: boolean
     /** Set when this prompt is review feedback: the items sent back; `text` is the user's note. */
     review?: { reviewId: string, round?: number, items: { id: string, title: string }[] }
+    /** Set when autopilot sent this prompt in the user's place (or relayed a card answer). */
+    autopilot?: { from: AutopilotMessageDetails['from'], rules?: string[] }
 }
 
 /** Token usage and cost summed over a turn's model requests. */
@@ -157,6 +164,47 @@ export function contentImages(content: string | (TextContent | ImageContent)[] |
     return typeof content === 'string' ? [] : (content ?? []).filter((c): c is ImageContent => c.type === 'image')
 }
 
+const isCard = (message: AgentMessage): boolean => message.role === 'custom' && message.customType === AUTOPILOT_TYPES.card && (message.details as AutopilotCard | undefined)?.kind === 'autopilot-card'
+const isAnswer = (message: AgentMessage): boolean => message.role === 'custom' && message.customType === AUTOPILOT_TYPES.answer && typeof (message.details as AutopilotAnswerEntry | undefined)?.cardId === 'string'
+
+/** Autopilot answers on the branch, by card id. */
+function cardAnswers(messages: TimelineMessage[]): Map<string, AutopilotAnswerEntry> {
+    const answers = new Map<string, AutopilotAnswerEntry>()
+    for (const { message } of messages) {
+        if (isAnswer(message)) {
+            const answer = (message as CustomMessage).details as AutopilotAnswerEntry
+            answers.set(answer.cardId, answer)
+        }
+    }
+    return answers
+}
+
+/** Autopilot cards with no answer on the branch, oldest first. */
+export function pendingCards(messages: TimelineMessage[]): AutopilotCard[] {
+    const answers = cardAnswers(messages)
+    return messages.map(m => m.message).filter(isCard).map(m => (m as CustomMessage).details as AutopilotCard).filter(c => !answers.has(c.id))
+}
+
+/** A decision's own cards follow it, though the extension appends them first. */
+function decisionFirst<T extends { step: Step }>(list: T[]): T[] {
+    const owned = new Set<string>()
+    for (const { step } of list) {
+        if (step.kind === 'autopilot')
+            step.decision.cards.forEach(id => owned.add(id))
+    }
+    const out: T[] = []
+    for (const item of list) {
+        if (item.step.kind === 'autopilot-card' && owned.has(item.step.card.id))
+            continue
+        out.push(item)
+        if (item.step.kind === 'autopilot') {
+            const ids = item.step.decision.cards
+            out.push(...list.filter(x => x.step.kind === 'autopilot-card' && ids.includes(x.step.card.id)))
+        }
+    }
+    return out
+}
+
 export interface BuildOptions {
     /** Assistant message currently streaming (stopReason "pending"). */
     streaming?: AssistantMessage | null
@@ -195,6 +243,8 @@ export function buildTurns(messages: TimelineMessage[], options: BuildOptions = 
         }
     }
 
+    const answers = cardAnswers(messages)
+
     const turns: Turn[] = []
     let current: Turn | undefined
     const start = (key: string, user?: UserPrompt, timestamp = 0) => {
@@ -203,11 +253,16 @@ export function buildTurns(messages: TimelineMessage[], options: BuildOptions = 
         return current
     }
     // A report can land mid-run; it waits for the run's turn to end and then stands on its own, so
-    // it never splits the run.
+    // it never splits the run. Autopilot decisions and cards do the same, sharing one turn per run.
     let reviews: { step: Step, timestamp: number }[] = []
     const flushReviews = () => {
-        for (const { step, timestamp } of reviews) {
-            start(step.key, undefined, timestamp).steps.push(step)
+        let autopilot: Turn | undefined
+        for (const { step, timestamp } of decisionFirst(reviews)) {
+            const own = step.kind === 'autopilot' || step.kind === 'autopilot-card'
+            const turn = own && autopilot ? autopilot : start(step.key, undefined, timestamp)
+            autopilot = own ? turn : undefined
+            turn.steps.push(step)
+            touch(turn, timestamp)
             current = undefined
         }
         reviews = []
@@ -312,6 +367,25 @@ export function buildTurns(messages: TimelineMessage[], options: BuildOptions = 
                         review: { reviewId: feedback.reviewId, round: report?.round, items: feedback.items.map(id => ({ id, title: title(id) })) },
                     }, message.timestamp)
                 }
+                else if (message.customType === AUTOPILOT_TYPES.decision && details?.kind === 'autopilot') {
+                    reviews.push({ step: { kind: 'autopilot', key, decision: details, settled: details.cards?.length > 0 && details.cards.every((id: string) => answers.has(id)) }, timestamp: message.timestamp })
+                }
+                else if (isCard(message)) {
+                    reviews.push({ step: { kind: 'autopilot-card', key, card: details, answer: answers.get(details.id) }, timestamp: message.timestamp })
+                }
+                else if (isAnswer(message)) {
+                    // Shown on its card.
+                }
+                else if (message.customType === AUTOPILOT_TYPES.message) {
+                    const from = (details as AutopilotMessageDetails | undefined)?.from ?? 'supervisor'
+                    open(key, {
+                        text: contentText(message.content),
+                        images: contentImages(message.content),
+                        timestamp: message.timestamp,
+                        pending: false,
+                        autopilot: { from, ...(details?.rules?.length ? { rules: details.rules } : {}) },
+                    }, message.timestamp)
+                }
                 else if (message.display) {
                     ensure(key, message.timestamp).steps.push({ kind: 'note', key, variant: 'custom', title: message.customType, text: contentText(message.content) })
                 }
@@ -323,7 +397,7 @@ export function buildTurns(messages: TimelineMessage[], options: BuildOptions = 
     }
     // Still running: the report shows in the run's turn until it ends.
     if (reviews.length && options.running && current) {
-        current.steps.push(...reviews.map(r => r.step))
+        current.steps.push(...decisionFirst(reviews).map(r => r.step))
         reviews = []
     }
     flushReviews()

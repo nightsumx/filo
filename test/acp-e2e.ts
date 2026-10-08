@@ -253,8 +253,13 @@ async function main() {
         await js(`(() => { ${cursorRow()}.click(); return true })()`)
         await until('installing', () => js<boolean>(`[...document.querySelectorAll('button')].some(b => b.textContent.includes('Installing Cursor'))`))
         check(true, 'the picker says it is installing Cursor')
+        // A message sent now would go to pi and pin the thread to it: the composer holds it.
+        await js(`(() => { ${T}.draft = 'too early'; return true })()`)
+        await until('the send button reflects the draft', () => js<boolean>(`!!document.querySelector('button[aria-label="Send"]')`))
+        check(await js<boolean>(`document.querySelector('button[aria-label="Send"]').disabled && document.querySelector('textarea').placeholder.includes('Installing Cursor')`), 'sending waits for the install')
         await until('Cursor installed and running', () => js<boolean>(`${T}.agent === 'cursor' && ${T}.agentStatus === 'ready'`), 60_000)
         check(true, 'once installed, the thread runs Cursor')
+        check(await js<boolean>(`${T}.isEmpty && !document.querySelector('button[aria-label="Send"]').disabled`), 'the held draft can be sent once Cursor is ready')
         await js(`(() => { const t = ${T}; t.draft = 'hi cursor'; void t.send(); return true })()`)
         await until('Cursor answers', () => js<boolean>(`(() => { const t = ${T}; return !t.running && JSON.stringify(t.turns.at(-1)?.steps ?? []).includes('echo: hi cursor') })()`), 20_000)
         check(true, 'the installed Cursor answers')

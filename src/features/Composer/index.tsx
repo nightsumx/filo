@@ -11,7 +11,7 @@ import { observer } from 'mobx-react-lite'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { StatusLine } from '../Thread/StatusLine'
-import { AgentPicker, ConfigPickers, ModelPicker, ModePicker, NoModelNotice, ThinkingPicker } from './Pickers'
+import { AgentPicker, AutopilotToggle, ConfigPickers, installingAgentLabel, ModelPicker, ModePicker, NoModelNotice, ThinkingPicker } from './Pickers'
 import { TodoBar } from './TodoBar'
 import { tr } from '@/lib/i18n'
 import type { Localized } from '@shared/i18n'
@@ -116,7 +116,10 @@ export const Composer = observer(({ thread }: { thread: Thread }) => {
         el.style.height = `${Math.min(el.scrollHeight, window.innerHeight * 0.4)}px`
     }, [thread.draft])
 
-    const canSend = !!thread.draft.trim() || thread.images.length > 0
+    // The agent picked for this fresh thread is still installing: typing is fine, sending waits.
+    const installing = installingAgentLabel(thread)
+    const hasInput = !!thread.draft.trim() || thread.images.length > 0
+    const canSend = hasInput && !installing
     const agent = thread.agentLabel
     const queued = [...thread.queue.steering, ...thread.queue.followUp]
     const widgetsAbove = Object.entries(thread.widgets).filter(([, w]) => w.placement === 'aboveEditor')
@@ -153,7 +156,8 @@ export const Composer = observer(({ thread }: { thread: Thread }) => {
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault()
             setSlashDismissed(false)
-            void thread.send()
+            if (canSend)
+                void thread.send()
             return
         }
         if (e.key === 'Escape' && thread.running) {
@@ -230,7 +234,7 @@ export const Composer = observer(({ thread }: { thread: Thread }) => {
                         value={thread.draft}
                         rows={2}
                         aria-label={tr(`给 ${agent} 发消息`, `Message ${agent}`)}
-                        placeholder={thread.running ? (queuesInput(thread) ? tr(`继续输入，${agent} 这轮结束后接着发送（Esc 中断）`, `Type a follow-up; ${agent} gets it after this run (Esc to stop)`) : tr(`继续输入以引导 ${agent}（Esc 中断）`, `Type to steer ${agent} (Esc to stop)`)) : thread.planMode ? tr(`描述要做的事，${agent} 先写出计划给你审阅`, `Describe the task; ${agent} writes a plan for you to review first`) : tr(`让 ${agent} 做点什么，输入 / 查看命令`, `Ask ${agent} to do something, or type / for commands`)}
+                        placeholder={installing ? tr(`正在安装 ${installing}，装好后就能发送`, `Installing ${installing}; you can send once it is ready`) : thread.running ? (queuesInput(thread) ? tr(`继续输入，${agent} 这轮结束后接着发送（Esc 中断）`, `Type a follow-up; ${agent} gets it after this run (Esc to stop)`) : tr(`继续输入以引导 ${agent}（Esc 中断）`, `Type to steer ${agent} (Esc to stop)`)) : thread.planMode ? tr(`描述要做的事，${agent} 先写出计划给你审阅`, `Describe the task; ${agent} writes a plan for you to review first`) : tr(`让 ${agent} 做点什么，输入 / 查看命令`, `Ask ${agent} to do something, or type / for commands`)}
                         onChange={(e) => {
                             thread.draft = e.target.value
                             setSlashDismissed(false)
@@ -272,9 +276,10 @@ export const Composer = observer(({ thread }: { thread: Thread }) => {
                         <ModelPicker thread={thread} />
                         <ThinkingPicker thread={thread} />
                         <ModePicker thread={thread} />
+                        <AutopilotToggle thread={thread} />
                         <ConfigPickers thread={thread} />
                         <span className="flex-1" />
-                        {thread.running && !canSend
+                        {thread.running && !hasInput
                             ? (
                                     <button
                                         type="button"
@@ -292,7 +297,7 @@ export const Composer = observer(({ thread }: { thread: Thread }) => {
                                         aria-label={thread.running ? tr('发送引导消息', 'Send steering message') : tr('发送', 'Send')}
                                         disabled={!canSend}
                                         onClick={() => void thread.send()}
-                                        title={tr('发送（Enter）', 'Send (Enter)')}
+                                        title={installing ? tr(`正在安装 ${installing}…`, `Installing ${installing}…`) : tr('发送（Enter）', 'Send (Enter)')}
                                         className="ml-1 flex h-7 w-7 items-center justify-center rounded-md bg-ide-accent text-always-white hover:bg-ide-accent-hover disabled:bg-gray-100 disabled:text-gray-400"
                                     >
                                         <ArrowUp size={15} />

@@ -14,10 +14,10 @@
   "author": "nightsumx",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/nightsumx/pi-kit.git",
+    "url": "git+https://github.com/nightsumx/filo.git",
     "directory": "packages/pi-cc-tui"
   },
-  "homepage": "https://github.com/nightsumx/pi-kit/tree/main/packages/pi-cc-tui#readme",
+  "homepage": "https://github.com/nightsumx/filo/tree/main/packages/pi-cc-tui#readme",
   "type": "module",
   "scripts": {
     "prepack": "node scripts/bundle-capabilities.mjs",
@@ -39,7 +39,8 @@
       "./extensions/capabilities/approval.ts",
       "./extensions/capabilities/plan.ts",
       "./extensions/capabilities/subagent.ts",
-      "./extensions/capabilities/review.ts"
+      "./extensions/capabilities/review.ts",
+      "./extensions/capabilities/autopilot.ts"
     ],
     "themes": [
       "./themes/claude-code.json",

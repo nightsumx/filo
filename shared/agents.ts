@@ -18,8 +18,11 @@ export interface AcpAgentSpec {
     npm?: string
     /** Or a pinned archive per platform (`process.platform-process.arch`), with the command inside it. */
     archive?: Partial<Record<string, AgentArchive>>
-    /** The agent's own CLI, passed to the adapter so it uses the user's install and sign-in. */
-    cli?: { bin: string, env: string }
+    /**
+     * The agent's own CLI, passed to the adapter so it uses the user's install and sign-in. Agents
+     * like Codex and Claude Code need an ACP adapter on top of it; `dirs` are extra folders to look in.
+     */
+    cli?: { bin: string, env: string, dirs?: string[] }
     /** An API key the agent takes from pi's auth.json (Model providers) when the environment has none. */
     apiKey?: { provider: string, env: string }
     /** What to do when the agent says it is not signed in. */
@@ -56,6 +59,8 @@ export const ACP_AGENTS: readonly AcpAgentSpec[] = [
         bin: 'claude-agent-acp',
         args: ['--hide-claude-auth'],
         npm: '@agentclientprotocol/claude-agent-acp@0.86.0',
+        // The adapter runs this CLI instead of the one bundled with its SDK.
+        cli: { bin: 'claude', env: 'CLAUDE_CODE_EXECUTABLE', dirs: ['~/.local/bin', '~/.claude/local'] },
         apiKey: { provider: 'anthropic', env: 'ANTHROPIC_API_KEY' },
         inputIncludesCache: false,
         signIn: {
@@ -127,6 +132,8 @@ export interface AgentAvailability {
     id: AgentKind
     label: string
     available: boolean
+    /** The agent's own CLI, when found: with `available` false, only the ACP adapter is missing. */
+    cli?: string
     /** The adapter command that will run, for the settings line. */
     command?: string
     /** Where the command comes from: the user's PATH, the app's own install, or a test override. */

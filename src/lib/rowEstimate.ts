@@ -134,6 +134,45 @@ function reviewHeight(step: Extract<Step, { kind: 'review' }>, width: number): n
     return ROW_LINE + 2 + markdownHeight(r.summary, width - 22).height + 18 + 6 + (r.rechecks.length + items) * ROW_LINE + (items ? 6 + 28 : 0) + 2 + ROW_LINE
 }
 
+/** Lines of 12.5px text (leading-5) at the given width; textWidth is measured at the 13.5px body size. */
+function smallLines(text: string | undefined, width: number): number {
+    if (!text)
+        return 0
+    return text.split('\n').reduce((n, l) => n + Math.max(1, Math.ceil(textWidth(l) * (12.5 / 13.5) / Math.max(120, width))), 0)
+}
+
+const SMALL_LINE = 20
+
+/** Autopilot decision: its line, then the reason and the valve or error under it; the commands open on click. */
+function autopilotHeight(step: Extract<Step, { kind: 'autopilot' }>, width: number): number {
+    const d = step.decision
+    return ROW_LINE + (smallLines(d.reason, width) + smallLines(d.valve, width - 18) + smallLines(d.error, width)) * SMALL_LINE
+}
+
+/** An answered card is one line; a pending one is the whole form (see AutopilotCardStep). */
+function cardHeight(step: Extract<Step, { kind: 'autopilot-card' }>, width: number): number {
+    if (step.answer)
+        return ROW_LINE
+    const c = step.card
+    const optionWidth = width - 16 - 24
+    let h = ROW_LINE + smallLines(c.question, width) * SMALL_LINE
+    if (c.gate)
+        h += 4 + 12 + smallLines(c.gate.summary, width - 24) * SMALL_LINE
+    if (c.rules)
+        h += (c.rules.summary ? 4 + smallLines(c.rules.summary, width) * SMALL_LINE : 0) + ROW_LINE
+    if (c.held)
+        h += smallLines(c.held, width) * SMALL_LINE
+    if (c.evidence?.length)
+        h += 4 + c.evidence.length * SMALL_LINE
+    for (const o of c.options)
+        h += 8 + smallLines(`${o.label}${o.id === c.recommended ? ' recommended' : ''}${o.detail ? ` — ${o.detail}` : ''}`, optionWidth) * SMALL_LINE
+    // Margins, the own-words field and the fallback line.
+    h += 4 + 4 + 28 + 4
+    if (c.fallback)
+        h += smallLines(c.fallback, width - 8) * SMALL_LINE
+    return h
+}
+
 /** A pending ask is a form (question, choices, buttons); an answered one lists question → answer. */
 function askHeight(step: ToolStep): number {
     const details = step.result?.details
@@ -159,6 +198,11 @@ function estimate(row: TranscriptRow, listWidth: number): number {
             if (row.user.review) {
                 const note = row.user.text ? row.user.text.split('\n').reduce((n, l) => n + Math.max(1, Math.ceil(textWidth(l) / bubble)), 0) : 0
                 return (row.first ? 24 : 12) + 12 + (1 + row.user.review.items.length + note) * 20
+            }
+            // Autopilot's prompt: a source line over the text.
+            if (row.user.autopilot) {
+                const lines = row.user.text.split('\n').reduce((n, l) => n + Math.max(1, Math.ceil(textWidth(l) / bubble)), 0)
+                return (row.first ? 24 : 12) + Math.min(USER_BUBBLE_MAX_HEIGHT, 12 + 20 + lines * 22)
             }
             const lines = row.user.text.split('\n').reduce((n, l) => n + Math.max(1, Math.ceil(textWidth(l) / bubble)), 0)
             return (row.first ? 24 : 12) + Math.min(USER_BUBBLE_MAX_HEIGHT, 12 + lines * 22) + (row.user.images.length ? 86 : 0)
@@ -203,6 +247,10 @@ function estimate(row: TranscriptRow, listWidth: number): number {
                     return pad + ROW_LINE + RESULT_LINE
                 case 'review':
                     return pad + reviewHeight(step, width)
+                case 'autopilot':
+                    return pad + autopilotHeight(step, width)
+                case 'autopilot-card':
+                    return pad + cardHeight(step, width)
                 case 'bash':
                     return pad + ROW_LINE + (step.message.output ? 16 + Math.min(10, step.message.output.split('\n').length) * 18 : 0)
                 default:

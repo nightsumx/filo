@@ -1,5 +1,5 @@
 import type { AcpConfigOption, AgentFeatures, AgentKind } from '@shared/agents'
-import type { ApprovalChoice, ApprovalMode, ApprovalRequest, AskResponse, CapabilityId, GuiCommands, PlanDecision, ReviewApply, ReviewProgress, TodoDetails } from '@shared/capabilities'
+import type { ApprovalChoice, ApprovalMode, ApprovalRequest, AskResponse, AutopilotAnswer, AutopilotCard, AutopilotStatus, CapabilityId, GuiCommands, PlanDecision, ReviewApply, ReviewProgress, TodoDetails } from '@shared/capabilities'
 import type { AgentExitInfo } from '@shared/ipc'
 import type { Presence } from '@shared/capabilities'
 import type {
@@ -19,11 +19,12 @@ import type { BlockTime, Step, TimelineMessage, ToolExecState, ToolResultView } 
 import { newThreadLabel, tr } from '@/lib/i18n'
 import { parsePartialJson } from '@/lib/partialJson'
 import { threadActivity } from '@/lib/threadActivity'
-import { blockTimeKey, buildTurns, contentImages, contentText } from '@/lib/timeline'
+import { blockTimeKey, buildTurns, contentImages, contentText, pendingCards } from '@/lib/timeline'
 import type { WaitingKind } from '@/lib/threadActivity'
 import { tuiTitle } from '@/lib/toolMeta'
 import { agentFeatures, agentLabel, agentOfKey } from '@shared/agents'
-import { APPROVAL_MODES, APPROVAL_TITLE_PREFIX, GUI_COMMAND_PREFIX, GUI_STATUS, REVIEW_TYPES } from '@shared/capabilities'
+import { APPROVAL_MODES, APPROVAL_TITLE_PREFIX, GUI_COMMAND_PREFIX, GUI_STATUS } from '@shared/capabilities'
+import { isShownEntry } from '@shared/entries'
 import { readableError, uid } from '@/lib/utils'
 import { makeAutoObservable, observable, runInAction, toJS } from 'mobx'
 import { toast } from 'sonner'
@@ -152,6 +153,8 @@ export class Thread {
     private unfollow: (() => void) | null = null
     /** The session file changed under this thread's own pi: restart it before the next prompt. */
     private agentStale = false
+    /** Coalesces the reloads of entries appended while idle (autopilot appends several at once). */
+    private entryReload: ReturnType<typeof setTimeout> | null = null
 
     constructor(private host: ThreadHost, init: { key: string, cwd: string, sessionPath?: string, name?: string, firstPrompt?: string, agent?: AgentKind }) {
         this.key = init.key
@@ -161,7 +164,7 @@ export class Thread {
         this.name = init.name
         this.firstPrompt = init.firstPrompt
         this.persisted = !!init.sessionPath
-        makeAutoObservable<this, 'liveCounter' | 'partialArgs' | 'startPromise' | 'stopping' | 'loadedConfig' | 'restartPending' | 'settling' | 'unfollow' | 'agentStale' | 'host'>(this, {
+        makeAutoObservable<this, 'liveCounter' | 'partialArgs' | 'startPromise' | 'stopping' | 'loadedConfig' | 'restartPending' | 'settling' | 'unfollow' | 'agentStale' | 'entryReload' | 'host'>(this, {
             id: false,
             lastEventAt: false,
             liveCounter: false,
@@ -173,6 +176,7 @@ export class Thread {
             settling: false,
             unfollow: false,
             agentStale: false,
+            entryReload: false,
             host: false,
         }, { autoBind: true })
     }
@@ -419,6 +423,29 @@ export class Thread {
         return this.planMode ? 'plan' : this.approvalMode
     }
 
+    /** The autopilot capability is loaded in this thread's pi. */
+    get autopilotAvailable(): boolean {
+        return this.guiCommands.includes('gui-autopilot' satisfies GuiCommands['autopilot'])
+    }
+
+    /** What autopilot reports; null when it is not loaded (or has not said yet). */
+    get autopilot(): AutopilotStatus | null {
+        const raw = this.statuses[GUI_STATUS.autopilot]
+        if (!raw)
+            return null
+        try {
+            return JSON.parse(raw) as AutopilotStatus
+        }
+        catch {
+            return null
+        }
+    }
+
+    /** Autopilot cards on the branch nobody answered yet. */
+    get pendingCards(): AutopilotCard[] {
+        return pendingCards([...this.items, ...this.live])
+    }
+
     /** Extension status entries for display; `gui-` keys carry mode state instead. */
     get visibleStatuses(): [string, string][] {
         return Object.entries(this.statuses).filter(([key]) => !key.startsWith(GUI_COMMAND_PREFIX))
@@ -449,7 +476,14 @@ export class Thread {
             return 'approval'
         if (!this.uiRequests.length && [...this.tools.values()].some(s => s.running && s.partial?.details?.kind === 'plan'))
             return 'plan'
+        if (this.autopilotWaiting)
+            return 'cards'
         return 'question'
+    }
+
+    /** Autopilot stopped on cards only the user decides; the run is over, so nothing else waits. */
+    private get autopilotWaiting(): boolean {
+        return !this.running && !this.uiRequests.length && this.autopilot?.phase === 'waiting'
     }
 
     /** The approval prompt pi is blocked on for a tool call, if any. */
@@ -470,6 +504,8 @@ export class Thread {
             if (state.running && details?.kind === 'plan' && details.status === 'pending')
                 return ''
         }
+        if (this.autopilotWaiting)
+            return this.pendingCards[0]?.title ?? ''
         return undefined
     }
 
@@ -1006,6 +1042,28 @@ export class Thread {
         }
     }
 
+    /** Autopilot on or off for this thread; the extension records it in the session. */
+    async setAutopilot(on: boolean) {
+        try {
+            await this.guiCommand('gui-autopilot', on ? 'on' : 'off')
+        }
+        catch (error: any) {
+            toast.error(error.message)
+        }
+    }
+
+    /** Decides an autopilot card; the extension tells the agent, which starts a turn when idle. */
+    async answerCard(cardId: string, answer: AutopilotAnswer): Promise<boolean> {
+        try {
+            await this.guiCommand('gui-autopilot-answer', `${cardId} ${JSON.stringify(answer)}`)
+            return true
+        }
+        catch (error: any) {
+            toast.error(error.message)
+            return false
+        }
+    }
+
     respondUi(request: UiRequest, payload: { value?: string, confirmed?: boolean, cancelled?: boolean }) {
         this.uiRequests = this.uiRequests.filter(r => r.id !== request.id)
         if (this.agentId)
@@ -1089,12 +1147,16 @@ export class Thread {
             case 'extension_ui_request':
                 this.handleUiRequest(event)
                 break
-            // A review report: appended while the agent may be idle, when no settle reloads the session.
+            // A review report or an autopilot entry: appended while the agent may be idle, when no
+            // settle reloads the session.
             case 'entry_appended':
-                if (event.entry?.customType === REVIEW_TYPES.report && event.entry.data?.kind === 'review') {
-                    this.pushLive({ role: 'custom', customType: REVIEW_TYPES.report, content: '', display: true, details: event.entry.data, timestamp: Date.now() })
-                    if (!this.running && !this.settling)
-                        void this.load()
+                if (isShownEntry(event.entry)) {
+                    this.pushLive({ role: 'custom', customType: event.entry.customType, content: '', display: true, details: event.entry.data, timestamp: Date.now() })
+                    this.entryReload ??= setTimeout(() => {
+                        this.entryReload = null
+                        if (!this.running && !this.settling)
+                            void this.load()
+                    }, 100)
                 }
                 break
             case 'acp_config_changed':

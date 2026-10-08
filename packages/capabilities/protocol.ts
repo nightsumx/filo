@@ -5,7 +5,7 @@
 // to other extensions in the same pi as GUI_EVENTS on `pi.events`.
 // Extensions import these with `import type` only; the event names and env vars are repeated there.
 
-export type CapabilityId = 'todo' | 'ask' | 'approval' | 'plan' | 'subagent' | 'review'
+export type CapabilityId = 'todo' | 'ask' | 'approval' | 'plan' | 'subagent' | 'review' | 'autopilot'
 
 /** Hidden commands are filtered out of the slash menu. */
 export const GUI_COMMAND_PREFIX = 'gui-'
@@ -31,6 +31,12 @@ export interface GuiCommands {
     reviewCancel: 'gui-review-cancel'
     /** `/gui-rewind <entryId>`: back to before that user prompt, in the same session (extensions/rewind.ts, always loaded). */
     rewind: 'gui-rewind'
+    /** `/gui-autopilot on|off`: the supervisor answers for the user in this thread. */
+    autopilot: 'gui-autopilot'
+    /** `/gui-autopilot-answer <cardId> <AutopilotAnswer JSON>`: the user decides a card. */
+    autopilotAnswer: 'gui-autopilot-answer'
+    /** `/gui-autopilot-learn`: proposes rulebook changes from the recorded interventions. */
+    autopilotLearn: 'gui-autopilot-learn'
 }
 
 /**
@@ -126,6 +132,8 @@ export const GUI_STATUS = {
     plan: 'gui-plan',
     /** ReviewProgress JSON while a review runs; cleared when its report is appended. */
     review: 'gui-review',
+    /** AutopilotStatus JSON while autopilot is loaded. */
+    autopilot: 'gui-autopilot',
 } as const
 
 // ---------------------------------------------------------------- todo
@@ -348,4 +356,171 @@ export interface ReviewApply {
 /** Details of the feedback message sent to the agent. */
 export interface ReviewFeedbackDetails extends ReviewApply {
     reviewId: string
+}
+
+// ---------------------------------------------------------------- autopilot
+
+/**
+ * Session entries: the on/off switch, each supervisor decision, the cards waiting for the user and
+ * their answers (`pi.appendEntry`, outside the model's context), and the message the supervisor sends
+ * the agent in the user's place (a custom message, which the model reads as the user's).
+ */
+export const AUTOPILOT_TYPES = {
+    mode: 'pi-kit-autopilot-mode',
+    decision: 'pi-kit-autopilot',
+    card: 'pi-kit-autopilot-card',
+    answer: 'pi-kit-autopilot-answer',
+    message: 'pi-kit-autopilot-message',
+} as const
+
+/**
+ * Files outside any project, under `<agent dir>/AUTOPILOT_DIR`:
+ *   rules.md     the user's rulebook the supervisor judges by
+ *   config.json  AutopilotConfig
+ *   board/<session id>.json   AutopilotPeer, one per running pi with autopilot loaded
+ *   mail/<session id>/*.json  AutopilotMail for that session, removed once read
+ *   misses.jsonl              AutopilotMiss, what the user said while autopilot was on
+ */
+export const AUTOPILOT_DIR = 'autopilot'
+
+/** off: the user drives. idle: on, nothing to do. supervising: judging the last run. waiting: cards need the user. */
+export type AutopilotPhase = 'off' | 'idle' | 'supervising' | 'waiting'
+
+export interface AutopilotStatus {
+    phase: AutopilotPhase
+    since: number
+    /** Decisions made in this thread. */
+    decisions: number
+    /** Cards waiting for the user. */
+    pending: number
+    /** The supervisor's tool calls so far while supervising, and the latest one. */
+    tools?: number
+    last?: string
+}
+
+/** What a card asks about. gate: a call the hard rules stopped; rules: a rulebook change. */
+export type AutopilotCategory = 'taste' | 'direction' | 'money' | 'release' | 'delete' | 'naming' | 'theory' | 'gate' | 'rules' | 'other'
+
+export interface AutopilotOption {
+    id: string
+    label: string
+    detail?: string
+}
+
+/** A blocked call: `key` is what an "allow" grants for the rest of the session. */
+export interface AutopilotGate {
+    key: string
+    tool: string
+    summary: string
+    why: string
+}
+
+export interface AutopilotCard {
+    kind: 'autopilot-card'
+    id: string
+    category: AutopilotCategory
+    title: string
+    question: string
+    options: AutopilotOption[]
+    /** Option id the supervisor recommends. */
+    recommended?: string
+    /** What happens while nobody answers; never something risky. */
+    fallback?: string
+    /** Files to look at first: screenshots, contact sheets, diffs. */
+    evidence?: string[]
+    gate?: AutopilotGate
+    /** A rules card carries the proposed rulebook. */
+    rules?: { text: string, summary: string }
+    /** A safety valve held this message back; choosing `go` sends it. */
+    held?: string
+    createdAt: number
+}
+
+/** `/gui-autopilot-answer` payload: an option id, free text, or both. */
+export interface AutopilotAnswer {
+    choice?: string
+    text?: string
+}
+
+export interface AutopilotAnswerEntry extends AutopilotAnswer {
+    cardId: string
+    via: 'app' | 'terminal' | 'mail'
+    at: number
+}
+
+export interface AutopilotDecision<Message = unknown, Streaming = unknown> {
+    kind: 'autopilot'
+    id: string
+    status: 'done' | 'failed' | 'cancelled'
+    /** continue: `message` goes to the agent. wait: only the user can move this on. done: the goal is met. */
+    next: 'continue' | 'wait' | 'done'
+    message?: string
+    reason: string
+    /** Rulebook ids that fired (R05…). */
+    rules: string[]
+    /** Cards this decision added. */
+    cards: string[]
+    /** Set when a safety valve overrode the supervisor. */
+    valve?: string
+    /** Tool calls in the agent run this decision judged. */
+    workTools: number
+    /** What this thread works on, in a few words; goes to the board. */
+    topic?: string
+    /** Notes sent to other sessions. */
+    peers?: { session: string, text: string }[]
+    commands: ReviewEvidence[]
+    run?: SubagentDetails<Message, Streaming>
+    startedAt: number
+    endedAt: number
+    error?: string
+}
+
+/** Details of the supervisor's message to the agent. */
+export interface AutopilotMessageDetails {
+    decisionId?: string
+    /** user: a card answer relayed; peer: a note from another session; retry: resent after an API error. */
+    from: 'supervisor' | 'user' | 'peer' | 'retry'
+    rules?: string[]
+}
+
+export interface AutopilotPeer {
+    session: string
+    pid: number
+    cwd: string
+    /** Git top level, or cwd: sessions in the same root share files. */
+    root: string
+    file?: string
+    topic?: string
+    state: 'running' | AutopilotPhase
+    /** Files this session's edit/write calls touched. */
+    files: string[]
+    cards: Pick<AutopilotCard, 'id' | 'category' | 'title' | 'question' | 'options' | 'recommended'>[]
+    /** Start of the agent's latest reply. */
+    last?: string
+    updatedAt: number
+}
+
+export type AutopilotMail =
+    | { kind: 'note', from: string, text: string, at: number }
+    | { kind: 'answer', cardId: string, answer: AutopilotAnswer, at: number }
+
+export interface AutopilotMiss {
+    at: number
+    cwd: string
+    session: string
+    /** What the user typed while autopilot was on. */
+    text: string
+    /** Start of the agent's reply the user answered. */
+    reply?: string
+    /** The supervisor's latest decision before it. */
+    decision?: Pick<AutopilotDecision, 'next' | 'message' | 'reason' | 'rules'>
+    phase: AutopilotPhase
+    angry?: boolean
+}
+
+export interface AutopilotConfig {
+    /** Substrings of a command (or of the script it runs) that mean a paid API. */
+    paid?: string[]
+    /** Absolute path prefixes the agent must not write. */
+    protected?: string[]
 }
