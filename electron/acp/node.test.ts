@@ -7,6 +7,7 @@ import os from 'node:os'
 import path from 'node:path'
 import process from 'node:process'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { platform } from '../platform'
 import { installAgent } from './install'
 import { appNodeBin, setAppNode, withAppNode } from './node'
 
@@ -14,7 +15,10 @@ import { appNodeBin, setAppNode, withAppNode } from './node'
 const electron: string = createRequire(import.meta.url)('electron')
 const npm = path.resolve('bundled-pi/node_modules/npm')
 // A Mac without Node.js: only the system folders.
-const BARE_PATH = '/usr/bin:/bin:/usr/sbin:/sbin'
+const BARE_PATH = ['/usr/bin', '/bin', '/usr/sbin', '/sbin'].join(path.delimiter)
+const joined = (...dirs: string[]) => dirs.join(path.delimiter)
+// Shebang scripts and /bin/sh: what a POSIX system runs.
+const posix = platform.id !== 'win32'
 
 describe('the app as node, without Node.js on PATH', () => {
     let dir: string
@@ -31,13 +35,13 @@ describe('the app as node, without Node.js on PATH', () => {
 
     it('puts its folder last on PATH', async () => {
         const bin = await appNodeBin()
-        expect(env.PATH).toBe(`${BARE_PATH}:${bin}`)
-        expect(await withAppNode(`/a::/b`)).toBe(`/a:/b:${bin}`)
+        expect(env.PATH).toBe(joined(BARE_PATH, bin!))
+        expect(await withAppNode(joined('/a', '', '/b'))).toBe(joined('/a', '/b', bin!))
         setAppNode(undefined)
         expect(await withAppNode(BARE_PATH)).toBe(BARE_PATH)
     })
 
-    it('runs scripts as node, and what they start sees a normal environment', async () => {
+    it.runIf(posix)('runs scripts as node, and what they start sees a normal environment', async () => {
         const node = path.join((await appNodeBin())!, 'node')
         const script = path.join(dir, 'probe.mjs')
         await writeFile(script, [

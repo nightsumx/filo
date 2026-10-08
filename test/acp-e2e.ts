@@ -17,9 +17,9 @@ import { execFileSync } from 'node:child_process'
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import process from 'node:process'
-import { check, launch, until, windows } from './app'
+import { check, launch, until, windows, workDir } from './app'
 
-const WORK = '/private/tmp/pi-gui-acp'
+const WORK = workDir('pi-gui-acp')
 const SHOTS = process.env.SHOTS ?? ''
 const FAKE = path.resolve(import.meta.dirname, 'fakeAcp.mjs')
 

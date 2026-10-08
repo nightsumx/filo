@@ -8,9 +8,9 @@ import { mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import http from 'node:http'
 import path from 'node:path'
 import process from 'node:process'
-import { check, launch, until, windows } from './app'
+import { check, launch, until, windows, workDir } from './app'
 
-const WORK = '/private/tmp/pi-gui-windows'
+const WORK = workDir('pi-gui-windows')
 const CHUNKS = Array.from({ length: 16 }, (_, i) => `part${i} `)
 const FULL = CHUNKS.join('')
 const CHUNK_MS = 150

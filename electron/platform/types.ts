@@ -26,6 +26,11 @@ export interface Launcher {
 export interface Command {
     file: string
     args: string[]
+    /**
+     * Windows: `args` end in one cmd.exe command line that must reach it unchanged (spawn's option of
+     * the same name). Arguments added after it still work when they are plain words.
+     */
+    windowsVerbatimArguments?: boolean
 }
 
 export interface Platform {
@@ -52,6 +57,10 @@ export interface Platform {
 
     // ---- processes
 
+    /** Every process below `pid`. */
+    descendants: (pid: number) => Promise<number[]>
+    /** What a terminal's shell runs in the foreground: a program name, or the shell's own name at the prompt ('' if unknown). */
+    foreground: (pty: { pid: number, process: string }) => Promise<string>
     /** Ends a terminal's process (`kill`, the PTY's own) and everything it started, within `graceMs`. */
     stopTree: (pid: number, kill: (signal?: string) => void, exited: Promise<void>, graceMs: number) => Promise<void>
 

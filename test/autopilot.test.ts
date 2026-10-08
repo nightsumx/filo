@@ -3,8 +3,12 @@ import type { FileState, GateContext } from '../packages/capabilities/lib/autopi
 import { mkdtempSync, rmSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import process from 'node:process'
 import { afterEach, describe, expect, it } from 'vitest'
 import { answerText, autopilotFacts, cardsOf, gateCard, gateOf, isAngry, readMisses, readPeers, recordMiss, sendMail, supervisorBlocks, supervisorTask, takeMail, valveOf, writePeer, writeRules } from '../packages/capabilities/lib/autopilot'
+
+// The fixtures use POSIX paths (/repo/…), which resolve differently on Windows.
+const posix = process.platform !== 'win32'
 
 const ctx = (over: Partial<GateContext> = {}, states: Record<string, FileState> = {}): GateContext => ({
     cwd: '/repo',
@@ -45,7 +49,7 @@ describe('gateOf', () => {
         expect(await bash('git stash')).toBeUndefined()
     })
 
-    it('rm: temp files, files this session created, ignored and clean tracked files go; the rest is held', async () => {
+    it.runIf(posix)('rm: temp files, files this session created, ignored and clean tracked files go; the rest is held', async () => {
         const g = ctx({ created: new Set(['/repo/new.ts']) }, { '/repo/dist': 'ignored', '/repo/src/a.ts': 'dirty', '/repo/notes.md': 'untracked', '/elsewhere/x': 'outside' })
         expect(await bash('rm -rf /tmp/shots', g)).toBeUndefined()
         expect(await bash('rm new.ts', g)).toBeUndefined()
@@ -59,7 +63,7 @@ describe('gateOf', () => {
         expect(await bash('cd src && rm a.ts', g)).toBe('rm /repo/src/a.ts')
     })
 
-    it('paid APIs in the command, or inside the script it runs; config adds patterns', async () => {
+    it.runIf(posix)('paid APIs in the command, or inside the script it runs; config adds patterns', async () => {
         expect(await bash('curl -X POST https://queue.fal.run/fal-ai/flux -H "Authorization: Key $FAL_KEY"')).toBe('paid fal.run')
         const g = ctx({ readScript: async file => file === '/repo/scripts/gen.ts' ? 'import { fal } from "@fal-ai/client"' : 'console.log(1)' })
         expect(await bash('bun scripts/gen.ts --count 40', g)).toBe('paid @fal-ai/')
@@ -69,7 +73,7 @@ describe('gateOf', () => {
         expect(await bash('grep -rn minimax src')).toBeUndefined()
     })
 
-    it('secrets: printing .env or the environment, writing .env files, protected paths', async () => {
+    it.runIf(posix)('secrets: printing .env or the environment, writing .env files, protected paths', async () => {
         expect(await bash('cat .env.local')).toBe('print secrets')
         expect(await bash('cat .env.example')).toBeUndefined()
         expect(await bash('printenv')).toBe('print env')
@@ -103,7 +107,7 @@ const custom = (customType: string, data: unknown) => ({ type: 'custom', customT
 const decision = (over: Partial<AutopilotDecision>): AutopilotDecision => ({ kind: 'autopilot', id: 'ap', status: 'done', next: 'continue', message: 'go', reason: 'r', rules: [], cards: [], commands: [], startedAt: 0, endedAt: 0, workTools: 3, ...over })
 
 describe('autopilotFacts', () => {
-    it('reads the conversation, the last run\'s commands with exit codes, cards, answers and grants', () => {
+    it.runIf(posix)('reads the conversation, the last run\'s commands with exit codes, cards, answers and grants', () => {
         const gate = gateCard({ key: 'git push', tool: 'bash', summary: 'git push', why: '推送' })
         const card = { ...gateCard({ key: 'x', tool: 'bash', summary: 'x', why: 'x' }), gate: undefined, id: 'c2', category: 'taste' as const, title: '颜色' }
         const f = autopilotFacts([
@@ -166,7 +170,7 @@ describe('decisions', () => {
         expect(answerText(card, { choice: 'A', text: '再暗一点' })).toBe('用户对「配色」的决定：暖。再暗一点')
     })
 
-    it('the task carries rules, conversation, commands, peers and never the agent\'s reasoning', () => {
+    it.runIf(posix)('the task carries rules, conversation, commands, peers and never the agent\'s reasoning', () => {
         const facts = autopilotFacts([user('做完登录页'), assistant('', [{ id: 'a', name: 'bash', arguments: { command: 'bun test' } }]), result('a', 'ok'), assistant('好了，要我提交吗？')], '/repo')
         const peer: AutopilotPeer = { session: 's2', pid: 1, cwd: '/repo', root: '/repo', topic: '设置页', state: 'running', files: ['/repo/src/settings.tsx'], cards: [], updatedAt: 0 }
         const task = supervisorTask({ facts, changes: { scope: 'thread', files: ['src/a.ts'], diff: '+x', unshown: [] }, peers: [peer], rules: 'R02 已授权就别再问', session: 's1', cwd: '/repo' })

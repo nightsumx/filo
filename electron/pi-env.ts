@@ -1,4 +1,5 @@
 import type { PiEnv, PiEnvResult } from '@shared/ipc'
+import type { Command } from './platform'
 import { execFile } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import path from 'node:path'
@@ -60,7 +61,7 @@ export function piSpawnEnv(env: PiEnv): Record<string, string> {
 }
 
 /** pi's bin is usually a JS file run by node; a compiled binary is spawned directly. */
-export function piCommand(env: PiEnv, args: string[]): { file: string, args: string[] } {
+export function piCommand(env: PiEnv, args: string[]): Command {
     if (env.bundled)
         return { file: env.nodePath, args: [env.bundled.launcher, env.piPath, ...args] }
     return /\.[cm]?js$/.test(env.piPath)
@@ -96,9 +97,9 @@ async function resolveBundled(): Promise<PiEnvResult | undefined> {
 
 /** `pi --version` through the same command and environment the threads use. */
 async function checkVersion(env: PiEnv): Promise<PiEnvResult> {
-    const { file, args } = piCommand(env, ['--version'])
+    const { file, args, windowsVerbatimArguments } = piCommand(env, ['--version'])
     try {
-        const { stdout } = await execFileAsync(file, args, { env: piSpawnEnv(env), timeout: 15_000 })
+        const { stdout } = await execFileAsync(file, args, { env: piSpawnEnv(env), timeout: 15_000, windowsVerbatimArguments })
         env.version = stdout.trim()
     }
     catch (error: any) {

@@ -8,6 +8,7 @@ import { mkdtempSync, realpathSync, rmSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeAll, describe, expect, it } from 'vitest'
+import { platform } from '../electron/platform'
 import { TerminalTools } from '../electron/terminalTools'
 import { Terminals } from '../electron/terminals'
 import { findPi, startMockLlm, startPi } from './harness'
@@ -31,13 +32,14 @@ async function setup(reply: (request: MockRequest, index: number) => MockReply) 
     let project = ''
     const terminals = new Terminals({ ptyDir: path.resolve('node_modules/node-pty'), onChange: () => {} })
     const dir = mkdtempSync(path.join(os.tmpdir(), 'filo-tt-'))
-    const tools = new TerminalTools(terminals, path.join(dir, 't.sock'), () => [project])
+    const tools = new TerminalTools(terminals, platform.ipcPath(dir, 't.sock'), () => [project])
     await tools.start()
     const llm: MockLlm = await startMockLlm(reply)
     cleanup.push(() => rmSync(dir, { recursive: true, force: true }), () => llm.close(), () => tools.stop(), () => terminals.closeAll())
     const pi: PiSession = await startPi(env!, llm, ['terminal'], { hostEnv: tools.env() })
     project = pi.cwd
-    cleanup.push(() => pi.stop())
+    // Terminals first: on Windows a shell keeps its folder from being deleted.
+    cleanup.push(() => pi.stop(), () => terminals.closeAll())
     return { terminals, tools, llm, pi }
 }
 
@@ -104,8 +106,16 @@ describe.runIf(process.env.PI_GUI_SKIP_E2E !== '1')('terminal capability (real p
         expect(terminals.get(mine)?.exit).toBeUndefined()
     }, 60_000)
 
-    // macOS: /tmp is a link to /private/tmp, which pi reports.
-    it.runIf(realpathSync('/tmp') !== '/tmp')('a request from pi\'s resolved cwd lands in the project as the window knows it', async () => {
+    // macOS: /tmp is a link to /private/tmp, which pi reports. Windows has no /tmp.
+    const tmpIsLink = () => {
+        try {
+            return realpathSync('/tmp') !== '/tmp'
+        }
+        catch {
+            return false
+        }
+    }
+    it.runIf(tmpIsLink())('a request from pi\'s resolved cwd lands in the project as the window knows it', async () => {
         const terminals = new Terminals({ ptyDir: path.resolve('node_modules/node-pty'), onChange: () => {} })
         const tools = new TerminalTools(terminals, '/dev/null', () => ['/tmp'])
         cleanup.push(() => terminals.closeAll())
@@ -117,12 +127,12 @@ describe.runIf(process.env.PI_GUI_SKIP_E2E !== '1')('terminal capability (real p
     it('rejects requests without the token', async () => {
         const terminals = new Terminals({ ptyDir: path.resolve('node_modules/node-pty'), onChange: () => {} })
         const dir = mkdtempSync(path.join(os.tmpdir(), 'filo-tt-'))
-        const tools = new TerminalTools(terminals, path.join(dir, 't.sock'))
+        const tools = new TerminalTools(terminals, platform.ipcPath(dir, 't.sock'))
         await tools.start()
         cleanup.push(() => rmSync(dir, { recursive: true, force: true }), () => tools.stop())
         const net = await import('node:net')
         const answer = await new Promise<string>((resolve) => {
-            const socket = net.createConnection(path.join(dir, 't.sock'), () => socket.write(`${JSON.stringify({ token: 'nope', method: 'read', cwd: dir })}\n`))
+            const socket = net.createConnection(platform.ipcPath(dir, 't.sock'), () => socket.write(`${JSON.stringify({ token: 'nope', method: 'read', cwd: dir })}\n`))
             let out = ''
             socket.on('data', (d) => {
                 out += d

@@ -1,7 +1,9 @@
 // Shared pieces of the end-to-end scripts: launch the built app with remote debugging, reach each
 // window's store (exposed as window.__app with PI_GUI_TEST) over CDP, and poll for state.
 import { spawn } from 'node:child_process'
+import { realpathSync } from 'node:fs'
 import { createRequire } from 'node:module'
+import os from 'node:os'
 import path from 'node:path'
 import process from 'node:process'
 
@@ -9,6 +11,14 @@ const ROOT = path.resolve(import.meta.dirname, '..')
 export const PORT = 9336
 /** CDP modifier bits are 1 Alt, 2 Ctrl, 4 Meta, 8 Shift; the app's ⌘ is Ctrl off macOS (src/platform.ts). */
 export const COMMAND = process.platform === 'darwin' ? 4 : 2
+
+/**
+ * A scratch folder for a run: /private/tmp/<name> on macOS and Linux (the resolved form of /tmp, as
+ * pi reports it), the user's temp folder on Windows.
+ */
+export function workDir(name: string): string {
+    return process.platform === 'win32' ? path.join(realpathSync.native(os.tmpdir()), name) : `/private/tmp/${name}`
+}
 
 export class Page {
     private next = 0

@@ -9,10 +9,10 @@
 import { mkdir, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import process from 'node:process'
-import { check, launch, PORT, until, windows } from './app'
+import { check, launch, PORT, until, windows, workDir } from './app'
 import { startMockLlm } from './harness'
 
-const WORK = '/private/tmp/pi-gui-subagents'
+const WORK = workDir('pi-gui-subagents')
 const SHOTS = process.env.SHOTS ?? ''
 
 const text = (m: any) => typeof m?.content === 'string' ? m.content : (m?.content ?? []).map((p: any) => p.text ?? '').join('')

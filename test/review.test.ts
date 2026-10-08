@@ -1,6 +1,10 @@
 import type { ReviewDetails, SubagentDetails } from '@shared/capabilities'
+import process from 'node:process'
 import { describe, expect, it } from 'vitest'
 import { branchFacts, buildReport, evidenceOf, exitCodeOf, feedbackText, matchEvidence, parseApplyArgs, reviewerTask } from '../packages/capabilities/lib/review'
+
+// The fixtures use POSIX paths (/repo/…), which resolve differently on Windows.
+const posix = process.platform !== 'win32'
 
 const user = (text: string) => ({ type: 'message', message: { role: 'user', content: [{ type: 'text', text }] } })
 const assistant = (text: string, calls: { name: string, arguments: object }[] = []) => ({
@@ -10,7 +14,7 @@ const assistant = (text: string, calls: { name: string, arguments: object }[] = 
 const run = { kind: 'subagent', status: 'done', title: 'Review', task: '', messages: [], tools: {}, steering: [], usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 }, startedAt: 1, endedAt: 2 } as unknown as SubagentDetails
 const changes = { scope: 'thread' as const, files: ['a.ts'], diff: '+x', unshown: [] }
 
-describe('branchFacts', () => {
+describe.runIf(posix)('branchFacts', () => {
     it('collects requests, final replies and edited files, never the reasoning', () => {
         const facts = branchFacts([
             user('add a flag'),

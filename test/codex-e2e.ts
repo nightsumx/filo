@@ -15,9 +15,9 @@ import { mkdir, rm, writeFile } from 'node:fs/promises'
 import http from 'node:http'
 import path from 'node:path'
 import process from 'node:process'
-import { check, launch, until, windows } from './app'
+import { check, launch, until, windows, workDir } from './app'
 
-const WORK = '/private/tmp/pi-gui-codex'
+const WORK = workDir('pi-gui-codex')
 const SHOTS = process.env.SHOTS ?? ''
 
 type Step = { text: string } | { call: { name: string, args: Record<string, unknown> } }

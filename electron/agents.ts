@@ -52,6 +52,7 @@ class PiAgent implements ManagedAgent {
         const command = piCommand(env, args)
         this.child = spawn(command.file, command.args, {
             cwd: options.cwd,
+            windowsVerbatimArguments: command.windowsVerbatimArguments,
             // The app loads its capabilities with -e; pi-cc-tui, if installed, leaves its copies off.
             env: { ...piSpawnEnv(env), ...hostEnv, [ENV.host]: 'gui' },
             stdio: ['pipe', 'pipe', 'pipe'],

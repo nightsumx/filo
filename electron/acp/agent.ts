@@ -32,6 +32,8 @@ export const ACP_PROTOCOL_VERSION = 1
 export interface AcpLaunch {
     file: string
     args: string[]
+    /** Set when `file` is cmd.exe running a batch file (platform Command). */
+    windowsVerbatimArguments?: boolean
     /** The command as found, when `file` is what runs it (Windows: node for an npm .cmd shim). */
     bin?: string
     env: Record<string, string>
@@ -153,7 +155,7 @@ export class AcpAgent implements AgentAdapter {
     constructor(readonly spec: AcpAgentSpec, launch: AcpLaunch, private options: AgentAdapterOptions, private callbacks: AgentAdapterCallbacks) {
         this.hasApiKey = !!(spec.apiKey && launch.env[spec.apiKey.env])
         this.transcript = new AcpTranscript('', { model: () => this.modelStamp(), inputIncludesCache: spec.inputIncludesCache, now: () => (this.loading ? this.clock ?? options.replayTime ?? Date.now() : Date.now()) })
-        this.child = spawn(launch.file, launch.args, { cwd: options.cwd, env: launch.env, stdio: ['pipe', 'pipe', 'pipe'] })
+        this.child = spawn(launch.file, launch.args, { cwd: options.cwd, env: launch.env, stdio: ['pipe', 'pipe', 'pipe'], windowsVerbatimArguments: launch.windowsVerbatimArguments })
         this.connection = new AcpConnection(this.child.stdin, this.child.stdout, {
             onNotification: (method, params) => this.notification(method, params),
             onRequest: (method, params) => this.agentRequest(method, params),

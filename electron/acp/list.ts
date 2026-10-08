@@ -25,7 +25,7 @@ export interface SessionList {
 
 /** Starts the agent, initializes, runs `work`, and ends the process; the whole of it within `timeoutMs`. */
 export async function withAgent<T>(spec: AcpAgentSpec, launch: AcpLaunch, work: (connection: AcpConnection, caps: AcpAgentCaps) => Promise<T>, timeoutMs = 20_000): Promise<{ caps: AcpAgentCaps, result: T }> {
-    const child = spawn(launch.file, launch.args, { env: launch.env, stdio: ['pipe', 'pipe', 'ignore'] })
+    const child = spawn(launch.file, launch.args, { env: launch.env, stdio: ['pipe', 'pipe', 'ignore'], windowsVerbatimArguments: launch.windowsVerbatimArguments })
     const connection = new AcpConnection(child.stdin, child.stdout, {
         onNotification: () => {},
         onRequest: async (method) => {

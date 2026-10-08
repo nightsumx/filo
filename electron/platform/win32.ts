@@ -9,6 +9,7 @@ import { readFileSync, statSync } from 'node:fs'
 import nodePath from 'node:path'
 import process from 'node:process'
 import { promisify } from 'node:util'
+import { below, foregroundOf, processes } from './win32-processes'
 
 // Windows paths, also when the tests run this file elsewhere.
 const path = nodePath.win32
@@ -80,8 +81,21 @@ function readShim(file: string): string | undefined {
     }
 }
 
-/** cmd.exe's quoting for one argument of `cmd /d /s /c "…"`. */
-const cmdQuote = (arg: string) => /^[\w\-.\\/:=@]+$/.test(arg) ? arg : `"${arg.replace(/(["^&|<>%!])/g, '^$1')}"`
+// cmd.exe quoting as cross-spawn does it: an argument is quoted for the program (backslashes before a
+// quote doubled), then cmd's special characters get a caret, twice for a batch file, whose `%*` line
+// cmd reads again.
+const CMD_META = /([()\][%!^"`<>&|;, *?])/g
+const cmdEscape = (s: string) => s.replace(CMD_META, '^$1')
+
+export function cmdArgument(arg: string): string {
+    const quoted = `"${arg.replace(/(\\*)"/g, '$1$1\\"').replace(/(\\*)$/, '$1$1')}"`
+    return cmdEscape(cmdEscape(quoted))
+}
+
+/** The arguments for cmd.exe running a batch file; spawn them with windowsVerbatimArguments. */
+export function cmdLine(file: string, args: readonly string[]): string[] {
+    return ['/d', '/s', '/c', `"${[cmdEscape(file), ...args.map(cmdArgument)].join(' ')}"`]
+}
 
 function command(file: string, args: readonly string[]): Command {
     if (!/\.(cmd|bat)$/i.test(file))
@@ -94,7 +108,7 @@ function command(file: string, args: readonly string[]): Command {
         return { file: node, args: [script, ...args] }
     }
     // Any other batch file runs through cmd.exe, as Windows would run it.
-    return { file: process.env.ComSpec || path.join(system32(), 'cmd.exe'), args: ['/d', '/s', '/c', `"${[file, ...args].map(cmdQuote).join(' ')}"`] }
+    return { file: process.env.ComSpec || path.join(system32(), 'cmd.exe'), args: cmdLine(file, args), windowsVerbatimArguments: true }
 }
 
 async function shellEnv(): Promise<ShellEnv> {
@@ -146,6 +160,8 @@ export const win32: Platform = {
         return out
     },
 
+    descendants: async pid => below(await processes(), pid),
+    foreground: async pty => foregroundOf(await processes(), pty.pid),
     // Console programs get no signal to end on; the tree is ended at once, the shell first knowing it.
     stopTree: async (pid, kill, exited, graceMs) => {
         await taskkill(pid)

@@ -42,10 +42,11 @@ export const desktopWindow: WindowPlatform = {
         {
             label: tr('窗口', 'Window'),
             submenu: [
-                { role: 'minimize', accelerator: '' },
+                // Their default keys (Ctrl+M, Ctrl+W) belong to the shell in a terminal.
+                { role: 'minimize', registerAccelerator: false },
                 mergeWindows,
                 // Alt+F4 closes the window; Ctrl+Shift+W closes a terminal (src/platform.ts).
-                { role: 'close', label: tr('关闭窗口', 'Close Window'), accelerator: '' },
+                { role: 'close', label: tr('关闭窗口', 'Close Window'), registerAccelerator: false },
             ],
         },
     ],

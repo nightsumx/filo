@@ -6,6 +6,7 @@ import path from 'node:path'
 import process from 'node:process'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { applyEndpoint, checkEndpoint, fetchEndpointModels, piEntry, ProviderHelper, ProviderService, readEndpoints, readModelsJson, removeEndpoint, writeModelsJson } from './providers'
+import { platform } from './platform'
 
 const root = path.resolve(__dirname, '..')
 const PI_BIN = path.join(root, 'node_modules/@earendil-works/pi-coding-agent/dist/cli.js')
@@ -107,7 +108,9 @@ describe('models.json endpoints', () => {
             expect(await readModelsJson()).toEqual({ text: '', json: {} })
             await writeModelsJson({ providers: { a: { apiKey: 'k' } } })
             const file = path.join(dir, 'models.json')
-            expect((await stat(file)).mode & 0o777).toBe(0o600)
+            // Windows has no mode bits: the user's profile folder is private by its ACL.
+            if (platform.id !== 'win32')
+                expect((await stat(file)).mode & 0o777).toBe(0o600)
             expect((await readModelsJson()).json).toEqual({ providers: { a: { apiKey: 'k' } } })
             await writeFile(file, '{ broken')
             await expect(readModelsJson()).rejects.toThrow()

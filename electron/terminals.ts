@@ -41,6 +41,9 @@ const SCROLLBACK = 10_000
 const FLUSH_MS = 8
 const FLUSH_BYTES = 256 * 1024
 const POLL_MS = 1000
+
+/** A shell as the tab names it: zsh, pwsh (not pwsh.exe). */
+const shellName = (shell: string) => path.basename(shell).replace(/\.exe$/i, '')
 /** Processes that outlive SIGHUP/SIGTERM get SIGKILL after this (platform.stopTree). */
 const KILL_GRACE_MS = 1500
 const DEFAULT_COLS = 100
@@ -114,6 +117,7 @@ export class Terminals {
     private entries = new Map<string, Entry>()
     private pty: NodePty | null = null
     private poll: ReturnType<typeof setInterval> | null = null
+    private polling = false
     private changeTimer: ReturnType<typeof setTimeout> | null = null
 
     constructor(private options: TerminalsOptions) {}
@@ -147,7 +151,7 @@ export class Terminals {
         headless.loadAddon(serializer as never)
         const command = create.command?.trim() || undefined
         const entry: Entry = {
-            info: { id: randomUUID(), cwd, title: create.label?.trim() || (command ? commandTitle(command) : path.basename(shell)), busy: !!command, command, by, createdAt: Date.now() },
+            info: { id: randomUUID(), cwd, title: create.label?.trim() || (command ? commandTitle(command) : shellName(shell)), busy: !!command, command, by, createdAt: Date.now() },
             pty: null,
             headless,
             serializer,
@@ -170,7 +174,7 @@ export class Terminals {
             headless.dispose()
             throw error
         }
-        this.poll ??= setInterval(() => this.pollTitles(), POLL_MS)
+        this.poll ??= setInterval(() => void this.pollTitles(), POLL_MS)
         this.changed()
         return { ...entry.info }
     }
@@ -385,25 +389,31 @@ export class Terminals {
     }
 
     /** The foreground program names the tab and says whether anything runs. */
-    private pollTitles() {
+    private async pollTitles() {
+        if (this.polling)
+            return
+        this.polling = true
         let changed = false
-        for (const entry of this.entries.values()) {
-            if (!entry.pty || entry.info.command)
-                continue
-            let fg = ''
-            try {
-                // A name on macOS; on Linux the program's argv[0], which can be a path (/bin/bash).
-                fg = path.basename(entry.pty.process)
+        try {
+            for (const entry of this.entries.values()) {
+                const pty = entry.pty
+                if (!pty || entry.info.command)
+                    continue
+                const fg = await platform.foreground(pty).catch(() => '')
+                if (entry.pty !== pty)
+                    continue
+                const name = shellName(entry.shell)
+                const busy = !!fg && fg !== name && fg !== `-${name}`
+                const title = entry.label ?? (busy ? fg : name)
+                if (busy !== entry.info.busy || title !== entry.info.title) {
+                    entry.info.busy = busy
+                    entry.info.title = title
+                    changed = true
+                }
             }
-            catch {}
-            const shellName = path.basename(entry.shell)
-            const busy = !!fg && fg !== shellName && fg !== `-${shellName}`
-            const title = entry.label ?? (busy ? fg : shellName)
-            if (busy !== entry.info.busy || title !== entry.info.title) {
-                entry.info.busy = busy
-                entry.info.title = title
-                changed = true
-            }
+        }
+        finally {
+            this.polling = false
         }
         if (changed)
             this.changed()

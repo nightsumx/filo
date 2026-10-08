@@ -3,8 +3,9 @@
 import type { Platform } from './types'
 import { execFile } from 'node:child_process'
 import process from 'node:process'
+import path from 'node:path'
 import { promisify } from 'node:util'
-import { chmodPtyHelper, clearSocket, directCommand, findExecutable, loginShellEnv, posixShell, posixShellArgs, posixStopTree, restrictSocket, shLauncher, socketPath } from './posix'
+import { chmodPtyHelper, descendants, clearSocket, directCommand, findExecutable, loginShellEnv, posixShell, posixShellArgs, posixStopTree, restrictSocket, shLauncher, socketPath } from './posix'
 
 const execFileAsync = promisify(execFile)
 
@@ -25,6 +26,9 @@ export const linux: Platform = {
     withPath: (env, value) => ({ ...env, PATH: value }),
     launcher: shLauncher,
 
+    descendants: pid => descendants(pid, 'ps'),
+    // node-pty reports the foreground program's argv[0], which can be a path (/bin/bash).
+    foreground: async pty => path.basename(pty.process),
     stopTree: posixStopTree('ps'),
 
     ipcPath: socketPath,

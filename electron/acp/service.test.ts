@@ -2,6 +2,7 @@ import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { platform } from '../platform'
 
 // The login shell's PATH is a temp folder holding fake commands.
 let shellPath = ''
@@ -20,9 +21,10 @@ describe('agent availability', () => {
         await rm(dir, { recursive: true, force: true })
     })
 
+    // A command as npm leaves one: a script with the executable bit, or a .cmd file on Windows.
     async function fakeBin(name: string) {
-        const file = path.join(dir, 'bin', name)
-        await writeFile(file, '#!/bin/sh\n')
+        const file = path.join(dir, 'bin', platform.id === 'win32' ? `${name}.cmd` : name)
+        await writeFile(file, platform.id === 'win32' ? '@echo off\r\n' : '#!/bin/sh\n')
         await chmod(file, 0o755)
         return file
     }

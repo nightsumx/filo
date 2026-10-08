@@ -10,9 +10,9 @@ import { mkdir, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import process from 'node:process'
 import type { Page } from './app'
-import { check, launch, until, windows } from './app'
+import { check, launch, until, windows, workDir } from './app'
 
-const WORK = '/private/tmp/pi-gui-shell'
+const WORK = workDir('pi-gui-shell')
 const SHOTS = process.env.SHOTS ?? ''
 
 async function key(page: Page, key: string, code: string, modifiers: number, text?: string) {

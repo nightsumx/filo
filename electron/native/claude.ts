@@ -19,6 +19,7 @@ const STDERR_LIMIT = 64 * 1024
 export interface ClaudeLaunch {
     file: string
     args: string[]
+    windowsVerbatimArguments?: boolean
     env: Record<string, string>
 }
 
@@ -128,20 +129,21 @@ export class ClaudeAgent implements AgentAdapter {
             'Task': 'subagent',
         }
 
-        // Build command line
+        // Build command line: the launch's own arguments first (on Windows they can be node's script,
+        // or cmd.exe's command line).
         const args = [
+            ...launch.args,
             '--input-format', 'stream-json',
             '--output-format', 'stream-json',
             '--permission-prompt-tool', 'stdio',
             '--include-partial-messages',
-            ...launch.args,
         ]
 
         if (options.sessionId) {
             args.push('--resume', options.sessionId)
         }
 
-        this.child = spawn(launch.file, args, { cwd: options.cwd, env: launch.env, stdio: ['pipe', 'pipe', 'pipe'] })
+        this.child = spawn(launch.file, args, { cwd: options.cwd, env: launch.env, stdio: ['pipe', 'pipe', 'pipe'], windowsVerbatimArguments: launch.windowsVerbatimArguments })
 
         this.child.stderr.on('data', (chunk: Buffer) => {
             this.stderr += chunk.toString()

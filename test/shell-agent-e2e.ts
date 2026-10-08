@@ -10,11 +10,11 @@
 import { mkdir, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import process from 'node:process'
-import { check, launch, until, windows } from './app'
+import { check, launch, until, windows, workDir } from './app'
 import { startMockLlm } from './harness'
 
-// Unresolved on purpose: /tmp is a symlink to /private/tmp.
-const WORK = '/tmp/pi-gui-shell-agent'
+// Unresolved on purpose: /tmp is a symlink to /private/tmp. Windows has no /tmp.
+const WORK = process.platform === 'win32' ? workDir('pi-gui-shell-agent') : '/tmp/pi-gui-shell-agent'
 const SHOTS = process.env.SHOTS ?? ''
 
 async function main() {
@@ -69,7 +69,9 @@ async function main() {
         // The user's own shell, with something on its screen for the agent to read.
         await page.evaluate(`window.__terminals.create(${JSON.stringify(project)})`)
         userShell = await until('user shell', () => page.evaluate<string | undefined>('window.__terminals.list.find(t => t.by === "user")?.id'))
-        await page.evaluate(`window.pi.terminalWrite(${JSON.stringify(userShell)}, 'echo "TypeError: x is undefined" >&2\\r')`)
+        // To stderr; PowerShell (Windows) has its own way to write there.
+        const toStderr = process.platform === 'win32' ? '[Console]::Error.WriteLine("TypeError: x is undefined")' : 'echo "TypeError: x is undefined" >&2'
+        await page.evaluate(`window.pi.terminalWrite(${JSON.stringify(userShell)}, ${JSON.stringify(`${toStderr}\r`)})`)
         await until('user shell output', async () => (await screen(userShell)).includes('TypeError: x is undefined\n'))
         await page.evaluate('window.__terminals.hide()')
 

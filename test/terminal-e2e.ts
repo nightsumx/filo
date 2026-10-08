@@ -10,11 +10,11 @@
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import process from 'node:process'
-import { check, launch, until, windows } from './app'
+import { check, launch, until, windows, workDir } from './app'
 import { startMockLlm } from './harness'
 import { hasTmux, startTerminalPi } from './terminal'
 
-const WORK = '/private/tmp/pi-gui-term'
+const WORK = workDir('pi-gui-term')
 const SHOTS = process.env.SHOTS ?? ''
 
 const userText = (m: any) => typeof m?.content === 'string' ? m.content : (m?.content ?? []).map((p: any) => p.text ?? '').join('')

@@ -28,6 +28,7 @@ const STDERR_LIMIT = 64 * 1024
 export interface CodexLaunch {
     file: string
     args: string[]
+    windowsVerbatimArguments?: boolean
     env: Record<string, string>
 }
 
@@ -364,7 +365,7 @@ export class CodexAgent implements AgentAdapter {
             inputIncludesCache: true,
             now: () => (this.loading ? options.replayTime ?? Date.now() : Date.now()),
         })
-        this.child = spawn(launch.file, launch.args, { cwd: options.cwd, env: launch.env, stdio: ['pipe', 'pipe', 'pipe'] })
+        this.child = spawn(launch.file, launch.args, { cwd: options.cwd, env: launch.env, stdio: ['pipe', 'pipe', 'pipe'], windowsVerbatimArguments: launch.windowsVerbatimArguments })
         this.connection = new AcpConnection(this.child.stdin, this.child.stdout, {
             onNotification: (method, params) => this.notification(method, params),
             onRequest: (method, params) => this.serverRequest(method, params),
@@ -1213,7 +1214,7 @@ export class CodexAgent implements AgentAdapter {
 
 /** A short-lived app-server for one piece of work (the thread list, a delete). */
 async function withAppServer<T>(launch: CodexLaunch, work: (rpc: (method: string, params: unknown) => Promise<any>) => Promise<T>, timeoutMs = 20_000): Promise<T> {
-    const child = spawn(launch.file, launch.args, { env: launch.env, stdio: ['pipe', 'pipe', 'ignore'] })
+    const child = spawn(launch.file, launch.args, { env: launch.env, stdio: ['pipe', 'pipe', 'ignore'], windowsVerbatimArguments: launch.windowsVerbatimArguments })
     const connection = new AcpConnection(child.stdin, child.stdout, {
         onNotification: () => {},
         onRequest: async method => Promise.reject(new RpcError(`Method not found: ${method}`, -32601)),

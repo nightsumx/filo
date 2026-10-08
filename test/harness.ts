@@ -217,7 +217,8 @@ export async function startPi(env: PiEnv, llm: MockLlm, capabilities: Capability
         },
         async stop() {
             await manager.stopAll()
-            await rm(root, { recursive: true, force: true })
+            // Windows keeps a folder busy until the processes in it have exited.
+            await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
         },
     }
 }

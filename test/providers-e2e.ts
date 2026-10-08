@@ -13,10 +13,10 @@ import { existsSync } from 'node:fs'
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import process from 'node:process'
-import { check, launch, until, windows } from './app'
+import { check, launch, until, windows, workDir } from './app'
 import { startMockLlm } from './harness'
 
-const WORK = '/private/tmp/pi-gui-providers'
+const WORK = workDir('pi-gui-providers')
 const SHOTS = process.env.SHOTS ?? ''
 
 async function main() {

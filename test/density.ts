@@ -13,12 +13,12 @@ import { existsSync } from 'node:fs'
 import { mkdir, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import process from 'node:process'
-import { BACKGROUND_ENV } from './app'
+import { BACKGROUND_ENV, workDir } from './app'
 import { findPi, startMockLlm, startPi } from './harness'
 
 const ROOT = path.resolve(import.meta.dirname, '..')
 const BASELINE = path.join(ROOT, 'test/density-baseline.json')
-const WORK = '/private/tmp/pi-gui-density'
+const WORK = workDir('pi-gui-density')
 const PORT = 9335
 const VIEWPORT = { width: 1280, height: 820 }
 /** Allowed growth of the transcript height before the comparison fails. */

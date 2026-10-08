@@ -59,7 +59,8 @@ describe('reading an old session that is not running', () => {
             delete process.env.PI_GUI_ACP_CODEX
         else
             process.env.PI_GUI_ACP_CODEX = previous
-        await rm(dir, { recursive: true, force: true })
+        // Windows keeps a folder busy until the app-server in it has exited.
+        await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
     })
 
     it('replays a Codex session over app-server, not ACP', async () => {

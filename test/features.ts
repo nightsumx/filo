@@ -16,10 +16,10 @@ import { existsSync } from 'node:fs'
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import process from 'node:process'
-import { check, COMMAND, launch, PORT, until, windows } from './app'
+import { check, COMMAND, launch, PORT, until, windows, workDir } from './app'
 import { startMockLlm } from './harness'
 
-const WORK = '/private/tmp/pi-gui-features'
+const WORK = workDir('pi-gui-features')
 const SHOTS = process.env.SHOTS ?? ''
 
 const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8' }).trim()
@@ -53,6 +53,8 @@ async function main() {
     await Promise.all([repo, userData, agentDir].map(d => mkdir(d, { recursive: true })))
     await writeFile(path.join(repo, 'a.txt'), 'original\n')
     git(repo, 'init', '-q', '-b', 'main')
+    // Git for Windows turns LF into CRLF on checkout by default; the checks compare bytes.
+    git(repo, 'config', 'core.autocrlf', 'false')
     git(repo, '-c', 'user.name=t', '-c', 'user.email=t@t', 'add', '-A')
     git(repo, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', 'init')
     git(repo, 'config', 'user.name', 't')
@@ -91,7 +93,8 @@ async function main() {
     }))
     const env = { PI_GUI_USER_DATA: userData, PI_CODING_AGENT_DIR: agentDir, PI_GUI_TEST: '1' }
     const R = JSON.stringify(repo)
-    const sleeper = spawn('sleep', ['300'], { stdio: 'ignore' })
+    // A live process to stand for another session's pi (sleep is not on Windows).
+    const sleeper = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 300000)'], { stdio: 'ignore' })
     let movedSession = ''
 
     let stop = await launch(env)
@@ -173,12 +176,16 @@ async function main() {
 
         // Rendered text (Markdown, CSV, HTML, notebook), a font, an archive and a QuickLook document.
         await writeFile(path.join(repo, 'notes.md'), '# Old title\n')
-        execFileSync('zip', ['-q', 'pack.zip', 'a.txt'], { cwd: repo })
+        // Windows has no zip; its tar writes one.
+        const zip = (...files: string[]) => process.platform === 'win32'
+            ? execFileSync('tar', ['-a', '-cf', 'pack.zip', ...files], { cwd: repo })
+            : execFileSync('zip', ['-q', 'pack.zip', ...files], { cwd: repo })
+        zip('a.txt')
         git(repo, 'add', 'notes.md', 'pack.zip')
         git(repo, 'commit', '-q', '-m', 'docs')
         await writeFile(path.join(repo, 'notes.md'), '# New title\n\n- **bold** item\n')
         await rm(path.join(repo, 'pack.zip'))
-        execFileSync('zip', ['-q', 'pack.zip', 'a.txt', 'logo.png'], { cwd: repo })
+        zip('a.txt', 'logo.png')
         await writeFile(path.join(repo, 'table.csv'), 'name,qty\n"Widget, large",3\nBolt,12\n')
         await writeFile(path.join(repo, 'page.html'), '<h1>Hello page</h1><script>parent.__ran = true</script>')
         await writeFile(path.join(repo, 'nb.ipynb'), JSON.stringify({

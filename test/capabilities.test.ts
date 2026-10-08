@@ -3,6 +3,8 @@ import type { PiEnv } from '@shared/ipc'
 import type { MockLlm, MockReply, MockRequest, PiSession } from './harness'
 import { APPROVAL_TITLE_PREFIX, CAPABILITIES } from '@shared/capabilities'
 import { execFileSync } from 'node:child_process'
+import { writeFileSync } from 'node:fs'
+import path from 'node:path'
 import { afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { findPi, startMockLlm, startPi } from './harness'
 
@@ -549,7 +551,7 @@ describe.runIf(process.env.PI_GUI_SKIP_E2E !== '1')('capability extensions (real
             return skip('pi not installed')
         const { llm, pi } = await setup(['review'], (r) => isReviewer(r) ? { text: 'looks fine' } : { text: 'nothing to do' })
         gitProject(pi.cwd)
-        execFileSync('sh', ['-c', 'printf "draft\n" > notes.md'], { cwd: pi.cwd })
+        writeFileSync(path.join(pi.cwd, 'notes.md'), 'draft\n')
         await pi.run('hi')
         await pi.request({ type: 'prompt', message: '/gui-review' })
         const report = (await reportAppended(pi) as any).entry.data as ReviewDetails

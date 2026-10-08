@@ -20,17 +20,18 @@ const items: SessionItem[] = [
 
 describe('acp mirror', () => {
     it('maps a session key to a file and back', () => {
-        const file = mirrorFile('/m', 'acp:codex:01a1/b')!
-        expect(file).toBe('/m/codex/01a1%2Fb.jsonl')
-        expect(mirrorKey('/m', file)).toBe('acp:codex:01a1/b')
-        expect(mirrorKey('/m', '/m/nobody/x.jsonl')).toBeUndefined()
-        expect(mirrorKey('/m', '/elsewhere/codex/x.jsonl')).toBeUndefined()
-        expect(mirrorFile('/m', '/sessions/x.jsonl')).toBeUndefined()
+        const m = path.resolve('/m')
+        const file = mirrorFile(m, 'acp:codex:01a1/b')!
+        expect(file).toBe(path.join(m, 'codex', '01a1%2Fb.jsonl'))
+        expect(mirrorKey(m, file)).toBe('acp:codex:01a1/b')
+        expect(mirrorKey(m, path.join(m, 'nobody', 'x.jsonl'))).toBeUndefined()
+        expect(mirrorKey(m, path.resolve('/elsewhere/codex/x.jsonl'))).toBeUndefined()
+        expect(mirrorFile(m, path.resolve('/sessions/x.jsonl'))).toBeUndefined()
     })
 
     it('writes a pi session file the edit log and search read', () => {
         const text = mirrorText({ sessionId: 's1', cwd: '/repo', createdAt: at, name: 'Rename flag' }, items)
-        expect(parseEdits(text)).toEqual({ cwd: '/repo', title: 'Rename flag', edits: [{ path: '/repo/a.ts', at: at + 1 }] })
+        expect(parseEdits(text)).toEqual({ cwd: '/repo', title: 'Rename flag', edits: [{ path: path.resolve('/repo/a.ts'), at: at + 1 }] })
         const indexed = indexSession(Buffer.from(text))!
         expect(indexed).toMatchObject({ cwd: '/repo', name: 'Rename flag', firstPrompt: 'rename the flag' })
         // Entry ids are the snapshot's: a search hit opens at that message.
@@ -93,7 +94,7 @@ describe('acpService index', () => {
         const mirrors = path.join(dir, 'mirror')
         const file = mirrorFile(mirrors, 'acp:claude:s1')!
         await mkdir(path.dirname(file), { recursive: true })
-        const edited = items.map(i => JSON.parse(JSON.stringify(i).replaceAll('/repo/', `${repo}/`)))
+        const edited = items.map(i => JSON.parse(JSON.stringify(i).replaceAll('/repo/', `${JSON.stringify(repo).slice(1, -1)}/`)))
         await writeFile(file, mirrorText({ sessionId: 's1', cwd: repo, createdAt: at, name: 'Rename flag' }, edited))
         expect(await mirrorFiles(mirrors)).toEqual([file])
 

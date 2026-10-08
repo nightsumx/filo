@@ -7,8 +7,31 @@ import path from 'node:path'
 import { afterAll, afterEach, describe, expect, it } from 'vitest'
 import { IPC } from '@shared/ipc'
 import { platform } from './platform'
-import { descendants } from './platform/posix'
 import { terminalEnv, Terminals } from './terminals'
+
+// The same steps in the shell terminals run: zsh or bash, or PowerShell on Windows.
+const ps = platform.id === 'win32'
+const sh = ps
+    ? {
+            probe: 'echo "dir=$PWD" "sum=$(40+2)" "term=$env:TERM"',
+            echo: (word: string, a: number, b: number) => `echo "${word}-$(${a}+${b})"`,
+            red: (text: string) => `Write-Host ("$([char]27)[31m" + '${text}' + "$([char]27)[0m")`,
+            // A child of a child, beside the program in the foreground.
+            tree: ['Start-Process -NoNewWindow cmd -ArgumentList \'/c\',\'ping -n 600 127.0.0.1 >nul\'', 'ping -n 601 127.0.0.1'],
+            wait: 'ping -n 30 127.0.0.1',
+            waiting: 'ping',
+            shell: path.basename(platform.userShell()).replace(/\.exe$/i, ''),
+        }
+    : {
+            probe: 'echo "dir=$PWD" "sum=$((40+2))" "term=$TERM"',
+            echo: (word: string, a: number, b: number) => `echo ${word}-$((${a}+${b}))`,
+            red: (text: string) => `printf '\\033[31m%s\\033[0m\\n' ${text}`,
+            // A job that ignores SIGHUP and SIGTERM, and a child of it: only the tree walk and SIGKILL get them.
+            tree: [`sh -c 'trap "" HUP TERM; sleep 600 & wait' &`, 'sleep 601'],
+            wait: 'sleep 30',
+            waiting: 'sleep',
+            shell: path.basename(platform.userShell()),
+        }
 
 const ptyDir = path.resolve('node_modules/node-pty')
 const dir = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'filo-term-')))
@@ -47,7 +70,7 @@ describe('terminals', () => {
         const t = terminals.create({ cwd: dir, cols: 80, rows: 24 })
         const out = sink()
         await terminals.attach(t.id, out.sink)
-        terminals.write(t.id, 'echo "dir=$PWD" "sum=$((40+2))" "term=$TERM"\r')
+        terminals.write(t.id, `${sh.probe}\r`)
         await until(() => out.text().includes('sum=42'))
         expect(out.text()).toContain(`dir=${dir}`)
         expect(out.text()).toContain('term=xterm-256color')
@@ -55,12 +78,12 @@ describe('terminals', () => {
 
     it('a late window gets the screen so far, and only chunks after it', async () => {
         const t = terminals.create({ cwd: dir })
-        terminals.write(t.id, 'echo before-$((1+1))\r')
+        terminals.write(t.id, `${sh.echo('before', 1, 1)}\r`)
         await until(async () => (await terminals.text(t.id)).includes('before-2'))
         const late = sink(2)
         const snapshot = await terminals.attach(t.id, late.sink)
         expect(snapshot.data).toContain('before-2')
-        terminals.write(t.id, 'echo after-$((2+1))\r')
+        terminals.write(t.id, `${sh.echo('after', 2, 1)}\r`)
         await until(() => late.text().includes('after-3'))
         expect(late.chunks.every(c => c.seq > snapshot.seq)).toBe(true)
         expect(late.text()).not.toContain('before-2')
@@ -68,7 +91,7 @@ describe('terminals', () => {
 
     it('reads back plain text, wrapped lines joined', async () => {
         const t = terminals.create({ cwd: dir, cols: 20, rows: 10 })
-        terminals.write(t.id, `printf '\\033[31m%s\\033[0m\\n' ${'x'.repeat(50)}\r`)
+        terminals.write(t.id, `${sh.red('x'.repeat(50))}\r`)
         await until(async () => (await terminals.text(t.id)).includes('x'.repeat(50)))
         expect(await terminals.text(t.id)).not.toContain('\x1B[')
     })
@@ -84,8 +107,9 @@ describe('terminals', () => {
         await terminals.restart(t.id)
         expect(terminals.get(t.id)?.exit).toBeUndefined()
         await terminals.waitExit(t.id, 8000)
-        expect((await terminals.text(t.id)).match(/built/g)?.length).toBe(2)
-    })
+        // ConPTY starts each run on a cleared screen.
+        expect((await terminals.text(t.id)).match(/built/g)?.length).toBe(ps ? 1 : 2)
+    }, 20_000)
 
     it('a shell the user exits goes away', async () => {
         const t = terminals.create({ cwd: dir })
@@ -96,13 +120,12 @@ describe('terminals', () => {
 
     it('closing ends every process started in it, background jobs and their children too', async () => {
         const t = terminals.create({ cwd: dir })
-        // A job that ignores SIGHUP and SIGTERM, and a child of it: only the tree walk and SIGKILL get them.
-        terminals.write(t.id, `sh -c 'trap "" HUP TERM; sleep 600 & wait' &\r`)
-        terminals.write(t.id, 'sleep 601\r')
+        terminals.write(t.id, `${sh.tree[0]}\r`)
+        terminals.write(t.id, `${sh.tree[1]}\r`)
         let pids: number[] = []
         await until(async () => {
             const pid = (terminals as any).entries.get(t.id).pty.pid as number
-            pids = await descendants(pid)
+            pids = await platform.descendants(pid)
             return pids.length >= 3
         })
         await terminals.close(t.id)
@@ -123,9 +146,9 @@ describe('terminals', () => {
 
     it('tells a busy shell from an idle one by its foreground program', async () => {
         const t = terminals.create({ cwd: dir })
-        await until(() => terminals.get(t.id)?.title === path.basename(platform.userShell()), 4000)
-        terminals.write(t.id, 'sleep 30\r')
-        await until(() => terminals.get(t.id)?.busy === true && terminals.get(t.id)?.title === 'sleep', 5000)
+        await until(() => terminals.get(t.id)?.title === sh.shell, 4000)
+        terminals.write(t.id, `${sh.wait}\r`)
+        await until(() => terminals.get(t.id)?.busy === true && terminals.get(t.id)?.title === sh.waiting, 5000)
         expect(terminals.busyIn([dir])).toBe(1)
         terminals.write(t.id, '\x03')
         await until(() => terminals.get(t.id)?.busy === false, 5000)

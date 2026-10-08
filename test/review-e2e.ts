@@ -10,10 +10,10 @@ import { execFileSync } from 'node:child_process'
 import { mkdir, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import process from 'node:process'
-import { check, launch, PORT, until, windows } from './app'
+import { check, launch, PORT, until, windows, workDir } from './app'
 import { startMockLlm } from './harness'
 
-const WORK = '/private/tmp/pi-gui-review'
+const WORK = workDir('pi-gui-review')
 const SHOTS = process.env.SHOTS ?? ''
 
 const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8' }).trim()

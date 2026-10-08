@@ -1,9 +1,13 @@
-import { readdirSync, readFileSync, statSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
+import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { platform } from '.'
 import { darwin } from './darwin'
 import { linux } from './linux'
-import { shimScript, win32 } from './win32'
+import { cmdArgument, shimScript, win32 } from './win32'
+import { below, foregroundOf, parseRows } from './win32-processes'
 import { darwinWindow } from './window/darwin'
 import { desktopWindow } from './window/desktop'
 
@@ -85,6 +89,44 @@ describe('win32', () => {
         expect(win32.ipcPath('C:\\Users\\b\\AppData\\Roaming\\pi-gui', 'terminals-1.sock')).not.toBe(a)
     })
 
+    it('passes arguments through cmd.exe to a batch file unchanged', () => {
+        expect(cmdArgument('plain')).toBe('^^^"plain^^^"')
+        expect(cmdArgument('a b&c')).toBe('^^^"a^^^ b^^^&c^^^"')
+        expect(cmdArgument('say "hi"\\')).toBe('^^^"say^^^ \\^^^"hi\\^^^"\\\\^^^"')
+        const run = win32.command('C:\\a b\\agent.cmd', ['x y'])
+        expect(run.args.slice(0, 3)).toEqual(['/d', '/s', '/c'])
+        expect(run.windowsVerbatimArguments).toBe(true)
+    })
+
+    // What cmd.exe makes of it, on Windows itself: spaces, quotes, % and & reach the program as given.
+    it.runIf(platform.id === 'win32')('runs a batch file in a folder with spaces, with awkward arguments', () => {
+        const dir = mkdtempSync(path.join(os.tmpdir(), 'filo cmd '))
+        try {
+            const echo = path.join(dir, 'echo args.cjs')
+            writeFileSync(echo, 'console.log(JSON.stringify(process.argv.slice(2)))')
+            const launcher = win32.launcher('probe', {}, [process.execPath, echo])
+            const file = path.join(dir, launcher.file)
+            writeFileSync(file, launcher.text)
+            const args = ['two words', 'a&b|c', '100%', '"quoted"', 'trail\\', '^caret', '!bang!', '']
+            const command = win32.command(file, args)
+            const out = spawnSync(command.file, [...command.args, '--plain'], { windowsVerbatimArguments: command.windowsVerbatimArguments, encoding: 'utf8' })
+            expect(JSON.parse(out.stdout)).toEqual([...args, '--plain'])
+        }
+        finally {
+            rmSync(dir, { recursive: true, force: true })
+        }
+    })
+
+    it('reads the process table: children, the tree below, the program in front', () => {
+        const rows = parseRows('4 0 System\r\n10 4 pwsh.exe\r\n11 10 conhost.exe\r\n12 10 node.exe\r\n13 12 esbuild.exe\r\n14 14 Odd.exe\r\n\r\n')
+        expect(rows).toHaveLength(6)
+        expect(below(rows, 10)).toEqual([11, 12, 13])
+        expect(below(rows, 14)).toEqual([])
+        expect(foregroundOf(rows, 10)).toBe('node')
+        expect(foregroundOf(rows, 12)).toBe('esbuild')
+        expect(foregroundOf(rows, 13)).toBe('')
+    })
+
     it('writes launchers as batch files', () => {
         const l = win32.launcher('node', { ELECTRON_RUN_AS_NODE: '1' }, ['C:\\Program Files\\Filo\\Filo.exe', '--require', 'C:\\100%\\preload.cjs'])
         expect(l.file).toBe('node.cmd')
@@ -101,7 +143,9 @@ describe('win32', () => {
 
 describe('posix', () => {
     it('keeps socket paths under the length limit', () => {
-        expect(darwin.ipcPath('/Users/a/Library/Application Support/pi-gui', 't.sock')).toBe('/Users/a/Library/Application Support/pi-gui/t.sock')
+        // The POSIX side joins with the host's separator.
+        if (platform.id !== 'win32')
+            expect(darwin.ipcPath('/Users/a/Library/Application Support/pi-gui', 't.sock')).toBe('/Users/a/Library/Application Support/pi-gui/t.sock')
         expect(linux.ipcPath(`/home/${'x'.repeat(120)}`, 't.sock').length).toBeLessThan(100)
     })
 

@@ -6,15 +6,15 @@ import { capabilityArgs } from './capabilities'
 
 describe('capabilityArgs', () => {
     it('maps ids to -e paths in catalogue order and drops unknown ids', () => {
-        expect(capabilityArgs(['ask', 'nope', 'todo', 'ask'], '/ext')).toEqual(['-e', '/ext/todo.ts', '-e', '/ext/ask.ts'])
+        expect(capabilityArgs(['ask', 'nope', 'todo', 'ask'], '/ext')).toEqual(['-e', path.join('/ext', 'todo.ts'), '-e', path.join('/ext', 'ask.ts')])
         expect(capabilityArgs(undefined, '/ext')).toEqual([])
         expect(capabilityArgs('todo', '/ext')).toEqual([])
     })
 
     it('passes the approval mode only when approval loads', () => {
-        expect(capabilityArgs(['approval'], '/ext', { approvalMode: 'edits' })).toEqual(['-e', '/ext/approval.ts', '--gui-approval', 'edits'])
-        expect(capabilityArgs(['todo'], '/ext', { approvalMode: 'edits' })).toEqual(['-e', '/ext/todo.ts'])
-        expect(capabilityArgs(['approval'], '/ext', { approvalMode: 'bogus' as any })).toEqual(['-e', '/ext/approval.ts'])
+        expect(capabilityArgs(['approval'], '/ext', { approvalMode: 'edits' })).toEqual(['-e', path.join('/ext', 'approval.ts'), '--gui-approval', 'edits'])
+        expect(capabilityArgs(['todo'], '/ext', { approvalMode: 'edits' })).toEqual(['-e', path.join('/ext', 'todo.ts')])
+        expect(capabilityArgs(['approval'], '/ext', { approvalMode: 'bogus' as any })).toEqual(['-e', path.join('/ext', 'approval.ts')])
     })
 })
 
