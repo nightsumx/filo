@@ -150,7 +150,7 @@ export interface PiSession {
  * Starts pi in a throwaway agent dir whose only model is the mock, so user settings, extensions
  * and credentials are never read.
  */
-export async function startPi(env: PiEnv, llm: MockLlm, capabilities: CapabilityId[], options: { approvalMode?: ApprovalMode, settings?: Record<string, unknown> } = {}): Promise<PiSession> {
+export async function startPi(env: PiEnv, llm: MockLlm, capabilities: CapabilityId[], options: { approvalMode?: ApprovalMode, settings?: Record<string, unknown>, hostEnv?: Record<string, string> } = {}): Promise<PiSession> {
     const root = await mkdtemp(path.join(os.tmpdir(), 'pi-gui-test-'))
     const agentDir = path.join(root, 'agent')
     const cwd = path.join(root, 'project')
@@ -177,7 +177,7 @@ export async function startPi(env: PiEnv, llm: MockLlm, capabilities: Capability
         onExit: () => {
             exited = true
         },
-    }, EXTENSIONS_DIR)
+    }, EXTENSIONS_DIR, () => options.hostEnv ?? {})
 
     // piSpawnEnv copies process.env at spawn time.
     const previous = process.env.PI_CODING_AGENT_DIR

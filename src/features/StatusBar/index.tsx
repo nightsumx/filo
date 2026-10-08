@@ -4,7 +4,8 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { APP_INFO } from '@shared/app'
 import { cn } from '@/lib/utils'
 import { appStore } from '@/store/app'
-import { Check, ChevronRight, Loader2, Monitor, Moon, Settings, Sun } from 'lucide-react'
+import { terminalStore } from '@/store/terminals'
+import { Check, ChevronRight, Loader2, Monitor, Moon, Settings, SquareTerminal, Sun } from 'lucide-react'
 import { observer } from 'mobx-react-lite'
 import { ProjectBadge } from '../Toolbar/ProjectBadge'
 import { newThreadLabel, tr } from '@/lib/i18n'
@@ -55,6 +56,7 @@ export const StatusBar = observer(() => {
     const thread = appStore.active
     const env = appStore.env
     const running = [...appStore.threads.values()].filter(t => t.running).length
+    const terminalsBusy = project ? terminalStore.busyIn(project.cwd) : 0
 
     return (
         <footer className="flex h-[26px] shrink-0 items-center gap-0.5 px-2 text-[12px]">
@@ -81,6 +83,12 @@ export const StatusBar = observer(() => {
                     <Loader2 size={12} className="animate-spin" />
                     {tr(`${running} 个线程运行中`, `${running} running`)}
                 </span>
+            )}
+            {terminalsBusy > 0 && (
+                <button type="button" className={widget} title={tr('显示终端（⌃`）', 'Show terminal (⌃`)')} onClick={terminalStore.show}>
+                    <SquareTerminal size={12} />
+                    {tr(`${terminalsBusy} 个终端运行中`, `${terminalsBusy} in terminal`)}
+                </button>
             )}
             <span className={cn(widget, 'cursor-default')} title={piTitle(env)}>
                 {env?.ok ? `pi ${env.env.version}${env.env.bundled ? tr(' · 内置', ' · built-in') : ''}` : env ? tr('pi 不可用', 'pi unavailable') : tr('正在查找 pi…', 'Looking for pi…')}

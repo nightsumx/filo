@@ -221,7 +221,11 @@ function LiveTail({ text }: { text: string }) {
     return <pre className="mt-0.5 whitespace-pre-wrap break-all pl-4 font-mono text-[12px] text-gray-400">{tail}</pre>
 }
 
-export const ToolRow = memo(({ call, result, running, startedAt, ms }: { call: ToolCall, result?: ToolResultView, running: boolean, startedAt?: number, ms?: number }) => {
+/**
+ * `action`: a small control at the end of the result line; `label`: what the call line shows instead
+ * of its arguments (terminal tools: the terminal's name, not its id).
+ */
+export const ToolRow = memo(({ call, result, running, startedAt, ms, action, label }: { call: ToolCall, result?: ToolResultView, running: boolean, startedAt?: number, ms?: number, action?: React.ReactNode, label?: string }) => {
     const cwd = useContext(CwdContext)
     const t = useT()
     const [expanded, setExpanded] = useViewState(`tool:${call.id}`, false)
@@ -230,7 +234,8 @@ export const ToolRow = memo(({ call, result, running, startedAt, ms }: { call: T
     const failed = status === 'error'
     const output = resultText(result)
     const images = resultImages(result)
-    const { main, detail } = tuiSummary(call.name, call.arguments, cwd)
+    const summary = tuiSummary(call.name, call.arguments, cwd)
+    const { main, detail } = label ? { main: label, detail: '' } : summary
     const name = call.name
     const path = String(call.arguments?.path ?? call.arguments?.file_path ?? '')
 
@@ -325,11 +330,14 @@ export const ToolRow = memo(({ call, result, running, startedAt, ms }: { call: T
                         </span>
                     )}
                 </button>
-                <button type="button" onClick={toggle} className="group/res flex min-h-[22px] w-full items-start gap-1.5 text-left leading-[22px]">
-                    <span className="shrink-0 select-none text-gray-400">↳</span>
-                    {/* CJK labels read better in the UI font; numbers and meters stay mono. */}
-                    <span className="min-w-0 font-sans text-[12.5px] [overflow-wrap:anywhere]">{resultLine}</span>
-                </button>
+                <div className="flex items-start gap-2">
+                    <button type="button" onClick={toggle} className="group/res flex min-h-[22px] min-w-0 flex-1 items-start gap-1.5 text-left leading-[22px]">
+                        <span className="shrink-0 select-none text-gray-400">↳</span>
+                        {/* CJK labels read better in the UI font; numbers and meters stay mono. */}
+                        <span className="min-w-0 font-sans text-[12.5px] [overflow-wrap:anywhere]">{resultLine}</span>
+                    </button>
+                    {action}
+                </div>
                 {status === 'running' && name === 'bash' && <LiveTail text={output} />}
                 {diff && name === 'edit' && (
                     <div className="mt-1">

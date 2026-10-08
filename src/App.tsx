@@ -2,6 +2,7 @@ import { Button } from '@/components/ui/button'
 import { Toaster } from '@/components/ui/sonner'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { appStore } from '@/store/app'
+import { terminalStore } from '@/store/terminals'
 import { AlertTriangle, FolderPlus, Loader2, Plus } from 'lucide-react'
 import { observer } from 'mobx-react-lite'
 import { Fragment, useEffect, useRef } from 'react'
@@ -10,6 +11,7 @@ import { SearchDialog } from './features/Search'
 import { SettingsDialog } from './features/Settings'
 import { Sidebar } from './features/Sidebar'
 import { StatusBar } from './features/StatusBar'
+import { TerminalPanel, TerminalResizer, useTerminalViews } from './features/Terminal'
 import { closeTabWithConfirm, TabBar } from './features/Tabs/TabBar'
 import { ShortcutHints, ThreadPane } from './features/Thread'
 import { MainToolbar } from './features/Toolbar'
@@ -81,15 +83,28 @@ const Panes = observer(() => {
 /** Islands under the main toolbar: project tool window, editor (tabs + panes), changes tool window. */
 const Workspace = observer(() => {
     const active = appStore.active
+    const column = useRef<HTMLDivElement>(null)
+    const terminalOpen = terminalStore.open && terminalStore.tabs.length > 0
+    useTerminalViews()
     return (
         <div className="flex min-h-0 flex-1 gap-[5px] px-[5px]">
             {appStore.sidebarOpen && <Sidebar />}
-            <main className="ide-island flex min-w-0 flex-1 flex-col bg-ide-editor">
-                <TabBar />
-                <div className="flex min-h-0 flex-1">
-                    <Panes />
-                </div>
-            </main>
+            <div ref={column} className="flex min-w-0 flex-1 flex-col">
+                <main className="ide-island flex min-h-0 min-w-0 flex-1 flex-col bg-ide-editor">
+                    <TabBar />
+                    <div className="flex min-h-0 flex-1">
+                        <Panes />
+                    </div>
+                </main>
+                {terminalOpen && (
+                    <>
+                        <TerminalResizer maxHeight={() => (column.current?.clientHeight ?? 600) - 160} />
+                        <div className="ide-island shrink-0" style={{ height: `min(${terminalStore.height}px, calc(100% - 160px))` }}>
+                            <TerminalPanel />
+                        </div>
+                    </>
+                )}
+            </div>
             {appStore.reviewOpen && active && (
                 <div className="ide-island w-[40%] min-w-[340px] max-w-[700px] shrink-0">
                     <ReviewPanel thread={active} onClose={appStore.toggleReview} />
@@ -107,6 +122,12 @@ function useShortcuts() {
             if (e.ctrlKey && !e.metaKey && e.key === 'Tab') {
                 e.preventDefault()
                 appStore.cycleTab(e.shiftKey ? -1 : 1)
+                return
+            }
+            // ⌃` as in VS Code and JetBrains: open and focus the terminal, or hide it from inside.
+            if (e.ctrlKey && !e.metaKey && !e.altKey && e.code === 'Backquote') {
+                e.preventDefault()
+                terminalStore.toggle(e.target instanceof Element && !!e.target.closest('.xterm'))
                 return
             }
             if (e.ctrlKey && !e.metaKey && /^[1-9]$/.test(e.key)) {

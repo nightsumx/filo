@@ -41,6 +41,11 @@ describe('turnStats', () => {
         expect(s).toMatchObject({ commands: 2, reads: 1, searches: 1, edited: 2, added: 4, removed: 1, other: 1, failed: 1 })
     })
 
+    it('a command started in an app terminal counts as a command; reading one does not', () => {
+        const s = turnStats([tool('0', 'terminal_run', { command: 'npm run dev' }), tool('1', 'terminal_read'), tool('2', 'terminal_stop', { id: 't' })])
+        expect(s).toMatchObject({ commands: 1, other: 2 })
+    })
+
     it('sums thinking time and finds when the last step finished', () => {
         const thinking = (key: string, ms: number, endedAt: number): Step => ({ kind: 'thinking', key, text: 't', streaming: false, redacted: false, ms, endedAt })
         const s = turnStats([thinking('0', 1200, 3000), { ...tool('1', 'bash'), endedAt: 9000 } as Step, thinking('2', 800, 9800)])

@@ -9,6 +9,7 @@ import { AutopilotCardStep, AutopilotDecisionStep } from './capabilities/Autopil
 import { PlanStep } from './capabilities/PlanStep'
 import { ReviewStep } from './capabilities/ReviewStep'
 import { SubagentStep } from './capabilities/SubagentStep'
+import { TerminalStep } from './capabilities/TerminalStep'
 import { TodoStep } from './capabilities/TodoStep'
 import { ThinkingBlock } from './ThinkingBlock'
 import { Gutter, ToolRow } from './ToolRow'
@@ -95,6 +96,8 @@ export const StepView = memo(({ step }: { step: Step }) => {
                 return <PlanStep call={step.call} result={step.result} running={step.running} />
             if (step.call.name === 'subagent')
                 return <SubagentStep call={step.call} result={step.result} running={step.running} />
+            if (step.call.name.startsWith('terminal_'))
+                return <TerminalStep call={step.call} result={step.result} running={step.running} startedAt={step.startedAt} ms={step.ms} />
             return <ToolRow call={step.call} result={step.result} running={step.running} startedAt={step.startedAt} ms={step.ms} />
         case 'bash':
             return <BashExecution id={step.key} message={step.message} />

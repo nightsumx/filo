@@ -102,29 +102,29 @@ describe('capabilities', () => {
     })
 
     it('saves a preset by its id, so later additions to it reach users who chose it', () => {
-        appStore.setCapabilities(['todo', 'ask', 'approval', 'plan', 'review', 'autopilot'])
+        appStore.setCapabilities(['todo', 'ask', 'approval', 'plan', 'review', 'autopilot', 'terminal'])
         expect(saved()).toBe('standard')
         expect(appStore.capabilityPreset).toBe('standard')
         appStore.setCapabilities(['todo', 'plan'])
         expect(saved()).toEqual(['todo', 'plan'])
         expect(appStore.capabilityPreset).toBeUndefined()
-        expect(restore({ capabilities: 'full' })).toEqual(['todo', 'ask', 'approval', 'plan', 'subagent', 'review', 'autopilot'])
+        expect(restore({ capabilities: 'full' })).toEqual(['todo', 'ask', 'approval', 'plan', 'subagent', 'review', 'autopilot', 'terminal'])
         expect(appStore.capabilityPreset).toBe('full')
         expect(restore({ capabilities: 'lean' })).toEqual([])
-        expect(restore({ capabilities: 'gone' })).toEqual(['todo', 'ask', 'approval', 'plan', 'review', 'autopilot'])
+        expect(restore({ capabilities: 'gone' })).toEqual(['todo', 'ask', 'approval', 'plan', 'review', 'autopilot', 'terminal'])
     })
 
     it('nothing saved is the standard preset', () => {
-        expect(restore({})).toEqual(['todo', 'ask', 'approval', 'plan', 'review', 'autopilot'])
+        expect(restore({})).toEqual(['todo', 'ask', 'approval', 'plan', 'review', 'autopilot', 'terminal'])
         expect(appStore.capabilityPreset).toBe('standard')
     })
 
     it('a list saved before presets were saved by id becomes the preset it was', () => {
-        // Those builds could not offer review or autopilot, so a list without them still matches.
-        expect(restore({ capabilities: ['todo', 'ask', 'approval', 'plan', 'subagent'] })).toEqual(['todo', 'ask', 'approval', 'plan', 'subagent', 'review', 'autopilot'])
+        // Those builds could not offer review, autopilot or terminal, so a list without them still matches.
+        expect(restore({ capabilities: ['todo', 'ask', 'approval', 'plan', 'subagent'] })).toEqual(['todo', 'ask', 'approval', 'plan', 'subagent', 'review', 'autopilot', 'terminal'])
         expect(appStore.capabilityPreset).toBe('full')
-        expect(restore({ capabilities: ['todo', 'ask', 'approval', 'plan'] })).toEqual(['todo', 'ask', 'approval', 'plan', 'review', 'autopilot'])
-        expect(restore({ capabilities: ['todo', 'ask', 'approval', 'plan', 'review', 'autopilot'] })).toEqual(['todo', 'ask', 'approval', 'plan', 'review', 'autopilot'])
+        expect(restore({ capabilities: ['todo', 'ask', 'approval', 'plan'] })).toEqual(['todo', 'ask', 'approval', 'plan', 'review', 'autopilot', 'terminal'])
+        expect(restore({ capabilities: ['todo', 'ask', 'approval', 'plan', 'review', 'autopilot'] })).toEqual(['todo', 'ask', 'approval', 'plan', 'review', 'autopilot', 'terminal'])
         // Lean stays lean, and other lists stay as they are.
         expect(restore({ capabilities: [] })).toEqual([])
         expect(appStore.capabilityPreset).toBe('lean')

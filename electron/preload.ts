@@ -119,6 +119,18 @@ const bridge: PiBridge = {
         ipcRenderer.on(IPC.notificationClick, handler)
         return () => ipcRenderer.off(IPC.notificationClick, handler)
     },
+
+    terminals: () => ipcRenderer.invoke(IPC.terminals),
+    onTerminals: listener => listen(IPC.terminalsChanged, listener),
+    terminalCreate: create => ipcRenderer.invoke(IPC.terminalCreate, create),
+    terminalAttach: id => ipcRenderer.invoke(IPC.terminalAttach, id),
+    terminalDetach: id => ipcRenderer.send(IPC.terminalDetach, id),
+    onTerminalData: listener => listen(IPC.terminalData, listener),
+    terminalWrite: (id, data) => ipcRenderer.send(IPC.terminalWrite, id, data),
+    terminalResize: (id, cols, rows) => ipcRenderer.send(IPC.terminalResize, id, cols, rows),
+    terminalClose: id => ipcRenderer.invoke(IPC.terminalClose, id),
+    terminalRestart: id => ipcRenderer.invoke(IPC.terminalRestart, id),
+    terminalText: (id, lines) => ipcRenderer.invoke(IPC.terminalText, id, lines),
 }
 
 contextBridge.exposeInMainWorld('pi', bridge)

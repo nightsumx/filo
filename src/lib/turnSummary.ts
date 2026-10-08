@@ -93,7 +93,8 @@ export function turnStats(steps: Step[]): TurnStats {
         const path = String(args.path ?? args.file_path ?? '')
         if (step.result?.isError)
             stats.failed++
-        if (name === 'bash')
+        // terminal_run starts a command too, in an app terminal instead of bash.
+        if (name === 'bash' || name === 'terminal_run')
             stats.commands++
         else if (name === 'read')
             read.add(path || step.key)

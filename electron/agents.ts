@@ -45,7 +45,7 @@ class PiAgent implements ManagedAgent {
     private stderr = ''
     private exited = false
 
-    constructor(env: PiEnv, options: AgentStartOptions, extensionsDir: string, callbacks: AgentCallbacks) {
+    constructor(env: PiEnv, options: AgentStartOptions, extensionsDir: string, callbacks: AgentCallbacks, hostEnv: Record<string, string> = {}) {
         const args = ['--mode', 'rpc', ...hostExtensionArgs(extensionsDir), ...capabilityArgs(options.capabilities, extensionsDir, { approvalMode: options.approvalMode })]
         if (options.sessionPath)
             args.push('--session', options.sessionPath)
@@ -53,7 +53,7 @@ class PiAgent implements ManagedAgent {
         this.child = spawn(command.file, command.args, {
             cwd: options.cwd,
             // The app loads its capabilities with -e; pi-cc-tui, if installed, leaves its copies off.
-            env: { ...piSpawnEnv(env), [ENV.host]: 'gui' },
+            env: { ...piSpawnEnv(env), ...hostEnv, [ENV.host]: 'gui' },
             stdio: ['pipe', 'pipe', 'pipe'],
         })
 
@@ -131,7 +131,8 @@ export class AgentManager {
     private agents = new Map<string, ManagedAgent>()
 
     /** extensionsDir holds the capability extensions (packages/capabilities/extensions, or Resources/capabilities when packaged). */
-    constructor(private callbacks: AgentCallbacks, private extensionsDir: string) {}
+    /** `hostEnv`: variables for every pi the app starts (the terminal socket), read at each start. */
+    constructor(private callbacks: AgentCallbacks, private extensionsDir: string, private hostEnv: () => Record<string, string> = () => ({})) {}
 
     start(env: PiEnv, options: AgentStartOptions): string {
         const agent = new PiAgent(env, options, this.extensionsDir, {
@@ -140,7 +141,7 @@ export class AgentManager {
                 this.agents.delete(id)
                 this.callbacks.onExit(id, info)
             },
-        })
+        }, this.hostEnv())
         this.agents.set(agent.id, agent)
         return agent.id
     }

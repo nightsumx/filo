@@ -49,6 +49,10 @@ export interface WindowsOptions {
     /** Creates a BrowserWindow (preload, handlers, page) at the given frame. */
     create: (bounds: Partial<WindowBounds>) => BrowserWindow
     stopAgent: (agentId: string) => Promise<void>
+    /** Terminals with something running in these projects (the close prompt counts them). */
+    busyTerminals?: (cwds: string[]) => number
+    /** The projects some window shows, after every change. */
+    projectsShown?: (cwds: Set<string>) => void
 }
 
 export class Windows {
@@ -101,10 +105,17 @@ export class Windows {
         win.on('close', (event) => {
             if (!this.quitting && !entry.closing) {
                 const running = Object.values(entry.activity).reduce((n, a) => n + a.running, 0)
-                if (running > 0) {
+                // Terminals end with the last window showing their project.
+                const alone = entry.projects.filter(cwd => ![...this.entries.values()].some(e => e !== entry && e.projects.includes(cwd)))
+                const terminals = this.options.busyTerminals?.(alone) ?? 0
+                if (running > 0 || terminals > 0) {
+                    const parts = [
+                        running && tr(`${running} 个线程`, `${running} ${running === 1 ? 'thread' : 'threads'}`),
+                        terminals && tr(`${terminals} 个终端`, `${terminals} ${terminals === 1 ? 'terminal' : 'terminals'}`),
+                    ].filter(Boolean)
                     const choice = dialog.showMessageBoxSync(win, {
                         type: 'warning',
-                        message: tr(`${running} 个线程正在运行`, `${running} ${running === 1 ? 'thread is' : 'threads are'} running`),
+                        message: tr(`${parts.join('、')}正在运行`, `${parts.join(' and ')} ${running + terminals === 1 ? 'is' : 'are'} running`),
                         detail: tr('关闭窗口会停止它们。', 'Closing the window stops them.'),
                         buttons: [tr('关闭窗口', 'Close window'), tr('取消', 'Cancel')],
                         defaultId: 1,
@@ -223,6 +234,8 @@ export class Windows {
         }
         const waiting = open.reduce((n, p) => n + p.activity.waiting, 0)
         app.setBadgeCount(Math.min(waiting, 999))
+        if (!this.quitting)
+            this.options.projectsShown?.(new Set(open.map(p => p.cwd)))
     }
 
     private setProjects(entry: Entry, projects: string[]) {

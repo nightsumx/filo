@@ -304,6 +304,39 @@ export interface AgentExitInfo {
     detached?: boolean
 }
 
+/** A terminal in the app's Terminal tool window: a shell, or a command run in one. Lives in main, per project. */
+export interface TerminalInfo {
+    id: string
+    cwd: string
+    /** Tab label: the label it started with, else the foreground program (zsh, bun, node…). */
+    title: string
+    /** Something other than the shell runs in the foreground (a command terminal: while it lives). */
+    busy: boolean
+    /** Started to run this command; the terminal ends with it and can run it again. */
+    command?: string
+    by: 'user' | 'agent'
+    /** Set once its process has ended (command terminals stay open to show the output). */
+    exit?: { code: number, signal?: number }
+    createdAt: number
+}
+
+export interface TerminalCreate {
+    cwd: string
+    cols?: number
+    rows?: number
+    /** Runs this in the user's interactive login shell instead of opening a shell. */
+    command?: string
+    label?: string
+}
+
+/** The screen and scrollback as escape sequences, up to output chunk `seq`. */
+export interface TerminalSnapshot {
+    data: string
+    seq: number
+    cols: number
+    rows: number
+}
+
 /** The API preload exposes on window.pi. */
 export interface PiBridge {
     resolveEnv: () => Promise<PiEnvResult>
@@ -418,6 +451,24 @@ export interface PiBridge {
     notify: (notice: AppNotice) => Promise<void>
     onNotificationClick: (listener: (key: string) => void) => () => void
 
+    /** Every terminal (all projects); the list again on every change. */
+    terminals: () => Promise<TerminalInfo[]>
+    onTerminals: (listener: (list: TerminalInfo[]) => void) => () => void
+    terminalCreate: (create: TerminalCreate) => Promise<TerminalInfo>
+    /** Starts output delivery to this window; returns what came before (see TerminalSnapshot.seq). */
+    terminalAttach: (id: string) => Promise<TerminalSnapshot>
+    terminalDetach: (id: string) => void
+    /** Output chunks; `seq` counts chunks, so ones the snapshot already holds can be skipped. */
+    onTerminalData: (listener: (id: string, seq: number, data: string) => void) => () => void
+    terminalWrite: (id: string, data: string) => void
+    terminalResize: (id: string, cols: number, rows: number) => void
+    /** Ends the terminal and every process started in it, and drops it. */
+    terminalClose: (id: string) => Promise<void>
+    /** A command terminal runs its command again (stopping it first if it still runs). */
+    terminalRestart: (id: string) => Promise<void>
+    /** Plain text of the last lines, for sending output to a thread. */
+    terminalText: (id: string, lines?: number) => Promise<string>
+
     /** Settings → 模型供应商: pi's providers and the models.json entries the page edits. */
     providers: () => Promise<ProvidersState>
     /** Starts a sign-in; its prompts and outcome arrive on onProviderLogin under the returned id. */
@@ -516,6 +567,17 @@ export const IPC = {
     endpointModels: 'providers:endpoint-models',
     providerLoginUpdate: 'providers:login-update',
     providersChanged: 'providers:changed',
+    terminals: 'terminal:list',
+    terminalsChanged: 'terminal:changed',
+    terminalCreate: 'terminal:create',
+    terminalAttach: 'terminal:attach',
+    terminalDetach: 'terminal:detach',
+    terminalData: 'terminal:data',
+    terminalWrite: 'terminal:write',
+    terminalResize: 'terminal:resize',
+    terminalClose: 'terminal:close',
+    terminalRestart: 'terminal:restart',
+    terminalText: 'terminal:text',
     /** Renderer → main answer to a main → renderer request (export/import). */
     reply: 'window:reply',
 } as const

@@ -5,7 +5,7 @@
 // to other extensions in the same pi as GUI_EVENTS on `pi.events`.
 // Extensions import these with `import type` only; the event names and env vars are repeated there.
 
-export type CapabilityId = 'todo' | 'ask' | 'approval' | 'plan' | 'subagent' | 'review' | 'autopilot'
+export type CapabilityId = 'todo' | 'ask' | 'approval' | 'plan' | 'subagent' | 'review' | 'autopilot' | 'terminal'
 
 /** Hidden commands are filtered out of the slash menu. */
 export const GUI_COMMAND_PREFIX = 'gui-'
@@ -62,7 +62,45 @@ export const ENV = {
     subagent: 'PI_KIT_SUBAGENT',
     /** Approval mode a subagent's pi starts in, when approval is loaded without `-e`. */
     approvalMode: 'PI_KIT_APPROVAL_MODE',
+    /** The desktop app's terminal socket (TerminalRequest lines); the terminal tools exist only with it. */
+    terminals: 'PI_KIT_TERMINALS',
+    /** Token every TerminalRequest carries. */
+    terminalsToken: 'PI_KIT_TERMINALS_TOKEN',
 } as const
+
+// ---------------------------------------------------------------- terminals
+
+/**
+ * The terminal capability asks the desktop app, over the unix socket in ENV.terminals, to run
+ * commands in its Terminal tool window, where the user sees them too. One JSON line each way per
+ * connection.
+ */
+export type TerminalCall =
+    | { method: 'run', cwd: string, command: string, label?: string, waitFor?: string, timeoutMs?: number }
+    | { method: 'read', cwd: string, id?: string, lines?: number, waitFor?: string, timeoutMs?: number }
+    | { method: 'stop', cwd: string, id: string }
+
+export type TerminalRequest = { token: string } & TerminalCall
+
+export interface TerminalSummary {
+    id: string
+    title: string
+    command?: string
+    by: 'user' | 'agent'
+    /** running: something runs in it (a command terminal: its command); idle: a shell at its prompt. */
+    status: 'running' | 'idle' | 'exited'
+    exitCode?: number
+}
+
+export type TerminalResponse =
+    | { ok: true, terminal?: TerminalSummary, terminals?: TerminalSummary[], output?: string, matched?: boolean, restarted?: boolean }
+    | { ok: false, error: string }
+
+/** Details of terminal_run / terminal_read / terminal_stop results: the terminal the call was about. */
+export interface TerminalDetails {
+    kind: 'terminal'
+    terminal?: TerminalSummary
+}
 
 // ---------------------------------------------------------------- presence
 

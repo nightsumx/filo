@@ -23,6 +23,8 @@ import { compactionInfo, globalCompaction, setGlobalCompaction } from './piSetti
 import { endpointSaveOf, helperLaunch, ProviderHelper, ProviderService } from './providers'
 import { resolvePiEnv, setBundledPi } from './pi-env'
 import { assertInSessionsDir, listSessions, readSession } from './sessions'
+import { socketPath, TerminalTools } from './terminalTools'
+import { Terminals } from './terminals'
 import { Windows } from './windows'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -48,7 +50,7 @@ setBundledPi(app.isPackaged
 const agents = new AgentManager({
     onEvent: (agentId, event) => windows.deliver(agentId, IPC.agentEvent, event),
     onExit: (agentId, info) => windows.deliver(agentId, IPC.agentExit, info),
-}, extensionsDir)
+}, extensionsDir, () => terminalTools.env())
 
 // Sessions of ACP agents (Codex, …) started from the app; the agents keep the conversations.
 const acpMirrorDir = () => path.join(app.getPath('userData'), 'acp-transcripts')
@@ -61,7 +63,41 @@ const acp = new AcpService(
     url => net.fetch(url),
 )
 
-const windows = new Windows({ store, create: createWindow, stopAgent: id => agents.stop(id) })
+const windows = new Windows({
+    store,
+    create: createWindow,
+    stopAgent: id => agents.stop(id),
+    busyTerminals: cwds => terminals.busyIn(cwds),
+    projectsShown: (cwds) => {
+        shownProjects = cwds
+        closeHiddenTerminals(cwds)
+    },
+})
+
+// The Terminal tool window. node-pty is native, so it is not bundled: packaged builds carry it as
+// Resources/node-pty (package.json build.extraResources).
+const terminals = new Terminals({
+    ptyDir: app.isPackaged ? path.join(process.resourcesPath, 'node-pty') : path.join(__dirname, '../../node_modules/node-pty'),
+    onChange: list => windows.broadcast(null, IPC.terminalsChanged, list),
+    appVersion: app.getVersion(),
+})
+
+/**
+ * The agent's terminal tools (the terminal capability) reach the terminals through this socket. Named
+ * per app process, so a second instance (a test run, a dev build) has its own.
+ */
+const terminalTools = new TerminalTools(terminals, socketPath(app.getPath('userData'), `terminals-${process.pid}.sock`), () => shownProjects)
+
+/**
+ * A project no window shows any more takes its terminals with it. Checked a moment later, so a
+ * project passing between windows (or a window reloading) keeps them.
+ */
+let hiddenTimer: ReturnType<typeof setTimeout> | undefined
+let shownProjects = new Set<string>()
+function closeHiddenTerminals(shown: Set<string>) {
+    clearTimeout(hiddenTimer)
+    hiddenTimer = setTimeout(() => void terminals.closeOutside(shown), 2000)
+}
 
 /**
  * Settings → 模型供应商. The helper runs with the user's node and pi, so it is a real file outside the
@@ -429,7 +465,47 @@ function registerIpc() {
     ipcMain.handle(IPC.removeEndpoint, (_e, endpoint: unknown) => providers.service.removeEndpoint(id(endpoint)))
     ipcMain.handle(IPC.endpointModels, (_e, baseUrl: unknown, api: unknown, apiKey: unknown, provider: unknown) =>
         providers.service.endpointModels(typeof baseUrl === 'string' ? baseUrl : '', typeof api === 'string' ? api : '', typeof apiKey === 'string' ? apiKey : undefined, id(provider) || undefined))
+
+    const terminalId = (v: unknown) => (typeof v === 'string' && v.length <= 100 ? v : '')
+    ipcMain.handle(IPC.terminals, () => terminals.list())
+    ipcMain.handle(IPC.terminalCreate, (_e, create: unknown) => {
+        const c = (create ?? {}) as Record<string, unknown>
+        return terminals.create({
+            cwd: absolutePath(c.cwd),
+            cols: typeof c.cols === 'number' ? c.cols : undefined,
+            rows: typeof c.rows === 'number' ? c.rows : undefined,
+            command: typeof c.command === 'string' ? c.command.slice(0, 10_000) : undefined,
+            label: typeof c.label === 'string' ? c.label.slice(0, 100) : undefined,
+        })
+    })
+    ipcMain.handle(IPC.terminalAttach, (e, tid: unknown) => {
+        const sender = e.sender
+        if (!attachedSenders.has(sender.id)) {
+            attachedSenders.add(sender.id)
+            sender.once('destroyed', () => {
+                attachedSenders.delete(sender.id)
+                terminals.detachAll(sender.id)
+            })
+        }
+        return terminals.attach(terminalId(tid), sender)
+    })
+    ipcMain.on(IPC.terminalDetach, (e, tid: unknown) => terminals.detach(terminalId(tid), e.sender.id))
+    // Keystrokes and resizes are fire-and-forget: no reply per key.
+    ipcMain.on(IPC.terminalWrite, (_e, tid: unknown, data: unknown) => {
+        if (typeof data === 'string')
+            terminals.write(terminalId(tid), data.slice(0, 1024 * 1024))
+    })
+    ipcMain.on(IPC.terminalResize, (_e, tid: unknown, cols: unknown, rows: unknown) => {
+        if (typeof cols === 'number' && typeof rows === 'number')
+            terminals.resize(terminalId(tid), cols, rows)
+    })
+    ipcMain.handle(IPC.terminalClose, (_e, tid: unknown) => terminals.close(terminalId(tid)))
+    ipcMain.handle(IPC.terminalRestart, (_e, tid: unknown) => terminals.restart(terminalId(tid)))
+    ipcMain.handle(IPC.terminalText, (_e, tid: unknown, lines: unknown) => terminals.text(terminalId(tid), typeof lines === 'number' ? lines : undefined))
 }
+
+/** Windows that attached a terminal; each gets one cleanup when it goes away (or reloads its page). */
+const attachedSenders = new Set<number>()
 
 /**
  * App menu without a ⌘W "Close Window" item: ⌘W, ⌘T, ⌘1–9 and ⌘\ are tab shortcuts handled by the
@@ -510,6 +586,8 @@ app.whenReady().then(async () => {
         app.dock?.setIcon(path.join(__dirname, '../../build/icon.png'))
     applyLang(state.lang)
     registerIpc()
+    // Before the first window, so the first threads' pi already gets the socket.
+    await terminalTools.start().catch(error => console.error('terminal tools:', error))
     windows.restore(savedWindows(state))
     // Warm up env resolution so the first thread starts faster.
     void resolvePiEnv()
@@ -527,8 +605,9 @@ app.on('before-quit', (event) => {
     quitting = true
     event.preventDefault()
     presence.stop()
+    terminalTools.stop()
     providers.service.helper.stop()
-    void Promise.all([windows.prepareQuit(), agents.stopAll()]).finally(() => app.quit())
+    void Promise.all([windows.prepareQuit(), agents.stopAll(), terminals.closeAll()]).finally(() => app.quit())
 })
 
 app.on('window-all-closed', () => {

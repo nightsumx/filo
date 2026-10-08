@@ -5,7 +5,8 @@ import { ActivityBadge } from '@/components/StatusIcons'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { cn, shortPath } from '@/lib/utils'
 import { appStore } from '@/store/app'
-import { ChevronDown, Columns3, FolderOpen, FolderPlus, GitBranch, Merge, PanelLeft, PanelRight, Plus, Search, Square, X } from 'lucide-react'
+import { terminalStore } from '@/store/terminals'
+import { ChevronDown, Columns3, FolderOpen, FolderPlus, GitBranch, Merge, PanelBottom, PanelLeft, PanelRight, Plus, Search, Square, X } from 'lucide-react'
 import { observer } from 'mobx-react-lite'
 import { useEffect, useRef, useState } from 'react'
 import { useGitStatus } from '../Review/useGitStatus'
@@ -303,6 +304,26 @@ const BranchWidget = observer(({ cwd }: { cwd: string }) => {
     )
 })
 
+/** Shows the Terminal tool window; a dot when something runs in one of the project's terminals. */
+const TerminalToggle = observer(() => {
+    const open = terminalStore.open && terminalStore.tabs.length > 0
+    const busy = appStore.activeProject ? terminalStore.busyIn(appStore.activeProject) : 0
+    return (
+        <button
+            type="button"
+            aria-pressed={open}
+            aria-label={tr('终端', 'Terminal')}
+            title={busy ? tr(`终端：${busy} 个在运行（⌃\`）`, `Terminal: ${busy} running (⌃\`)`) : tr('终端（⌃\`）', 'Terminal (⌃\`)')}
+            disabled={!appStore.activeProject}
+            onClick={() => (open ? terminalStore.hide() : terminalStore.show())}
+            className={cn(iconBtn, 'relative', open && 'text-gray-900')}
+        >
+            <PanelBottom size={16} />
+            {busy > 0 && <span className="absolute right-[3px] top-[3px] h-1.5 w-1.5 rounded-full bg-[#99d58f]" />}
+        </button>
+    )
+})
+
 export const MainToolbar = observer(() => {
     const split = appStore.layout === 'split'
     const project = appStore.project
@@ -329,6 +350,7 @@ export const MainToolbar = observer(() => {
             <button type="button" aria-pressed={appStore.sidebarOpen} aria-label={tr('项目面板', 'Projects panel')} title={tr('项目面板（⌘B）', 'Projects panel (⌘B)')} onClick={appStore.toggleSidebar} className={cn(iconBtn, appStore.sidebarOpen && 'text-gray-900')}>
                 <PanelLeft size={16} />
             </button>
+            <TerminalToggle />
             <button type="button" aria-pressed={appStore.reviewOpen} aria-label={tr('改动面板', 'Changes panel')} title={tr('改动面板', 'Changes panel')} disabled={!appStore.active} onClick={appStore.toggleReview} className={cn(iconBtn, appStore.reviewOpen && 'text-gray-900')}>
                 <PanelRight size={16} />
             </button>

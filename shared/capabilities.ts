@@ -80,6 +80,14 @@ export const CAPABILITIES: readonly Capability[] = [
         tools: [],
         contextTokens: 0,
     },
+    {
+        id: 'terminal',
+        label: { zh: '终端', en: 'Terminals' },
+        description: { zh: '开发服务器这类长时间运行的命令放进底部的终端里跑，你能看到、能输入、能关掉；Agent 也能读你自己终端里的输出。', en: 'Long-running commands like dev servers run in the Terminal panel, where you can watch, type into and close them; the agent can also read what your own terminals print.' },
+        entry: 'terminal.ts',
+        tools: ['terminal_run', 'terminal_read', 'terminal_stop'],
+        contextTokens: 600,
+    },
 ]
 
 export interface CapabilityPreset {
@@ -91,8 +99,8 @@ export interface CapabilityPreset {
 
 export const PRESETS: readonly CapabilityPreset[] = [
     { id: 'lean', label: { zh: '精简', en: 'Lean' }, hint: { zh: '只用 pi 本身的能力，上下文最小。', en: 'Only what pi has built in; the smallest context.' }, capabilities: [] },
-    { id: 'standard', label: { zh: '标准', en: 'Standard' }, hint: { zh: '适合日常开发。', en: 'For everyday development.' }, capabilities: ['todo', 'ask', 'approval', 'plan', 'review', 'autopilot'] },
-    { id: 'full', label: { zh: '完整', en: 'Full' }, hint: { zh: '再加上子 Agent，适合大任务。', en: 'Adds subagents, for large tasks.' }, capabilities: ['todo', 'ask', 'approval', 'plan', 'subagent', 'review', 'autopilot'] },
+    { id: 'standard', label: { zh: '标准', en: 'Standard' }, hint: { zh: '适合日常开发。', en: 'For everyday development.' }, capabilities: ['todo', 'ask', 'approval', 'plan', 'review', 'autopilot', 'terminal'] },
+    { id: 'full', label: { zh: '完整', en: 'Full' }, hint: { zh: '再加上子 Agent，适合大任务。', en: 'Adds subagents, for large tasks.' }, capabilities: ['todo', 'ask', 'approval', 'plan', 'subagent', 'review', 'autopilot', 'terminal'] },
 ]
 
 export const DEFAULT_CAPABILITIES: readonly CapabilityId[] = PRESETS.find(p => p.id === 'standard')!.capabilities
@@ -108,7 +116,7 @@ export function presetOf(ids: readonly CapabilityId[]): CapabilityPreset | undef
  * Capabilities added after Settings started saving presets by id. A list saved by an older build
  * could not include them, so it is still the preset it was without them.
  */
-const NEWER_THAN_LISTS: readonly CapabilityId[] = ['review', 'autopilot']
+const NEWER_THAN_LISTS: readonly CapabilityId[] = ['review', 'autopilot', 'terminal']
 
 /** A saved choice (preset id, list, or anything unreadable) → the ids it enables. */
 export function resolveCapabilities(saved: unknown): { ids: CapabilityId[], preset?: string } {
