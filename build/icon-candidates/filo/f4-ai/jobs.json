@@ -1,0 +1,44 @@
+[
+ {
+  "prompt": "Keep the exact same letterform and composition from the reference: a cursive lowercase 'f' drawn as one continuous stroke with a loop at the top, a loop at the bottom, and a crossbar that sweeps out to the right. Full-bleed square canvas, no rounded-square frame, no border, no text other than this f. Exactly one subject. No sparkles, no stars, no extra objects. Make it a flat modern app icon glyph: the stroke becomes a thick, chunky, uniform-width solid stroke with rounded ends, perfectly smooth vector curves, optically balanced. Single solid cream white (#f5f3ee) color on a single solid deep navy background (#131a28). No shading, no gradients, no shadows, no texture.",
+  "out": "A1.png",
+  "ref": "ref-f4.png",
+  "size": "1024x1024",
+  "quality": "high"
+ },
+ {
+  "prompt": "Keep the exact same letterform and composition from the reference: a cursive lowercase 'f' drawn as one continuous stroke with a loop at the top, a loop at the bottom, and a crossbar that sweeps out to the right. Full-bleed square canvas, no rounded-square frame, no border, no text other than this f. Exactly one subject. No sparkles, no stars, no extra objects. Make it a flat modern app icon glyph: the stroke becomes a thick, chunky, uniform-width solid stroke with rounded ends, perfectly smooth vector curves, optically balanced. Single solid cream white (#f5f3ee) color on a single solid deep navy background (#131a28). No shading, no gradients, no shadows, no texture.",
+  "out": "A2.png",
+  "ref": "ref-f4.png",
+  "size": "1024x1024",
+  "quality": "high"
+ },
+ {
+  "prompt": "Keep the exact same letterform and composition from the reference: a cursive lowercase 'f' drawn as one continuous stroke with a loop at the top, a loop at the bottom, and a crossbar that sweeps out to the right. Full-bleed square canvas, no rounded-square frame, no border, no text other than this f. Exactly one subject. No sparkles, no stars, no extra objects. Make it a cartoon app icon: the stroke becomes a plump, soft, squishy tube like a gummy candy or a soft yarn cord, with gentle rounded volume, subtle soft shading and one small glossy highlight along the stroke. Cream white stroke on a solid deep navy background (#131a28). Cute, playful but tasteful, clean vector illustration style.",
+  "out": "B1.png",
+  "ref": "ref-f4.png",
+  "size": "1024x1024",
+  "quality": "high"
+ },
+ {
+  "prompt": "Keep the exact same letterform and composition from the reference: a cursive lowercase 'f' drawn as one continuous stroke with a loop at the top, a loop at the bottom, and a crossbar that sweeps out to the right. Full-bleed square canvas, no rounded-square frame, no border, no text other than this f. Exactly one subject. No sparkles, no stars, no extra objects. Make it a cartoon app icon: the stroke becomes a plump, soft, squishy tube like a gummy candy or a soft yarn cord, with gentle rounded volume, subtle soft shading and one small glossy highlight along the stroke. Cream white stroke on a solid deep navy background (#131a28). Cute, playful but tasteful, clean vector illustration style.",
+  "out": "B2.png",
+  "ref": "ref-f4.png",
+  "size": "1024x1024",
+  "quality": "high"
+ },
+ {
+  "prompt": "Keep the exact same letterform and composition from the reference: a cursive lowercase 'f' drawn as one continuous stroke with a loop at the top, a loop at the bottom, and a crossbar that sweeps out to the right. Full-bleed square canvas, no rounded-square frame, no border, no text other than this f. Exactly one subject. No sparkles, no stars, no extra objects. Make it a cartoon app icon where the line is alive: the stroke becomes a plump, soft cartoon tube with subtle soft shading, and the top loop of the f has two small glossy black eyes with white highlights and a tiny cute expression, as if the thread itself is a clever little creature. Cream white stroke on a solid deep navy background (#131a28). Charming, clever, tasteful, clean vector illustration, not childish.",
+  "out": "C1.png",
+  "ref": "ref-f4.png",
+  "size": "1024x1024",
+  "quality": "high"
+ },
+ {
+  "prompt": "Keep the exact same letterform and composition from the reference: a cursive lowercase 'f' drawn as one continuous stroke with a loop at the top, a loop at the bottom, and a crossbar that sweeps out to the right. Full-bleed square canvas, no rounded-square frame, no border, no text other than this f. Exactly one subject. No sparkles, no stars, no extra objects. Make it a cartoon app icon where the line is alive: the stroke becomes a plump, soft cartoon tube with subtle soft shading, and the top loop of the f has two small glossy black eyes with white highlights and a tiny cute expression, as if the thread itself is a clever little creature. Cream white stroke on a solid deep navy background (#131a28). Charming, clever, tasteful, clean vector illustration, not childish.",
+  "out": "C2.png",
+  "ref": "ref-f4.png",
+  "size": "1024x1024",
+  "quality": "high"
+ }
+]

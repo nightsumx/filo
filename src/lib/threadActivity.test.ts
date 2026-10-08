@@ -30,6 +30,13 @@ describe('threadActivity', () => {
         expect(threadActivity({ ...base, running: true, todo: allDone }).progress).toBeUndefined()
     })
 
+    it('counts parallel subagents instead of naming the last one', () => {
+        const sub = (id: string, running: boolean): Step => ({ ...tool('subagent', { title: id }), key: id, running } as Step)
+        expect(threadActivity({ ...base, running: true, steps: [sub('A', true)] }).text).toBe('子 Agent · A')
+        expect(threadActivity({ ...base, running: true, steps: [sub('A', true), sub('B', true)] }).text).toBe('2 个子 Agent 运行中')
+        expect(threadActivity({ ...base, running: true, steps: [sub('A', false), sub('B', true)] }).text).toBe('子 Agent · B')
+    })
+
     it('flags failed runs but not user aborts', () => {
         expect(threadActivity({ ...base, steps: [{ kind: 'error', key: 'e', text: '429 rate limited', aborted: false }] })).toEqual({ phase: 'error', text: '429 rate limited' })
         expect(threadActivity({ ...base, steps: [{ kind: 'error', key: 'e', text: '', aborted: true }] }).phase).toBe('idle')

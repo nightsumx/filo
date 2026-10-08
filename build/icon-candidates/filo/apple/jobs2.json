@@ -1,0 +1,43 @@
+[
+ {
+  "prompt": "Flat minimalist macOS app icon artwork in Apple's own simple icon style. Full-bleed square, background fills the entire canvas edge to edge, NO rounded corners, NO frame, NO border, NO drop shadow, NO texture, NO text, NO small details. Exactly one bold glyph centered, crisp geometric vector shapes. Maximum two colors. Refine this icon to be simpler and bolder: make the white stroke about twice as thick, make the single loop much larger so it fills the center, keep the glyph vertically centered, and end both line tails well inside the canvas with rounded caps (the line must not reach the edges). Same deep blue background with very subtle gradient. One continuous thread with one loop, nothing else.",
+  "out": "11-loop-blue.png",
+  "size": "1024x1024",
+  "quality": "high",
+  "ref": "01-loop.png"
+ },
+ {
+  "prompt": "Flat minimalist macOS app icon artwork in Apple's own simple icon style. Full-bleed square, background fills the entire canvas edge to edge, NO rounded corners, NO frame, NO border, NO drop shadow, NO texture, NO text, NO small details. Exactly one bold glyph centered, crisp geometric vector shapes. Maximum two colors. Redraw this same single-loop thread glyph much bolder: stroke about twice as thick, single loop much larger and centered, both line tails ending well inside the canvas with rounded caps. Change colors: the line is solid deep blue #1F4FD8, the background is a flat warm off-white #F4EFE6. One continuous thread with one loop, nothing else.",
+  "out": "12-loop-cream.png",
+  "size": "1024x1024",
+  "quality": "high",
+  "ref": "01-loop.png"
+ },
+ {
+  "prompt": "Flat minimalist macOS app icon artwork in Apple's own simple icon style. Full-bleed square, background fills the entire canvas edge to edge, NO rounded corners, NO frame, NO border, NO drop shadow, NO texture, NO text, NO small details. Exactly one bold glyph centered, crisp geometric vector shapes. Maximum two colors. Glyph: a lowercase letter f drawn as ONE continuous very thick white stroke with rounded caps, like a single thread: the stem rises, curls over at the top into a hook, and the crossbar is made by the same line looping once around the stem. Clean geometric construction, uniform stroke width, glyph about 55% of canvas height. Background: solid near-black charcoal #17181B.",
+  "out": "13-f-thread.png",
+  "size": "1024x1024",
+  "quality": "high"
+ },
+ {
+  "prompt": "Flat minimalist macOS app icon artwork in Apple's own simple icon style. Full-bleed square, background fills the entire canvas edge to edge, NO rounded corners, NO frame, NO border, NO drop shadow, NO texture, NO text, NO small details. Exactly one bold glyph centered, crisp geometric vector shapes. Maximum two colors. Keep this exact minimal lowercase f glyph design but make the stroke about 30% thicker and the glyph slightly larger. Change colors: white f on a flat bold orange #FF6A1A background. Nothing else.",
+  "out": "14-f-orange.png",
+  "size": "1024x1024",
+  "quality": "high",
+  "ref": "02-f.png"
+ },
+ {
+  "prompt": "Flat minimalist macOS app icon artwork in Apple's own simple icon style. Full-bleed square, background fills the entire canvas edge to edge, NO rounded corners, NO frame, NO border, NO drop shadow, NO texture, NO text, NO small details. Exactly one bold glyph centered, crisp geometric vector shapes. Maximum two colors. Keep this exact single needle shape, make it slightly wider and bolder with a slightly larger elongated eye slot, centered. Change background to flat near-black charcoal #17181B, needle solid white. Nothing else.",
+  "out": "15-needle-dark.png",
+  "size": "1024x1024",
+  "quality": "high",
+  "ref": "05-eye.png"
+ },
+ {
+  "prompt": "Flat minimalist macOS app icon artwork in Apple's own simple icon style. Full-bleed square, background fills the entire canvas edge to edge, NO rounded corners, NO frame, NO border, NO drop shadow, NO texture, NO text, NO small details. Exactly one bold glyph centered, crisp geometric vector shapes. Maximum two colors. Keep this exact single needle shape, slightly wider and bolder, centered, rotated 45 degrees so the tip points to the lower left. Change colors: needle solid dark indigo #24215E on a flat warm off-white #F4EFE6 background. Nothing else.",
+  "out": "16-needle-cream.png",
+  "size": "1024x1024",
+  "quality": "high",
+  "ref": "05-eye.png"
+ }
+]

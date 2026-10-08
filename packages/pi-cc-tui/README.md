@@ -73,7 +73,9 @@ The prompt is Claude Code's rounded box: ↑/↓ and enter, or press 1–3 direc
 
 **Review** — `/review [focus]` has a separate read-only pi audit this session's changes in the background: it gets your messages, the diff and the agent's claims (not its reasoning), runs commands to check them, and reports issues as reproduced (with the command's exit code and output) or suspected. `/review-apply [R1 S2 …] [note]` sends the picked items, every issue by default, back to the agent.
 
-Approval, plan mode, questions, todos, subagents and review come from `pi-capabilities`, the same extensions the Filo desktop app uses, bundled in this package. Inside the desktop app they stay off here, since it loads its own.
+**Autopilot** — `/autopilot` toggles it. When on, after every run a separate read-only pi checks the result against your rulebook (`~/.pi/agent/autopilot/rules.md`) and answers the agent for you: go on, verify, commit, or stop. Pushing, deploying, publishing, paid generation, deleting uncommitted work, sudo and printing secrets are held as cards, and so are calls only you make (taste, direction, spending). `/inbox` decides the cards waiting in every session. What you type while it is on is recorded, and `/autopilot learn` proposes rule changes from it.
+
+Approval, plan mode, questions, todos, subagents, review and autopilot come from `pi-capabilities`, the same extensions the Filo desktop app uses, bundled in this package. Inside the desktop app they stay off here, since it loads its own.
 
 **Compaction** — `· Compacting conversation… (1m 37s · ↓ 2.1k tokens · esc to cancel)` with a `▰▰▰▱▱▱ 60%` bar underneath, for both `/compact` and auto-compaction. pi's default summarizer still runs; the bar is an estimate from streamed summary tokens (the final length isn't known up front), so it eases toward 99% instead of tracking exact completion.
 
@@ -118,6 +120,8 @@ Terminals pi doesn't recognise (JetBrains, for one) get links as `text (url)`. T
 ```json
 { "terminal": { "hyperlinks": true } }
 ```
+
+JetBrains opens a clicked link itself even in fullscreen mode, so there pi leaves the click to the terminal instead of opening the link a second time.
 
 ## Notes
 

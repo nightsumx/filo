@@ -10,6 +10,7 @@ import { randomUUID } from 'node:crypto'
 import { IPC } from '@shared/ipc'
 import { app, BrowserWindow, dialog, ipcMain, screen } from 'electron'
 import { unionTabs, windowState } from './appState'
+import { reveal } from './background'
 import { tr } from './i18n'
 
 interface Entry {
@@ -194,8 +195,7 @@ export class Windows {
     private focus(entry: Entry) {
         if (entry.win.isMinimized())
             entry.win.restore()
-        entry.win.show()
-        entry.win.focus()
+        reveal(entry.win, true)
     }
 
     /** Saves the window list, refreshes every window's view of the others and the Dock badge. */

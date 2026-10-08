@@ -1,0 +1,56 @@
+[
+ {
+  "prompt": "Flat vector app icon artwork, full-bleed square. Solid deep navy background (#131a28) filling the entire canvas edge to edge; no rounded corners, no frame, no border, no vignette. Drawn with one bold, perfectly even, rounded monoline stroke in warm off-white (#f5f3ee); stroke width about 6% of the canvas width; round caps and round joins. Exactly one accent color, soft blue (#3b82f6), used only where described. The motif is centered and fills about 60-65% of the canvas, with generous empty margin. Completely flat: no gradients, no shadows, no glow, no 3D, no texture, no noise. No text, no letters, no numbers. Minimal, restrained, geometric, like a premium developer-tool logo, legible at 32 pixels. No animals, no cat, no robot, no sparkles, no stars, no speech bubbles. Motif: a terminal prompt drawn large: a bold off-white '>' chevron on the left, and to its right an underscore cursor in soft blue. The blue cursor does not stop: its right end continues as one smooth blue line that sweeps down and curls once in a gentle loose curve toward the lower right, as if the cursor is pulling a single thread out while it types. Only these elements, lots of empty space.",
+  "out": "c1.png",
+  "size": "1024x1024",
+  "quality": "high"
+ },
+ {
+  "prompt": "Flat vector app icon artwork, full-bleed square. Solid deep navy background (#131a28) filling the entire canvas edge to edge; no rounded corners, no frame, no border, no vignette. Drawn with one bold, perfectly even, rounded monoline stroke in warm off-white (#f5f3ee); stroke width about 6% of the canvas width; round caps and round joins. Exactly one accent color, soft blue (#3b82f6), used only where described. The motif is centered and fills about 60-65% of the canvas, with generous empty margin. Completely flat: no gradients, no shadows, no glow, no 3D, no texture, no noise. No text, no letters, no numbers. Minimal, restrained, geometric, like a premium developer-tool logo, legible at 32 pixels. No animals, no cat, no robot, no sparkles, no stars, no speech bubbles. Motif: a simple terminal window: a rounded-rectangle outline in off-white (no title bar dots, just a single thin top divider line is optional, prefer none). Inside it, one off-white '>' chevron at the left, and two short underscore cursors at different heights side by side, one off-white and one soft blue, suggesting two agents typing in parallel in the same window. Very few elements, wide spacing.",
+  "out": "c2.png",
+  "size": "1024x1024",
+  "quality": "high"
+ },
+ {
+  "prompt": "Flat vector app icon artwork, full-bleed square. Solid deep navy background (#131a28) filling the entire canvas edge to edge; no rounded corners, no frame, no border, no vignette. Drawn with one bold, perfectly even, rounded monoline stroke in warm off-white (#f5f3ee); stroke width about 6% of the canvas width; round caps and round joins. Exactly one accent color, soft blue (#3b82f6), used only where described. The motif is centered and fills about 60-65% of the canvas, with generous empty margin. Completely flat: no gradients, no shadows, no glow, no 3D, no texture, no noise. No text, no letters, no numbers. Minimal, restrained, geometric, like a premium developer-tool logo, legible at 32 pixels. No animals, no cat, no robot, no sparkles, no stars, no speech bubbles. Motif: an abstract minimal agent figure drawn as one continuous off-white line: a rounded hood or helmet silhouette shaped like a smooth arch with shoulders, like a pictogram of a person seen from the front, with no facial features except a terminal prompt in the face area: a '>' chevron and an underscore cursor, both in soft blue. The line of the silhouette is one unbroken continuous stroke. Calm, iconic, not a robot, no antennas, no ears.",
+  "out": "c3.png",
+  "size": "1024x1024",
+  "quality": "high"
+ },
+ {
+  "prompt": "Flat vector app icon artwork, full-bleed square. Solid deep navy background (#131a28) filling the entire canvas edge to edge; no rounded corners, no frame, no border, no vignette. Drawn with one bold, perfectly even, rounded monoline stroke in warm off-white (#f5f3ee); stroke width about 6% of the canvas width; round caps and round joins. Exactly one accent color, soft blue (#3b82f6), used only where described. The motif is centered and fills about 60-65% of the canvas, with generous empty margin. Completely flat: no gradients, no shadows, no glow, no 3D, no texture, no noise. No text, no letters, no numbers. Minimal, restrained, geometric, like a premium developer-tool logo, legible at 32 pixels. No animals, no cat, no robot, no sparkles, no stars, no speech bubbles. Motif: a play / run triangle drawn as a rounded off-white outline pointing right (like a media play button, outline only, rounded corners), and directly to its right, aligned with its bottom edge, a bold underscore cursor in soft blue, so the whole mark reads as a terminal prompt '>_' where the '>' is a run/play triangle. Balanced composition centered on the canvas.",
+  "out": "c4.png",
+  "size": "1024x1024",
+  "quality": "high"
+ },
+ {
+  "prompt": "Flat vector app icon artwork, full-bleed square. Solid deep navy background (#131a28) filling the entire canvas edge to edge; no rounded corners, no frame, no border, no vignette. Drawn with one bold, perfectly even, rounded monoline stroke in warm off-white (#f5f3ee); stroke width about 6% of the canvas width; round caps and round joins. Exactly one accent color, soft blue (#3b82f6), used only where described. The motif is centered and fills about 60-65% of the canvas, with generous empty margin. Completely flat: no gradients, no shadows, no glow, no 3D, no texture, no noise. No text, no letters, no numbers. Minimal, restrained, geometric, like a premium developer-tool logo, legible at 32 pixels. No animals, no cat, no robot, no sparkles, no stars, no speech bubbles. Motif: one continuous off-white line that enters from the lower left, makes a single smooth open loop, then turns sharply into a bold '>' chevron shape at the center right; just after the chevron, a separate soft blue underscore cursor. The whole thing reads as a cursor that traveled and left a single trail behind it. One loop only, smooth, uncluttered.",
+  "out": "c5.png",
+  "size": "1024x1024",
+  "quality": "high"
+ },
+ {
+  "prompt": "Flat vector app icon artwork, full-bleed square. Solid deep navy background (#131a28) filling the entire canvas edge to edge; no rounded corners, no frame, no border, no vignette. Drawn with one bold, perfectly even, rounded monoline stroke in warm off-white (#f5f3ee); stroke width about 6% of the canvas width; round caps and round joins. Exactly one accent color, soft blue (#3b82f6), used only where described. The motif is centered and fills about 60-65% of the canvas, with generous empty margin. Completely flat: no gradients, no shadows, no glow, no 3D, no texture, no noise. No text, no letters, no numbers. Minimal, restrained, geometric, like a premium developer-tool logo, legible at 32 pixels. No animals, no cat, no robot, no sparkles, no stars, no speech bubbles. Motif: a forking line: a single off-white line starts at the lower left and rises, then splits into two parallel branches that run to the right, like a git branch fork. Each branch ends with a terminal prompt chevron '>' tip; at the end of the upper branch an off-white underscore cursor, at the end of the lower branch a soft blue underscore cursor. Reads as one task splitting into two agents working in parallel. Simple, only two branches.",
+  "out": "c6.png",
+  "size": "1024x1024",
+  "quality": "high"
+ },
+ {
+  "prompt": "Flat vector app icon artwork, full-bleed square. Solid deep navy background (#131a28) filling the entire canvas edge to edge; no rounded corners, no frame, no border, no vignette. Drawn with one bold, perfectly even, rounded monoline stroke in warm off-white (#f5f3ee); stroke width about 6% of the canvas width; round caps and round joins. Exactly one accent color, soft blue (#3b82f6), used only where described. The motif is centered and fills about 60-65% of the canvas, with generous empty margin. Completely flat: no gradients, no shadows, no glow, no 3D, no texture, no noise. No text, no letters, no numbers. Minimal, restrained, geometric, like a premium developer-tool logo, legible at 32 pixels. No animals, no cat, no robot, no sparkles, no stars, no speech bubbles. Motif: a terminal prompt '>_' at the center (off-white '>' chevron, off-white underscore), surrounded by a single tilted elliptical orbit ring in off-white, with one small solid soft blue dot travelling on the orbit. Like a tiny planet system where the prompt is the sun. Only one orbit ring.",
+  "out": "c7.png",
+  "size": "1024x1024",
+  "quality": "high"
+ },
+ {
+  "prompt": "Flat vector app icon artwork, full-bleed square. Solid deep navy background (#131a28) filling the entire canvas edge to edge; no rounded corners, no frame, no border, no vignette. Drawn with one bold, perfectly even, rounded monoline stroke in warm off-white (#f5f3ee); stroke width about 6% of the canvas width; round caps and round joins. Exactly one accent color, soft blue (#3b82f6), used only where described. The motif is centered and fills about 60-65% of the canvas, with generous empty margin. Completely flat: no gradients, no shadows, no glow, no 3D, no texture, no noise. No text, no letters, no numbers. Minimal, restrained, geometric, like a premium developer-tool logo, legible at 32 pixels. No animals, no cat, no robot, no sparkles, no stars, no speech bubbles. Motif: a pilot / compass mark: a bold off-white circle ring with a small gap at the right side; inside the ring, a large bold '>' chevron in off-white pointing right toward the gap, acting like a compass needle or heading indicator; below the chevron's right tip, a short soft blue underscore cursor. Clean, symmetrical, iconic.",
+  "out": "c8.png",
+  "size": "1024x1024",
+  "quality": "high"
+ },
+ {
+  "prompt": "Flat vector app icon artwork, full-bleed square. Solid deep navy background (#131a28) filling the entire canvas edge to edge; no rounded corners, no frame, no border, no vignette. Drawn with one bold, perfectly even, rounded monoline stroke in warm off-white (#f5f3ee); stroke width about 6% of the canvas width; round caps and round joins. Exactly one accent color, soft blue (#3b82f6), used only where described. The motif is centered and fills about 60-65% of the canvas, with generous empty margin. Completely flat: no gradients, no shadows, no glow, no 3D, no texture, no noise. No text, no letters, no numbers. Minimal, restrained, geometric, like a premium developer-tool logo, legible at 32 pixels. No animals, no cat, no robot, no sparkles, no stars, no speech bubbles. Motif: a magnifying glass: a bold off-white circular lens ring with a short thick handle going to the lower right. Inside the lens, a small terminal prompt: an off-white '>' chevron and a soft blue underscore cursor. Represents an agent reviewing code. Simple, two elements only.",
+  "out": "c9.png",
+  "size": "1024x1024",
+  "quality": "high"
+ }
+]

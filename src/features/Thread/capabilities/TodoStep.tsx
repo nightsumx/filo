@@ -5,6 +5,7 @@ import type { ToolCall } from '@shared/pi'
 import type { ToolResultView } from '@/lib/timeline'
 import { useT } from '@/lib/transcriptText'
 import { cn } from '@/lib/utils'
+import { Check, Circle, CircleDot } from 'lucide-react'
 import { observer } from 'mobx-react-lite'
 import { memo } from 'react'
 import { Gutter, StatusMark } from '../ToolRow'
@@ -27,9 +28,13 @@ export const TodoList = observer(({ items, className }: { items: TodoItem[], cla
                 <li key={i} className="flex min-h-[22px] items-start gap-2 leading-[22px]">
                     <span
                         aria-label={item.status === 'done' ? tr('已完成', 'Done') : item.status === 'in_progress' ? tr('进行中', 'In progress') : tr('待办', 'To do')}
-                        className={cn('w-3 shrink-0 select-none text-center font-mono', item.status === 'done' ? 'text-ide-success' : item.status === 'in_progress' ? 'text-ide-accent' : 'text-gray-400')}
+                        className={cn('flex h-[22px] w-3.5 shrink-0 select-none items-center justify-center', item.status === 'done' ? 'text-ide-success' : item.status === 'in_progress' ? 'text-ide-accent' : 'text-gray-400')}
                     >
-                        {item.status === 'done' ? '✓' : item.status === 'in_progress' ? '▸' : '○'}
+                        {item.status === 'done'
+                            ? <Check size={14} strokeWidth={2.5} aria-hidden />
+                            : item.status === 'in_progress'
+                                ? <CircleDot size={13} strokeWidth={2.25} aria-hidden />
+                                : <Circle size={13} strokeWidth={1.75} aria-hidden />}
                     </span>
                     <span className={cn('min-w-0 [overflow-wrap:anywhere]', item.status === 'done' ? 'text-gray-400 line-through decoration-gray-300' : item.status === 'in_progress' ? 'font-medium text-gray-900' : 'text-gray-700')}>
                         {item.text}

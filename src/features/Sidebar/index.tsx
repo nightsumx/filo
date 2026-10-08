@@ -6,8 +6,10 @@ import { agentLabel, agentOfKey } from '@shared/agents'
 import type { Project } from '@/store/app'
 import type { Thread } from '@/store/thread'
 import { ConflictMark } from '@/components/ConflictMark'
-import { ActivityBadge, PiGlyph, StatusDot, TerminalStatus } from '@/components/StatusIcons'
+import type { SubagentRun } from '@/lib/subagents'
+import { ActivityBadge, PiGlyph, StatusDot, SubagentMark, TerminalStatus } from '@/components/StatusIcons'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import { childToolCount, subagentActivity, subagentLive } from '@/lib/subagents'
 import { formatElapsed } from '@/lib/threadActivity'
 import { cn, relativeTime, shortPath } from '@/lib/utils'
 import { appStore } from '@/store/app'
@@ -81,6 +83,7 @@ const ActivityLine = observer(({ thread, now }: { thread: Thread, now: number })
 
 const ThreadRow = observer(({ thread, session, selected }: { thread?: Thread, session?: SessionSummary, selected: boolean }) => {
     const open = () => {
+        thread?.showSubagent(null)
         if (thread && appStore.tabsOf(thread.cwd).includes(thread))
             appStore.focus(thread.key, true)
         else if (session)
@@ -98,13 +101,76 @@ const ThreadRow = observer(({ thread, session, selected }: { thread?: Thread, se
     const now = useNow(running || terminalBusy)
     const agent = thread?.agent ?? agentOfKey(session?.path)
     return (
+        <>
+            <div
+                role="treeitem"
+                aria-level={2}
+                aria-selected={selected}
+                tabIndex={-1}
+                data-tree-row
+                title={busy ? `${title}\n${activity!.text}` : terminal ? `${title}\n${tr('终端中的 pi', 'pi in a terminal')}` : title}
+                onClick={open}
+                onKeyDown={(e) => {
+                    if (e.key === 'Enter')
+                        open()
+                    else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                        e.preventDefault()
+                        moveFocus(e.currentTarget, e.key === 'ArrowDown' ? 1 : -1)
+                    }
+                }}
+                className={cn(rowBase, 'pl-[30px]', busy && 'h-auto flex-col items-stretch gap-0 pb-1', selected ? rowSelected : 'hover:bg-ide-hover')}
+            >
+                <div className="flex h-6 min-w-0 flex-1 items-center gap-1.5">
+                    {terminal ? <TerminalStatus presence={terminal} /> : thread ? <StatusDot thread={thread} /> : <PiGlyph dim />}
+                    <span className={cn('min-w-0 flex-1 truncate', thread ? 'text-gray-900' : 'text-gray-700')}>{title}</span>
+                    {agent !== 'pi' && <span className="shrink-0 text-[11px] text-gray-400">{agentLabel(agent)}</span>}
+                    <ConflictMark cwd={thread?.cwd ?? session!.cwd} session={thread?.sessionPath ?? session?.path} />
+                    {running
+                        ? <span className="shrink-0 text-[11px] tabular-nums text-gray-500" title={tr('已运行', 'Running for')}>{formatElapsed(now - thread!.runStartedAt)}</span>
+                        : terminalBusy
+                            ? <span className="shrink-0 text-[11px] tabular-nums text-gray-500" title={terminal!.state === 'waiting' ? tr('在终端等待你', 'Waiting in the terminal') : tr('终端运行中', 'Running in the terminal')}>{formatElapsed(now - terminal!.since)}</span>
+                            : updated != null && <span className="shrink-0 text-[11px] tabular-nums text-gray-400">{relativeTime(updated)}</span>}
+                </div>
+                {busy && <ActivityLine thread={thread!} now={now} />}
+            </div>
+            {thread && <SubagentRows thread={thread} />}
+        </>
+    )
+})
+
+/**
+ * The subagents of a thread's run, one level under it: shown while the run goes on (finished ones
+ * stay until it ends, so parallel work reads as a set), and the one open in the pane always.
+ */
+const SubagentRows = observer(({ thread }: { thread: Thread }) => {
+    const open = thread.openSubagent
+    const runs = thread.running || open ? thread.subagents : []
+    const shown = open && !runs.some(r => r.id === open.id) ? [...runs, open] : runs
+    const selected = appStore.activeKey === thread.key ? open?.id : undefined
+    return shown.map(run => <SubagentRow key={run.id} thread={thread} run={run} selected={run.id === selected} />)
+})
+
+const SubagentRow = observer(({ thread, run, selected }: { thread: Thread, run: SubagentRun, selected: boolean }) => {
+    const live = subagentLive(run)
+    const waiting = live && thread.subagentWaiting(run)
+    const now = useNow(live)
+    const details = run.details
+    const elapsed = details ? (details.endedAt ?? (live ? now : details.startedAt)) - details.startedAt : 0
+    const tools = childToolCount(details)
+    const activity = waiting ? tr('等你确认', 'Waiting for approval') : live ? subagentActivity(run, thread.cwd) : ''
+    const open = () => {
+        // View first: the focus request then lands on the subagent's composer.
+        thread.showSubagent(run.id)
+        appStore.focus(thread.key, true)
+    }
+    return (
         <div
             role="treeitem"
-            aria-level={2}
+            aria-level={3}
             aria-selected={selected}
             tabIndex={-1}
             data-tree-row
-            title={busy ? `${title}\n${activity!.text}` : terminal ? `${title}\n${tr('终端中的 pi', 'pi in a terminal')}` : title}
+            title={activity ? `${run.title}\n${activity}` : run.title}
             onClick={open}
             onKeyDown={(e) => {
                 if (e.key === 'Enter')
@@ -114,20 +180,19 @@ const ThreadRow = observer(({ thread, session, selected }: { thread?: Thread, se
                     moveFocus(e.currentTarget, e.key === 'ArrowDown' ? 1 : -1)
                 }
             }}
-            className={cn(rowBase, 'pl-[30px]', busy && 'h-auto flex-col items-stretch gap-0 pb-1', selected ? rowSelected : 'hover:bg-ide-hover')}
+            className={cn(rowBase, 'pl-[48px]', live && 'h-auto flex-col items-stretch gap-0 pb-1', selected ? rowSelected : 'hover:bg-ide-hover')}
         >
             <div className="flex h-6 min-w-0 flex-1 items-center gap-1.5">
-                {terminal ? <TerminalStatus presence={terminal} /> : thread ? <StatusDot thread={thread} /> : <PiGlyph dim />}
-                <span className={cn('min-w-0 flex-1 truncate', thread ? 'text-gray-900' : 'text-gray-700')}>{title}</span>
-                {agent !== 'pi' && <span className="shrink-0 text-[11px] text-gray-400">{agentLabel(agent)}</span>}
-                <ConflictMark cwd={thread?.cwd ?? session!.cwd} session={thread?.sessionPath ?? session?.path} />
-                {running
-                    ? <span className="shrink-0 text-[11px] tabular-nums text-gray-500" title={tr('已运行', 'Running for')}>{formatElapsed(now - thread!.runStartedAt)}</span>
-                    : terminalBusy
-                        ? <span className="shrink-0 text-[11px] tabular-nums text-gray-500" title={terminal!.state === 'waiting' ? tr('在终端等待你', 'Waiting in the terminal') : tr('终端运行中', 'Running in the terminal')}>{formatElapsed(now - terminal!.since)}</span>
-                        : updated != null && <span className="shrink-0 text-[11px] tabular-nums text-gray-400">{relativeTime(updated)}</span>}
+                <SubagentMark status={run.status} waiting={waiting} />
+                <span className={cn('min-w-0 flex-1 truncate text-[12.5px]', live ? 'text-gray-900' : 'text-gray-600')}>{run.title}</span>
+                {elapsed >= 1000 && <span className={cn('shrink-0 text-[11px] tabular-nums', live ? 'text-gray-500' : 'text-gray-400')}>{formatElapsed(elapsed)}</span>}
             </div>
-            {busy && <ActivityLine thread={thread!} now={now} />}
+            {live && (
+                <div className="flex h-[18px] min-w-0 items-center gap-1.5 pl-5 text-[12px] leading-none">
+                    <span className={cn('min-w-0 flex-1 truncate', waiting ? PHASE_TEXT.waiting : PHASE_TEXT.running)}>{activity}</span>
+                    {tools > 0 && <span className="shrink-0 tabular-nums text-gray-400" title={tr('工具调用次数', 'Tool calls')}>{tools}</span>}
+                </div>
+            )}
         </div>
     )
 })
@@ -259,9 +324,9 @@ const ProjectNode = observer(({ project, index, expanded, onToggle }: { project:
             </div>
             {expanded && (
                 <div role="group">
-                    {drafts.map(t => <ThreadRow key={t.key} thread={t} selected={t.key === activeKey} />)}
+                    {drafts.map(t => <ThreadRow key={t.key} thread={t} selected={t.key === activeKey && !t.openSubagent} />)}
                     {shown.map(s => (
-                        <ThreadRow key={s.path} session={s} thread={tabs.find(t => t.key === s.path)} selected={s.path === activeKey} />
+                        <ThreadRow key={s.path} session={s} thread={tabs.find(t => t.key === s.path)} selected={s.path === activeKey && !tabs.find(t => t.key === s.path)?.openSubagent} />
                     ))}
                     {project.sessions.length > PAGE && (
                         <button

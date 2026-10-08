@@ -1,0 +1,16 @@
+[
+ {
+  "out": "r3-weft.png",
+  "ref": "r2-weft.png",
+  "prompt": "Redraw this logo mark cleaner and bolder. Keep it a full-bleed square: solid flat background edge to edge, no rounded tile, no frame, no shadow, no glow, no gradient, no texture, no text. Flat vector, only the listed colors. Background solid navy #131a28. Three horizontal off-white (#f5f3ee) threads, each MUCH thicker (about 10% of canvas width) and shorter (each about 52% of canvas width), with fully rounded ends, evenly stacked with gaps about equal to their thickness, so the group forms a compact square block in the center. One soft blue (#3b82f6) thread of the same thickness runs vertically through the middle as ONE single smooth continuous gentle wave (not lumpy, no kinks), passing OVER the top thread, UNDER the middle thread, OVER the bottom thread, extending a little above and below with rounded caps. At every crossing where one thread goes under, leave a clean background-colored gap about 3% of canvas width on both sides so the over-under is crisp. Exactly four strokes.",
+  "size": "1024x1024",
+  "quality": "high"
+ },
+ {
+  "out": "r3-f-weave.png",
+  "ref": "r2-f-weave.png",
+  "prompt": "Redraw this lowercase 'f' logo mark cleaner and bolder. Keep it a full-bleed square: solid flat background edge to edge, no rounded tile, no frame, no shadow, no glow, no gradient, no texture, no text. Flat vector, only the listed colors. Background solid navy #131a28. The f stem with its rounded top hook curving to the right is one off-white (#f5f3ee) thread, about 10% of canvas width thick, uniform. The crossbar is a soft blue (#3b82f6) thread of the same thickness: it starts at the left with a rounded cap, passes BEHIND the stem (a clean navy gap on both sides of the stem, about 3% of canvas width), and on the right side it continues and bends smoothly downward and away in one relaxed curve, ending with a rounded cap at the lower right, like a thread pulled through the letter. The f is centered, about 62% of canvas height, with balanced negative space.",
+  "size": "1024x1024",
+  "quality": "high"
+ }
+]

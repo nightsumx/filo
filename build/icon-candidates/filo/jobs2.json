@@ -1,0 +1,44 @@
+[
+ {
+  "prompt": "Keep exactly the style of the reference image: flat minimal macOS app icon artwork, full-bleed square, solid deep navy background (#131a28) edge to edge, no frame, one bold off-white (#f5f3ee) thread with round ends drawn as a single calm calligraphic stroke with one soft loop, same line thickness as the reference. Pure flat vector: no gradients, no shadows, no glow, no 3D, no texture, no text, no letters. Centered, motif fills about 60% of the canvas. Make it feel like an AI agent at work: the thread's leading end turns into a small terminal prompt chevron '>' shape, as if the thread is being typed out by a command line.",
+  "out": "a1.png",
+  "ref": "v7.png",
+  "size": "1024x1024",
+  "quality": "high"
+ },
+ {
+  "prompt": "Keep exactly the style of the reference image: flat minimal macOS app icon artwork, full-bleed square, solid deep navy background (#131a28) edge to edge, no frame, one bold off-white (#f5f3ee) thread with round ends drawn as a single calm calligraphic stroke with one soft loop, same line thickness as the reference. Pure flat vector: no gradients, no shadows, no glow, no 3D, no texture, no text, no letters. Centered, motif fills about 60% of the canvas. Make it feel like an AI agent at work: the thread's leading end has a small solid soft-blue (#3b82f6) round dot, like the tip of a pen that is still drawing the line right now.",
+  "out": "a2.png",
+  "ref": "v7.png",
+  "size": "1024x1024",
+  "quality": "high"
+ },
+ {
+  "prompt": "Keep exactly the style of the reference image: flat minimal macOS app icon artwork, full-bleed square, solid deep navy background (#131a28) edge to edge, no frame, one bold off-white (#f5f3ee) thread with round ends drawn as a single calm calligraphic stroke with one soft loop, same line thickness as the reference. Pure flat vector: no gradients, no shadows, no glow, no 3D, no texture, no text, no letters. Centered, motif fills about 60% of the canvas. Make it feel like an AI agent at work: the thread is pulled by a small, simple sewing needle in soft blue (#3b82f6) at its leading end, the needle mid-stitch, as if someone invisible is working.",
+  "out": "a3.png",
+  "ref": "v7.png",
+  "size": "1024x1024",
+  "quality": "high"
+ },
+ {
+  "prompt": "Keep exactly the style of the reference image: flat minimal macOS app icon artwork, full-bleed square, solid deep navy background (#131a28) edge to edge, no frame, one bold off-white (#f5f3ee) thread with round ends drawn as a single calm calligraphic stroke with one soft loop, same line thickness as the reference. Pure flat vector: no gradients, no shadows, no glow, no 3D, no texture, no text, no letters. Centered, motif fills about 60% of the canvas. Make it feel like an AI agent at work: after the loop, the thread splits into two parallel strands that run side by side, one off-white and one soft blue (#3b82f6), like two threads of work running in parallel.",
+  "out": "a4.png",
+  "ref": "v7.png",
+  "size": "1024x1024",
+  "quality": "high"
+ },
+ {
+  "prompt": "Keep exactly the style of the reference image: flat minimal macOS app icon artwork, full-bleed square, solid deep navy background (#131a28) edge to edge, no frame, one bold off-white (#f5f3ee) thread with round ends drawn as a single calm calligraphic stroke with one soft loop, same line thickness as the reference. Pure flat vector: no gradients, no shadows, no glow, no 3D, no texture, no text, no letters. Centered, motif fills about 60% of the canvas. Make it feel like an AI agent at work: the loop is shaped like a gentle speech bubble outline, and the thread continues out of it to the right, ending in a short soft-blue (#3b82f6) segment like a text cursor.",
+  "out": "a5.png",
+  "ref": "v7.png",
+  "size": "1024x1024",
+  "quality": "high"
+ },
+ {
+  "prompt": "Keep exactly the style of the reference image: flat minimal macOS app icon artwork, full-bleed square, solid deep navy background (#131a28) edge to edge, no frame, one bold off-white (#f5f3ee) thread with round ends drawn as a single calm calligraphic stroke with one soft loop, same line thickness as the reference. Pure flat vector: no gradients, no shadows, no glow, no 3D, no texture, no text, no letters. Centered, motif fills about 60% of the canvas. Make it feel like an AI agent at work: the leading end of the thread ends in a small four-pointed sparkle star in soft blue (#3b82f6), subtle and small, suggesting intelligence, not magic.",
+  "out": "a6.png",
+  "ref": "v7.png",
+  "size": "1024x1024",
+  "quality": "high"
+ }
+]

@@ -1,0 +1,54 @@
+[
+ {
+  "prompt": "macOS app icon artwork for a developer tool, full-bleed square, solid background edge to edge, no frame, no rounded corners baked in. Clean monoline drawing with bold, even, rounded strokes (about 6% of canvas width), very few elements, generous negative space, centered, readable at 32 pixels. Flat vector, no shadows, no glow, no texture, no 3D, no text. The feel is a professional IDE / agent tool icon like JetBrains WebStorm, with a subtle anime character charm. Simplify the reference: deep navy background (#131a28), the one-line cat face drawn in off-white with thicker, more even strokes, only the outline, two ears and two ^ ^ closed eyes; the line's tail ends at the bottom right in a short soft-blue (#3b82f6) segment. Remove all other detail.",
+  "out": "n1.png",
+  "size": "1024x1024",
+  "quality": "high",
+  "ref": "../anime/neko.png"
+ },
+ {
+  "prompt": "macOS app icon artwork for a developer tool, full-bleed square, solid background edge to edge, no frame, no rounded corners baked in. Clean monoline drawing with bold, even, rounded strokes (about 6% of canvas width), very few elements, generous negative space, centered, readable at 32 pixels. Flat vector, no shadows, no glow, no texture, no 3D, no text. The feel is a professional IDE / agent tool icon like JetBrains WebStorm, with a subtle anime character charm. Deep navy background (#131a28). A one-line cat head outline in off-white with two pointed ears; instead of eyes it has a terminal prompt: a bold soft-blue (#3b82f6) chevron '>' as the left eye and an underscore cursor '_' as the right eye, like an agent waiting at a command line.",
+  "out": "n2.png",
+  "size": "1024x1024",
+  "quality": "high"
+ },
+ {
+  "prompt": "macOS app icon artwork for a developer tool, full-bleed square, solid background edge to edge, no frame, no rounded corners baked in. Clean monoline drawing with bold, even, rounded strokes (about 6% of canvas width), very few elements, generous negative space, centered, readable at 32 pixels. Flat vector, no shadows, no glow, no texture, no 3D, no text. The feel is a professional IDE / agent tool icon like JetBrains WebStorm, with a subtle anime character charm. JetBrains-style composition: background is bold flat diagonal color blocks (soft blue #3b82f6, teal #14b8a6 and a little warm yellow #facc15, hard edges, no gradients), with a black square inset in the center taking 60% of the icon; inside the black square a white one-line cat face (two ears, ^ ^ eyes) whose line tail continues out as a thread, and a short white underline bar below it like the WebStorm logo.",
+  "out": "n3.png",
+  "size": "1024x1024",
+  "quality": "high"
+ },
+ {
+  "prompt": "macOS app icon artwork for a developer tool, full-bleed square, solid background edge to edge, no frame, no rounded corners baked in. Clean monoline drawing with bold, even, rounded strokes (about 6% of canvas width), very few elements, generous negative space, centered, readable at 32 pixels. Flat vector, no shadows, no glow, no texture, no 3D, no text. The feel is a professional IDE / agent tool icon like JetBrains WebStorm, with a subtle anime character charm. Light off-white background (#f5f3ee). A single continuous soft-blue (#3b82f6) line forms a minimal cat head: two ears and the outline, the line never lifting, with two small navy (#131a28) ^ ^ eye arcs. The start and end of the line overlap at the chin like a thread being stitched.",
+  "out": "n4.png",
+  "size": "1024x1024",
+  "quality": "high",
+  "ref": "../anime/neko.png"
+ },
+ {
+  "prompt": "macOS app icon artwork for a developer tool, full-bleed square, solid background edge to edge, no frame, no rounded corners baked in. Clean monoline drawing with bold, even, rounded strokes (about 6% of canvas width), very few elements, generous negative space, centered, readable at 32 pixels. Flat vector, no shadows, no glow, no texture, no 3D, no text. The feel is a professional IDE / agent tool icon like JetBrains WebStorm, with a subtle anime character charm. Simplify the reference: deep navy background (#131a28), a minimal anime eye drawn with one bold off-white upper lash arc with two short lash flicks and a thinner lower lid line; a solid soft-blue (#3b82f6) round iris with one large white highlight dot; the lower lid line continues outward to the right as a loose thread. Remove the spiral and all small detail.",
+  "out": "e1.png",
+  "size": "1024x1024",
+  "quality": "high",
+  "ref": "../anime/eye.png"
+ },
+ {
+  "prompt": "macOS app icon artwork for a developer tool, full-bleed square, solid background edge to edge, no frame, no rounded corners baked in. Clean monoline drawing with bold, even, rounded strokes (about 6% of canvas width), very few elements, generous negative space, centered, readable at 32 pixels. Flat vector, no shadows, no glow, no texture, no 3D, no text. The feel is a professional IDE / agent tool icon like JetBrains WebStorm, with a subtle anime character charm. JetBrains-style composition: background is bold flat diagonal color blocks (soft blue #3b82f6, violet #8b5cf6 and teal #14b8a6, hard edges, no gradients), a black square inset in the center taking 60% of the icon; inside it a white minimal anime eye (bold upper lash arc, round iris with a highlight) and a short white bar below like the WebStorm logo.",
+  "out": "e2.png",
+  "size": "1024x1024",
+  "quality": "high"
+ },
+ {
+  "prompt": "macOS app icon artwork for a developer tool, full-bleed square, solid background edge to edge, no frame, no rounded corners baked in. Clean monoline drawing with bold, even, rounded strokes (about 6% of canvas width), very few elements, generous negative space, centered, readable at 32 pixels. Flat vector, no shadows, no glow, no texture, no 3D, no text. The feel is a professional IDE / agent tool icon like JetBrains WebStorm, with a subtle anime character charm. Deep navy background (#131a28). A minimal anime eye whose iris is a bold soft-blue (#3b82f6) focus ring like a code inspector / magnifier target, with one white highlight; the upper lash is a single thick off-white arc; a thin off-white thread leaves the outer corner of the eye and ends in a small text-cursor bar. Calm, watchful, like a code reviewer.",
+  "out": "e3.png",
+  "size": "1024x1024",
+  "quality": "high"
+ },
+ {
+  "prompt": "macOS app icon artwork for a developer tool, full-bleed square, solid background edge to edge, no frame, no rounded corners baked in. Clean monoline drawing with bold, even, rounded strokes (about 6% of canvas width), very few elements, generous negative space, centered, readable at 32 pixels. Flat vector, no shadows, no glow, no texture, no 3D, no text. The feel is a professional IDE / agent tool icon like JetBrains WebStorm, with a subtle anime character charm. Light off-white background (#f5f3ee). A very minimal anime eye in navy (#131a28): one thick upper lash arc with a flick, a round solid soft-blue (#3b82f6) iris with one white highlight dot, no lower lid; the lash's outer end continues into a loose flowing thread. Elegant, like a logo mark.",
+  "out": "e4.png",
+  "size": "1024x1024",
+  "quality": "high",
+  "ref": "../anime/eye.png"
+ }
+]

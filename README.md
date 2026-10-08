@@ -1,20 +1,20 @@
-# Pi
+# Filo
 
-A Mac app for the [pi](https://pi.dev) coding agent. Run threads side by side, see which thread made each change, have a separate read-only pi review the work, and search every session. It shares sessions and settings with pi in your terminal, so you can switch back any time.
+A Mac app for coding agents. Run [pi](https://pi.dev), Codex, Claude Code and others in threads side by side, see which thread made each change, have a separate read-only pi review the work, and search every session. It shares sessions and settings with pi in your terminal, so you can switch back any time.
 
-![Pi's main window: the project tree, a thread with its diff, and the changes panel](site/public/shots/en/main.webp)
+![Filo's main window: the project tree, a thread with its diff, and the changes panel](site/public/shots/en/main.webp)
 
-[简体中文](./README.zh-CN.md) · [pi.flowsrun.com](https://pi.flowsrun.com)
+[简体中文](./README.zh-CN.md) · [filoapp.dev](https://filoapp.dev)
 
 ## Install
 
 ```bash
-curl -fsSL https://pi.flowsrun.com/install.sh | bash
+curl -fsSL https://filoapp.dev/install.sh | bash
 ```
 
-Apple Silicon, macOS 11 or later. The script downloads the latest [release](https://github.com/nightsumx/pi-kit/releases), checks its signature and installs to `/Applications` (`~/Applications` without admin rights). Run it again to update; quit Pi first.
+Apple Silicon, macOS 11 or later. The script downloads the latest [release](https://github.com/nightsumx/filo/releases), checks its signature and installs to `/Applications` (`~/Applications` without admin rights). Run it again to update; quit Filo first. It replaces an older install named Pi.
 
-No Node.js or pi CLI needed: Pi comes with its own pi, and uses yours if your login shell has one. Sign in to a subscription, add an API key or connect a local model under Settings → Model providers. It all goes to pi's own `~/.pi/agent`.
+No Node.js or pi CLI needed: Filo comes with its own pi, and uses yours if your login shell has one. Sign in to a subscription, add an API key or connect a local model under Settings → Model providers. It all goes to pi's own `~/.pi/agent`.
 
 The app is not notarized. The `.dmg` from the releases page works too, but macOS blocks its first launch: open it once, then System Settings → Privacy & Security → Open Anyway.
 
@@ -33,7 +33,7 @@ The app is not notarized. The `.dmg` from the releases page works too, but macOS
 
 Each thread runs `pi --mode rpc` (or an ACP agent) as a child process of Electron's main process; the renderer talks to it over IPC. Sessions are pi's own JSONL files under `~/.pi/agent/sessions`, so the terminal and the app see the same history.
 
-App features that need the agent's cooperation (approvals, questions, plan mode, todos, subagents, review) are pi extensions in [`packages/capabilities`](packages/capabilities), loaded with `-e` per thread. [`packages/pi-cc-tui`](packages/pi-cc-tui) loads the same extensions in the terminal, with Claude Code style dialogs, plus the presence file and bridge socket the app uses to find and join terminal sessions.
+App features that need the agent's cooperation (approvals, questions, plan mode, todos, subagents, review, autopilot) are pi extensions in [`packages/capabilities`](packages/capabilities), loaded with `-e` per thread. [`packages/pi-cc-tui`](packages/pi-cc-tui) loads the same extensions in the terminal, with Claude Code style dialogs, plus the presence file and bridge socket the app uses to find and join terminal sessions.
 
 | Path | What's there |
 |---|---|
@@ -43,7 +43,7 @@ App features that need the agent's cooperation (approvals, questions, plan mode,
 | `packages/capabilities` | pi extensions shared by the app and pi-cc-tui; `protocol.ts` is the contract between them |
 | `packages/pi-cc-tui` | Claude Code look for pi's terminal UI, published to npm |
 | `bundled-pi/` | The pi version the app ships (lockfile), installed by `scripts/bundle-pi.sh` |
-| `site/` | pi.flowsrun.com, a Cloudflare Worker with static assets |
+| `site/` | filoapp.dev, a Cloudflare Worker with static assets |
 | `test/` | Vitest suites and end-to-end scripts that drive the built app over CDP |
 
 ## Development
@@ -66,6 +66,8 @@ bun run e2e:features   # also: e2e:windows, e2e:review, e2e:providers, e2e:acp, 
 
 `e2e:terminal` and `test/bridge.test.ts` need tmux to run a real terminal pi.
 
+The app runs in the background during these scripts (`PI_GUI_BACKGROUND=1`): no Dock icon, invisible windows, and it never takes focus. `PI_E2E_SHOW=1` shows it. Set `PI_GUI_BACKGROUND=1` yourself when launching the app with `--remote-debugging-port` by hand.
+
 Packaging and release:
 
 ```bash
@@ -75,3 +77,7 @@ bun run deploy:site      # deploys site/ with wrangler
 ```
 
 `release.sh` refuses a tag that exists, so bump `version` in `package.json` first.
+
+## License
+
+[MIT](./LICENSE)

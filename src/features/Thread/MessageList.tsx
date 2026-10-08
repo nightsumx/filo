@@ -1,9 +1,11 @@
+import type { SubagentRun } from '@/lib/subagents'
 import type { Thread } from '@/store/thread'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { ArrowDown } from 'lucide-react'
 import { observer } from 'mobx-react-lite'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { estimateRow } from '@/lib/rowEstimate'
+import { runTurns } from '@/lib/subagents'
 import type { TranscriptRow } from '@/lib/transcriptRows'
 import { transcriptRows } from '@/lib/transcriptRows'
 import { TRANSCRIPT_TEXT, TranscriptTextContext } from '@/lib/transcriptText'
@@ -42,17 +44,19 @@ function openFolds(rows: TranscriptRow[]): { fold: number, last: number }[] {
 /**
  * Virtualized transcript: only rows near the viewport are mounted, so a session with hundreds of
  * tool calls renders and updates as cheaply as a short one. Sticks to the bottom while output
- * arrives unless the user scrolled up.
+ * arrives unless the user scrolled up. With `subagent` it shows that child's transcript instead.
  */
-export const MessageList = observer(({ thread }: { thread: Thread }) => {
+export const MessageList = observer(({ thread, subagent }: { thread: Thread, subagent?: SubagentRun }) => {
     const scrollRef = useRef<HTMLDivElement>(null)
     const listRef = useRef<HTMLDivElement>(null)
     const stick = useRef(true)
     const [showJump, setShowJump] = useState(false)
-    const turns = thread.turns
-    // Finished turns the user unfolded, per thread.
-    const [unfolded, setUnfolded] = useState(() => ({ thread, keys: new Set<string>() as ReadonlySet<string> }))
-    const openTurns = unfolded.thread === thread ? unfolded.keys : NO_TURNS
+    const viewKey = subagent ? `${thread.key}#${subagent.id}` : thread.key
+    const childTurns = useMemo(() => subagent && runTurns(subagent), [subagent?.details, subagent?.status])
+    const turns = childTurns ?? thread.turns
+    // Finished turns the user unfolded, per view.
+    const [unfolded, setUnfolded] = useState(() => ({ view: viewKey, keys: new Set<string>() as ReadonlySet<string> }))
+    const openTurns = unfolded.view === viewKey ? unfolded.keys : NO_TURNS
     const rows = useMemo(() => transcriptRows(turns, openTurns), [turns, openTurns])
     // Expanding grows the list; don't let bottom-pinning scroll the clicked row away. Scrolling back
     // to the bottom pins again (onScroll).
@@ -62,14 +66,14 @@ export const MessageList = observer(({ thread }: { thread: Thread }) => {
     const toggleFold = useCallback((key: string) => {
         unpin()
         setUnfolded((prev) => {
-            const keys = new Set(prev.thread === thread ? prev.keys : [])
+            const keys = new Set(prev.view === viewKey ? prev.keys : [])
             if (!keys.delete(key))
                 keys.add(key)
-            return { thread, keys }
+            return { view: viewKey, keys }
         })
-    }, [thread, unpin])
+    }, [viewKey, unpin])
     // Expanded / show-all toggles survive rows scrolling out of view (and back).
-    const viewState = useMemo(() => new Map<string, unknown>(), [thread])
+    const viewState = useMemo(() => new Map<string, unknown>(), [viewKey])
 
     const virtualizer = useVirtualizer({
         count: rows.length,
@@ -89,12 +93,12 @@ export const MessageList = observer(({ thread }: { thread: Thread }) => {
             el.scrollTop = el.scrollHeight
     }
 
-    // Open a thread at its latest message.
+    // Open a thread (or subagent) at its latest message.
     useLayoutEffect(() => {
         stick.current = true
         setShowJump(false)
         toBottom()
-    }, [thread.key])
+    }, [viewKey])
 
     useEffect(() => {
         const el = scrollRef.current
@@ -174,7 +178,7 @@ export const MessageList = observer(({ thread }: { thread: Thread }) => {
     const revealed = useRef(0)
     const [flash, setFlash] = useState<string | null>(null)
     useEffect(() => {
-        if (!reveal || reveal.key !== thread.key || revealed.current === reveal.n)
+        if (!reveal || reveal.key !== viewKey || revealed.current === reveal.n)
             return
         const prefix = `${reveal.entryId}:`
         const matches = (key: string) => key.startsWith(prefix) || key.startsWith(`group:${prefix}`)
@@ -235,7 +239,7 @@ export const MessageList = observer(({ thread }: { thread: Thread }) => {
                                                             data-revealed={flash === rows[item.index].key || undefined}
                                                             className="rounded-md transition-colors duration-700 data-[revealed]:bg-amber-400/15"
                                                         >
-                                                            <TranscriptRowView row={rows[item.index]} thread={thread} top={item.index === 0} />
+                                                            <TranscriptRowView row={rows[item.index]} thread={thread} subagent={subagent} top={item.index === 0} />
                                                         </div>
                                                     ))}
                                                 </div>

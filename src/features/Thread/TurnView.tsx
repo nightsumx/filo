@@ -1,3 +1,4 @@
+import type { SubagentRun } from '@/lib/subagents'
 import type { Step, Turn, UserPrompt } from '@/lib/timeline'
 import type { TranscriptRow } from '@/lib/transcriptRows'
 import type { Thread } from '@/store/thread'
@@ -10,7 +11,7 @@ import { cn, formatCost, formatCount } from '@/lib/utils'
 import { tr } from '@/lib/i18n'
 import copyText from 'copy-to-clipboard'
 import { appStore } from '@/store/app'
-import { Check, ChevronRight, Copy, GitFork, PencilLine } from 'lucide-react'
+import { Check, ChevronRight, Copy, GitFork, PencilLine, Plane } from 'lucide-react'
 import { observer } from 'mobx-react-lite'
 import { turnStats } from '@/lib/turnSummary'
 import { createContext, Fragment, memo, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
@@ -62,10 +63,29 @@ const ReviewFeedbackBubble = observer(function ReviewFeedbackBubble({ user, revi
     )
 })
 
+/** A prompt autopilot sent in the user's place, or a card answer it relayed; labelled by its source. */
+const AutopilotBubble = observer(function AutopilotBubble({ user, autopilot }: { user: UserPrompt, autopilot: NonNullable<UserPrompt['autopilot']> }) {
+    const t = useT()
+    return (
+        <div className="flex flex-col items-end pl-[15%]" title={user.timestamp ? t.dateTime(user.timestamp) : undefined}>
+            <div style={{ maxHeight: USER_BUBBLE_MAX_HEIGHT }} className="min-w-0 max-w-full overflow-y-auto rounded-xl bg-ide-prompt px-3 py-1.5 text-gray-900">
+                <div className="flex h-5 items-center gap-1.5 text-[12px] text-gray-500">
+                    <Plane size={11} className="shrink-0" />
+                    <span>{t.apFrom[autopilot.from] ?? t.apFrom.supervisor}</span>
+                    {autopilot.rules?.length ? <span className="font-mono text-[11.5px]">{autopilot.rules.join(' ')}</span> : null}
+                </div>
+                <div className="whitespace-pre-wrap break-words text-[length:var(--app-font-size)] leading-relaxed select-text">{user.text}</div>
+            </div>
+        </div>
+    )
+})
+
 // User prompt: a right-aligned chat bubble; copy, fork and edit sit to its left on hover.
 const UserBubble = observer(({ user, thread, entryId }: { user: UserPrompt, thread?: Thread, entryId?: string }) => {
     if (user.review)
         return <ReviewFeedbackBubble user={user} review={user.review} />
+    if (user.autopilot)
+        return <AutopilotBubble user={user} autopilot={user.autopilot} />
     return <PromptBubble user={user} thread={thread} entryId={entryId} />
 })
 
@@ -327,6 +347,40 @@ const RunningLine = observer(({ thread, turn }: { thread: Thread, turn: Turn }) 
     )
 })
 
+/** The spark animation frame, advancing every 120ms while mounted. */
+function useSpark(): string {
+    const [frame, setFrame] = useState(0)
+    useEffect(() => {
+        const timer = setInterval(() => setFrame(f => f + 1), 120)
+        return () => clearInterval(timer)
+    }, [])
+    return SPARK_FRAMES[frame % SPARK_FRAMES.length]
+}
+
+/**
+ * A subagent's working line, with the child's own numbers: time since it started and the tokens and
+ * cost it reported. An approval one of its calls waits on takes the slot, as in the thread.
+ */
+const SubagentRunningLine = observer(({ thread, run, turn }: { thread: Thread, run: SubagentRun, turn: Turn }) => {
+    const t = useT()
+    const spark = useSpark()
+    if (thread.subagentWaiting(run))
+        return <ExtensionRequest thread={thread} />
+    const d = run.details
+    const elapsed = t.duration(Date.now() - (d?.startedAt ?? Date.now()))
+    const label = d ? verbFor(t, turn.key)[0] : tr('启动中', 'Starting')
+    return (
+        <Gutter mark={spark} markClassName="text-[#d7875f]">
+            <div className="flex h-6 min-w-0 items-center gap-1.5 text-[13px]">
+                <span className="shrink-0 text-[#e8956b]">{`${label}…`}</span>
+                <span className="truncate text-gray-500 tabular-nums">
+                    {`(${elapsed}${d?.usage.output ? ` · ↓ ${formatCount(d.usage.output)} tokens` : ''}${d?.usage.cost ? ` · ${formatCost(d.usage.cost)}` : ''})`}
+                </span>
+            </div>
+        </Gutter>
+    )
+})
+
 /** Steps of the message currently streaming; observes only thread.streaming. */
 const StreamingSteps = observer(({ thread }: { thread: Thread }) => (
     <>
@@ -335,12 +389,13 @@ const StreamingSteps = observer(({ thread }: { thread: Thread }) => (
 ))
 
 /** One virtualized transcript row; spacing reproduces the old per-turn layout (gap 12px, 24px between turns). */
-export const TranscriptRowView = memo(({ row, thread, top }: { row: TranscriptRow, thread: Thread, top: boolean }) => {
+/** `subagent`: the row is from that child's transcript (no fork actions; its own working line). */
+export const TranscriptRowView = memo(({ row, thread, subagent, top }: { row: TranscriptRow, thread: Thread, subagent?: SubagentRun, top: boolean }) => {
     const t = useT()
     const pad = row.first && !top ? 'pt-6' : 'pt-3'
     switch (row.kind) {
         case 'user':
-            return <div className={pad}><UserBubble user={row.user} thread={thread} entryId={row.turn.key} /></div>
+            return <div className={pad}><UserBubble user={row.user} thread={subagent ? undefined : thread} entryId={row.turn.key} /></div>
         case 'fold':
             return <div className={pad}><FoldRow row={row} /></div>
         case 'item':
@@ -350,6 +405,9 @@ export const TranscriptRowView = memo(({ row, thread, top }: { row: TranscriptRo
                 </div>
             )
         case 'live':
+            // A child's streaming message is already among its turns' steps.
+            if (subagent)
+                return <div className={pad}><SubagentRunningLine thread={thread} run={subagent} turn={row.turn} /></div>
             return (
                 <div className={cn(pad, 'flex flex-col gap-3')}>
                     <StreamingSteps thread={thread} />

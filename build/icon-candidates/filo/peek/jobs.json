@@ -1,0 +1,50 @@
+[
+ {
+  "prompt": "macOS app icon artwork, full-bleed square canvas, no rounded-square frame, no border, no text. A single flat solid background color filling the whole canvas edge to edge. A cute, clever, alert fox peeks in from the bottom-right corner: only its head and a bit of shoulder are visible, the rest is cropped by the canvas edges. Its head is turned slightly toward the viewer, ears up, with big glossy expressive eyes with a white highlight, looking bright and intelligent, a tiny smile. Orange fox with cream cheeks and muzzle, on a deep warm orange background (#e8641f). Style: clean flat vector illustration with soft subtle shading, rounded friendly shapes, thin light outline around the character separating it from the background, kawaii but tasteful, similar to modern indie Mac app icons. The animal is slender, nimble and lively, not chubby, not heavy. Exactly one character. No props, no sparkles, no hearts, no stars, no background objects, no gradients in the background except a very subtle vignette.",
+  "out": "p1-fox.png",
+  "size": "1024x1024",
+  "quality": "high"
+ },
+ {
+  "prompt": "macOS app icon artwork, full-bleed square canvas, no rounded-square frame, no border, no text. A single flat solid background color filling the whole canvas edge to edge. A cute, clever, alert fennec fox peeks in from the bottom-right corner: only its head and a bit of shoulder are visible, the rest is cropped by the canvas edges. Its head is turned slightly toward the viewer, ears up, with big glossy expressive eyes with a white highlight, looking bright and intelligent, a tiny smile. Pale sandy fennec fox with very large ears, on a warm sand background (#d9a35b). Style: clean flat vector illustration with soft subtle shading, rounded friendly shapes, thin light outline around the character separating it from the background, kawaii but tasteful, similar to modern indie Mac app icons. The animal is slender, nimble and lively, not chubby, not heavy. Exactly one character. No props, no sparkles, no hearts, no stars, no background objects, no gradients in the background except a very subtle vignette.",
+  "out": "p2-fennec.png",
+  "size": "1024x1024",
+  "quality": "high"
+ },
+ {
+  "prompt": "macOS app icon artwork, full-bleed square canvas, no rounded-square frame, no border, no text. A single flat solid background color filling the whole canvas edge to edge. A cute, clever, alert black cat peeks in from the bottom-right corner: only its head and a bit of shoulder are visible, the rest is cropped by the canvas edges. Its head is turned slightly toward the viewer, ears up, with big glossy expressive eyes with a white highlight, looking bright and intelligent, a tiny smile. Sleek black cat with bright golden-green eyes, on a deep indigo background (#2b2f77). Style: clean flat vector illustration with soft subtle shading, rounded friendly shapes, thin light outline around the character separating it from the background, kawaii but tasteful, similar to modern indie Mac app icons. The animal is slender, nimble and lively, not chubby, not heavy. Exactly one character. No props, no sparkles, no hearts, no stars, no background objects, no gradients in the background except a very subtle vignette.",
+  "out": "p3-blackcat.png",
+  "size": "1024x1024",
+  "quality": "high"
+ },
+ {
+  "prompt": "macOS app icon artwork, full-bleed square canvas, no rounded-square frame, no border, no text. A single flat solid background color filling the whole canvas edge to edge. A cute, clever, alert baby owl peeks in from the bottom-right corner: only its head and a bit of shoulder are visible, the rest is cropped by the canvas edges. Its head is turned slightly toward the viewer, ears up, with big glossy expressive eyes with a white highlight, looking bright and intelligent, a tiny smile. Small brown-grey owl with large round amber eyes and little ear tufts, on a dark teal background (#0f5b5c). Style: clean flat vector illustration with soft subtle shading, rounded friendly shapes, thin light outline around the character separating it from the background, kawaii but tasteful, similar to modern indie Mac app icons. The animal is slender, nimble and lively, not chubby, not heavy. Exactly one character. No props, no sparkles, no hearts, no stars, no background objects, no gradients in the background except a very subtle vignette.",
+  "out": "p4-owl.png",
+  "size": "1024x1024",
+  "quality": "high"
+ },
+ {
+  "prompt": "macOS app icon artwork, full-bleed square canvas, no rounded-square frame, no border, no text. A single flat solid background color filling the whole canvas edge to edge. A cute, clever, alert red squirrel peeks in from the bottom-right corner: only its head and a bit of shoulder are visible, the rest is cropped by the canvas edges. Its head is turned slightly toward the viewer, ears up, with big glossy expressive eyes with a white highlight, looking bright and intelligent, a tiny smile. Red squirrel with tufted ears and a hint of fluffy tail curling behind, on a forest green background (#2f6b3a). Style: clean flat vector illustration with soft subtle shading, rounded friendly shapes, thin light outline around the character separating it from the background, kawaii but tasteful, similar to modern indie Mac app icons. The animal is slender, nimble and lively, not chubby, not heavy. Exactly one character. No props, no sparkles, no hearts, no stars, no background objects, no gradients in the background except a very subtle vignette.",
+  "out": "p5-squirrel.png",
+  "size": "1024x1024",
+  "quality": "high"
+ },
+ {
+  "prompt": "macOS app icon artwork, full-bleed square canvas, no rounded-square frame, no border, no text. A single flat solid background color filling the whole canvas edge to edge. A cute, clever, alert young crow peeks in from the bottom-right corner: only its head and a bit of shoulder are visible, the rest is cropped by the canvas edges. Its head is turned slightly toward the viewer, ears up, with big glossy expressive eyes with a white highlight, looking bright and intelligent, a tiny smile. Glossy black crow with a small sharp beak and bright clever eyes, on a cool sky blue background (#3d7fd9). Style: clean flat vector illustration with soft subtle shading, rounded friendly shapes, thin light outline around the character separating it from the background, kawaii but tasteful, similar to modern indie Mac app icons. The animal is slender, nimble and lively, not chubby, not heavy. Exactly one character. No props, no sparkles, no hearts, no stars, no background objects, no gradients in the background except a very subtle vignette.",
+  "out": "p6-crow.png",
+  "size": "1024x1024",
+  "quality": "high"
+ },
+ {
+  "prompt": "macOS app icon artwork, full-bleed square canvas, no rounded-square frame, no border, no text. A single flat solid background color filling the whole canvas edge to edge. A cute, clever, alert fawn (baby deer) peeks in from the bottom-right corner: only its head and a bit of shoulder are visible, the rest is cropped by the canvas edges. Its head is turned slightly toward the viewer, ears up, with big glossy expressive eyes with a white highlight, looking bright and intelligent, a tiny smile. Light brown fawn with white spots and big ears, on a soft rose background (#d96a7b). Style: clean flat vector illustration with soft subtle shading, rounded friendly shapes, thin light outline around the character separating it from the background, kawaii but tasteful, similar to modern indie Mac app icons. The animal is slender, nimble and lively, not chubby, not heavy. Exactly one character. No props, no sparkles, no hearts, no stars, no background objects, no gradients in the background except a very subtle vignette.",
+  "out": "p7-fawn.png",
+  "size": "1024x1024",
+  "quality": "high"
+ },
+ {
+  "prompt": "macOS app icon artwork, full-bleed square canvas, no rounded-square frame, no border, no text. A single flat solid background color filling the whole canvas edge to edge. A cute, clever, alert white stoat (ermine) peeks in from the bottom-right corner: only its head and a bit of shoulder are visible, the rest is cropped by the canvas edges. Its head is turned slightly toward the viewer, ears up, with big glossy expressive eyes with a white highlight, looking bright and intelligent, a tiny smile. Slim white ermine with a tiny black nose, on a violet background (#5b3fd6). Style: clean flat vector illustration with soft subtle shading, rounded friendly shapes, thin light outline around the character separating it from the background, kawaii but tasteful, similar to modern indie Mac app icons. The animal is slender, nimble and lively, not chubby, not heavy. Exactly one character. No props, no sparkles, no hearts, no stars, no background objects, no gradients in the background except a very subtle vignette.",
+  "out": "p8-stoat.png",
+  "size": "1024x1024",
+  "quality": "high"
+ }
+]

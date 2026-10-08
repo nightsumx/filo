@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { AssistantMessageComponent, CONFIG_DIR_NAME, getAgentDir, UserMessageComponent, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { Editor, Loader, Markdown, Text } from "@earendil-works/pi-tui";
+import { Editor, Loader, Markdown, Text, TuiAltScreen } from "@earendil-works/pi-tui";
 import { latestTodos } from "pi-capabilities/lib/todo.ts";
 import type { TodoDetails } from "pi-capabilities/protocol";
 import { COLOR, key, MODE_KEY, shared } from "./lib/shared.ts";
@@ -96,6 +96,20 @@ const handleMouse = editor.handleMouse;
 editor.handleMouse = function (event: { x: number; width: number }) {
 	return handleMouse.call(this, { ...event, x: event.x - 2, width: event.width - 2 });
 };
+
+// JetBrains' terminal opens an OSC 8 link on click itself, even while pi captures the mouse,
+// so fullscreen pi opening it too means every link opens twice. Leave it to the terminal.
+// A no-op rather than no handler, so the click still counts as a link click, not a click on the message.
+if (process.env.TERMINAL_EMULATOR === "JetBrains-JediTerm") {
+	const altScreen = TuiAltScreen.prototype as any;
+	const handleSelection = altScreen.handleSelectionMouseEvent;
+	if (handleSelection) {
+		altScreen.handleSelectionMouseEvent = function (event: unknown) {
+			if (this.openUrl) this.openUrl = () => {};
+			return handleSelection.call(this, event);
+		};
+	}
+}
 
 const duration = (ms: number) => {
 	const s = Math.round(ms / 1000);

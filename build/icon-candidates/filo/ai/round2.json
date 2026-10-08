@@ -1,0 +1,32 @@
+[
+ {
+  "prompt": "Flat vector app icon artwork, square, 1024x1024. The ENTIRE canvas is a single solid flat navy color #131a28, filling edge to edge to all four corners; do NOT draw a rounded-square tile, card, frame, border or vignette. Pure flat 2D vector: no 3D, no bevel, no shadows, no glow, no gradients, no texture, no sparkles, no text. Minimal, bold, geometric logo mark with Swiss-modernist restraint. All strokes are VERY thick, about 9% of the canvas width, perfectly uniform width, rounded caps. Centered, mark spans about 62% of the canvas. The mark: three thick horizontal parallel threads, evenly spaced, stacked vertically, each with rounded ends. One single thick soft blue (#3b82f6) thread runs vertically through the center and WEAVES through them like a darning stitch: it passes OVER the top thread, UNDER the middle thread, and OVER the bottom thread, curving gently in a smooth serpentine S as it goes. At each crossing a clean narrow gap of background color separates the thread on top from the one below, making the over-under interlacing crystal clear. The blue thread's ends extend a little beyond the top and bottom threads with rounded caps. Exactly four strokes total. Horizontal threads off-white #f5f3ee, weaving thread soft blue #3b82f6.",
+  "out": "r2-weft.png",
+  "size": "1024x1024",
+  "quality": "high"
+ },
+ {
+  "prompt": "Flat vector app icon artwork, square, 1024x1024. The ENTIRE canvas is a single solid flat warm off-white color #f5f3ee, filling edge to edge to all four corners; do NOT draw a rounded-square tile, card, frame, border or vignette. Pure flat 2D vector: no 3D, no bevel, no shadows, no glow, no gradients, no texture, no sparkles, no text. Minimal, bold, geometric logo mark with Swiss-modernist restraint. All strokes are VERY thick, about 9% of the canvas width, perfectly uniform width, rounded caps. Centered, mark spans about 62% of the canvas. The mark: three thick horizontal parallel threads, evenly spaced, stacked vertically, each with rounded ends. One single thick soft blue (#3b82f6) thread runs vertically through the center and WEAVES through them like a darning stitch: it passes OVER the top thread, UNDER the middle thread, and OVER the bottom thread, curving gently in a smooth serpentine S as it goes. At each crossing a clean narrow gap of background color separates the thread on top from the one below, making the over-under interlacing crystal clear. The blue thread's ends extend a little beyond the top and bottom threads with rounded caps. Exactly four strokes total. Horizontal threads dark navy #131a28, weaving thread soft blue #3b82f6.",
+  "out": "r2-weft-light.png",
+  "size": "1024x1024",
+  "quality": "high"
+ },
+ {
+  "prompt": "Flat vector app icon artwork, square, 1024x1024. The ENTIRE canvas is a single solid flat navy color #131a28, filling edge to edge to all four corners; do NOT draw a rounded-square tile, card, frame, border or vignette. Pure flat 2D vector: no 3D, no bevel, no shadows, no glow, no gradients, no texture, no sparkles, no text. Minimal, bold, geometric logo mark with Swiss-modernist restraint. All strokes are VERY thick, about 9% of the canvas width, perfectly uniform width, rounded caps. Centered, mark spans about 62% of the canvas. The mark: a bold lowercase letter 'f' drawn as ONE continuous thick off-white (#f5f3ee) thread. The thread starts at the bottom of the straight vertical stem, rises up, curves over at the top into a rounded hook opening to the right. The crossbar is made by a short separate segment of the same thread that wraps once around the stem in a small neat loop, like a thread tied around a post, with its two short ends pointing left and right. Instantly readable as 'f' even when tiny. Only navy and off-white.",
+  "out": "r2-f-loop.png",
+  "size": "1024x1024",
+  "quality": "high"
+ },
+ {
+  "prompt": "Flat vector app icon artwork, square, 1024x1024. The ENTIRE canvas is a single solid flat navy color #131a28, filling edge to edge to all four corners; do NOT draw a rounded-square tile, card, frame, border or vignette. Pure flat 2D vector: no 3D, no bevel, no shadows, no glow, no gradients, no texture, no sparkles, no text. Minimal, bold, geometric logo mark with Swiss-modernist restraint. All strokes are VERY thick, about 9% of the canvas width, perfectly uniform width, rounded caps. Centered, mark spans about 62% of the canvas. The mark: a bold lowercase letter 'f'. The stem with its rounded top hook curving right is one thick off-white (#f5f3ee) thread. The crossbar is a thick soft blue (#3b82f6) thread that comes in from the left, passes BEHIND the stem (the blue is interrupted by a clean background-colored gap on both sides of the stem, so the stem clearly lies on top), then continues to the right and curves gently downward ending in a rounded cap, like a thread being woven through. Wide clean letterform, generous negative space.",
+  "out": "r2-f-weave.png",
+  "size": "1024x1024",
+  "quality": "high"
+ },
+ {
+  "prompt": "Flat vector app icon artwork, square, 1024x1024. The ENTIRE canvas is a single solid flat navy color #131a28, filling edge to edge to all four corners; do NOT draw a rounded-square tile, card, frame, border or vignette. Pure flat 2D vector: no 3D, no bevel, no shadows, no glow, no gradients, no texture, no sparkles, no text. Minimal, bold, geometric logo mark with Swiss-modernist restraint. All strokes are VERY thick, about 9% of the canvas width, perfectly uniform width, rounded caps. Centered, mark spans about 62% of the canvas. The mark: a weaving loom boat shuttle seen from above, horizontal and perfectly symmetric: a long slim shape with pointed ends on left and right (like a narrow canoe), drawn as a thick off-white (#f5f3ee) outline, with a solid soft blue (#3b82f6) rounded rectangle bobbin in its center. A thick off-white thread leaves the center of the shuttle's lower edge and runs down and to the left in one smooth curve to the bottom-left. Simple, iconic, industrial.",
+  "out": "r2-shuttle.png",
+  "size": "1024x1024",
+  "quality": "high"
+ }
+]

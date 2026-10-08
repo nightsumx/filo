@@ -1,20 +1,20 @@
-# Pi
+# Filo
 
-[pi](https://pi.dev) coding agent 的 Mac 桌面端。多个线程并排跑，每处改动都知道是哪个线程做的，另起一个只读的 pi 审查结果，所有会话都能搜。和终端里的 pi 用同一份会话和配置，随时切回终端。
+编码 Agent 的 Mac 工作台。[pi](https://pi.dev)、Codex、Claude Code 等 Agent 在多个线程里并排跑，每处改动都知道是哪个线程做的，另起一个只读的 pi 审查结果，所有会话都能搜。和终端里的 pi 用同一份会话和配置，随时切回终端。
 
-![Pi 的主窗口：左侧项目树，中间是线程的对话和 diff，右侧改动面板](site/public/shots/zh/main.webp)
+![Filo 的主窗口：左侧项目树，中间是线程的对话和 diff，右侧改动面板](site/public/shots/zh/main.webp)
 
-[English](./README.md) · [pi.flowsrun.com](https://pi.flowsrun.com)
+[English](./README.md) · [filoapp.dev](https://filoapp.dev)
 
 ## 安装
 
 ```bash
-curl -fsSL https://pi.flowsrun.com/install.sh | bash
+curl -fsSL https://filoapp.dev/install.sh | bash
 ```
 
-需要 Apple Silicon，macOS 11 及以上。脚本从 GitHub 下载最新的 [release](https://github.com/nightsumx/pi-kit/releases)，先校验签名，再装到 `/Applications`；没有管理员权限的话装到 `~/Applications`。再运行一次就是更新，运行前先退出 Pi。
+需要 Apple Silicon，macOS 11 及以上。脚本从 GitHub 下载最新的 [release](https://github.com/nightsumx/filo/releases)，先校验签名，再装到 `/Applications`；没有管理员权限的话装到 `~/Applications`。再运行一次就是更新，运行前先退出 Filo。旧名 Pi 的安装会被替换掉。
 
-不需要 Node.js 或 pi 命令行：Pi 自带一份 pi，登录 shell 里有你自己的 pi 就用你的。在“设置 → 模型供应商”里登录订阅、填 API key，或者接入本地模型，配置都存在 pi 自己的 `~/.pi/agent`。
+不需要 Node.js 或 pi 命令行：Filo 自带一份 pi，登录 shell 里有你自己的 pi 就用你的。在“设置 → 模型供应商”里登录订阅、填 API key，或者接入本地模型，配置都存在 pi 自己的 `~/.pi/agent`。
 
 应用没有经过 Apple 公证。也可以从 releases 页面下载 `.dmg`，但第一次打开会被 macOS 拦下：先打开一次，再到“系统设置 → 隐私与安全性”点“仍要打开”。
 
@@ -33,7 +33,7 @@ curl -fsSL https://pi.flowsrun.com/install.sh | bash
 
 每个线程在 Electron 主进程里起一个 `pi --mode rpc`（或 ACP Agent）子进程，渲染进程通过 IPC 和它通信。会话就是 pi 自己在 `~/.pi/agent/sessions` 下的 JSONL 文件，所以终端和桌面端看到的是同一份历史。
 
-需要 Agent 配合的功能（审批、提问、计划模式、待办、子 Agent、审查）是 [`packages/capabilities`](packages/capabilities) 里的 pi 扩展，每个线程用 `-e` 加载。[`packages/pi-cc-tui`](packages/pi-cc-tui) 在终端里加载同一批扩展，换成 Claude Code 风格的对话框，另外提供桌面端用来发现和连接终端会话的 presence 文件和 bridge socket。
+需要 Agent 配合的功能（审批、提问、计划模式、待办、子 Agent、审查、自动驾驶）是 [`packages/capabilities`](packages/capabilities) 里的 pi 扩展，每个线程用 `-e` 加载。[`packages/pi-cc-tui`](packages/pi-cc-tui) 在终端里加载同一批扩展，换成 Claude Code 风格的对话框，另外提供桌面端用来发现和连接终端会话的 presence 文件和 bridge socket。
 
 | 路径 | 内容 |
 |---|---|
@@ -43,7 +43,7 @@ curl -fsSL https://pi.flowsrun.com/install.sh | bash
 | `packages/capabilities` | 桌面端和 pi-cc-tui 共用的 pi 扩展；`protocol.ts` 是两边的约定 |
 | `packages/pi-cc-tui` | 让 pi 的终端界面像 Claude Code，发布在 npm |
 | `bundled-pi/` | 应用自带的 pi 版本（lockfile），由 `scripts/bundle-pi.sh` 安装 |
-| `site/` | pi.flowsrun.com，带静态资源的 Cloudflare Worker |
+| `site/` | filoapp.dev，带静态资源的 Cloudflare Worker |
 | `test/` | Vitest 测试，以及通过 CDP 驱动打包后应用的端到端脚本 |
 
 ## 开发
@@ -66,6 +66,8 @@ bun run e2e:features   # 还有 e2e:windows、e2e:review、e2e:providers、e2e:a
 
 `e2e:terminal` 和 `test/bridge.test.ts` 需要 tmux 来跑真实的终端 pi。
 
+这些脚本运行时应用在后台跑（`PI_GUI_BACKGROUND=1`）：没有 Dock 图标，窗口不可见，也不会抢焦点。设 `PI_E2E_SHOW=1` 可以看到窗口。自己带 `--remote-debugging-port` 启动应用时，也加上 `PI_GUI_BACKGROUND=1`。
+
 打包和发布：
 
 ```bash
@@ -75,3 +77,7 @@ bun run deploy:site      # 用 wrangler 部署 site/
 ```
 
 `release.sh` 遇到已存在的 tag 会拒绝，所以先改 `package.json` 里的 `version`。
+
+## 许可
+
+[MIT](./LICENSE)

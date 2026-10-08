@@ -6,11 +6,12 @@
 // existing prompt UI handles them.
 
 import type { AcpAgentCaps, AcpAgentSpec, AcpConfigOption } from '@shared/agents'
-import type { AgentExitInfo, SessionItem } from '@shared/ipc'
+import type { SessionItem } from '@shared/ipc'
 import type { ApprovalChoice, ApprovalRequest, AskQuestion, AskResponse, PlanDecision } from '@shared/capabilities'
 import type { ImageContent, PiEvent, PiModel, RpcResponse, SlashCommand } from '@shared/pi'
 import type { ChildProcessWithoutNullStreams } from 'node:child_process'
 import type { PromptUsage } from './transcript'
+import type { AgentAdapter, AgentAdapterCallbacks, AgentAdapterOptions } from './adapter'
 import { acpCaps, acpSessionKey } from '@shared/agents'
 import { APPROVAL_TITLE_PREFIX } from '@shared/capabilities'
 import { spawn } from 'node:child_process'
@@ -35,25 +36,6 @@ export interface AcpLaunch {
     via?: 'path' | 'app' | 'override'
     /** The app's install predates the pinned version. */
     outdated?: boolean
-}
-
-export interface AcpAgentOptions {
-    cwd: string
-    /** Resume this session (session/load replays it into the transcript); otherwise session/new. */
-    sessionId?: string
-    /** Only replay the session for reading, then stop: no events, no prompts. */
-    readOnly?: boolean
-    /** Replayed history carries no times; its messages get this one (the session's last update). */
-    replayTime?: number
-}
-
-export interface AcpAgentCallbacks {
-    onEvent: (agentId: string, event: PiEvent) => void
-    onExit: (agentId: string, info: AgentExitInfo) => void
-    /** The session exists (new or loaded); `prompt` is set when the user just sent one. */
-    onSession?: (agent: AcpAgent, change: { prompt?: string, title?: string, name?: string }) => void
-    /** The agent forked the session into `sessionId`; returns the fork's session key. */
-    onFork?: (agent: AcpAgent, sessionId: string) => string
 }
 
 interface PermissionWait {
@@ -115,7 +97,7 @@ function selectOptions(raw: unknown): AcpConfigOption[] {
         }))
 }
 
-export class AcpAgent {
+export class AcpAgent implements AgentAdapter {
     readonly id = randomUUID()
     private child: ChildProcessWithoutNullStreams
     private connection: AcpConnection
@@ -166,7 +148,7 @@ export class AcpAgent {
     /** The launch environment holds the agent's API key (from the environment or pi's providers). */
     private hasApiKey: boolean
 
-    constructor(readonly spec: AcpAgentSpec, launch: AcpLaunch, private options: AcpAgentOptions, private callbacks: AcpAgentCallbacks) {
+    constructor(readonly spec: AcpAgentSpec, launch: AcpLaunch, private options: AgentAdapterOptions, private callbacks: AgentAdapterCallbacks) {
         this.hasApiKey = !!(spec.apiKey && launch.env[spec.apiKey.env])
         this.transcript = new AcpTranscript('', { model: () => this.modelStamp(), inputIncludesCache: spec.inputIncludesCache, now: () => (this.loading ? this.clock ?? options.replayTime ?? Date.now() : Date.now()) })
         this.child = spawn(launch.file, launch.args, { cwd: options.cwd, env: launch.env, stdio: ['pipe', 'pipe', 'pipe'] })
@@ -571,9 +553,9 @@ export class AcpAgent {
         if (method === 'session/request_permission')
             return this.permission(params)
         const name = method.replace(/^_/, '')
-        if (this.caps.xai && name === 'x.ai/ask_user_question')
+        if ((this.caps.xai || this.caps.ask) && name === 'x.ai/ask_user_question')
             return this.xaiAsk(params)
-        if (this.caps.xai && name === 'x.ai/exit_plan_mode')
+        if ((this.caps.xai || this.caps.plan) && name === 'x.ai/exit_plan_mode')
             return this.xaiPlan(params)
         throw methodNotFound(method)
     }

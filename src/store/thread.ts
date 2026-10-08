@@ -14,10 +14,12 @@ import type {
     SlashCommand,
     ThinkingLevel,
 } from '@shared/pi'
+import type { SubagentRun } from '@/lib/subagents'
 import type { ThreadActivity } from '@/lib/threadActivity'
 import type { BlockTime, Step, TimelineMessage, ToolExecState, ToolResultView } from '@/lib/timeline'
 import { newThreadLabel, tr } from '@/lib/i18n'
 import { parsePartialJson } from '@/lib/partialJson'
+import { childToolCallIds, subagentsIn } from '@/lib/subagents'
 import { threadActivity } from '@/lib/threadActivity'
 import { blockTimeKey, buildTurns, contentImages, contentText, pendingCards } from '@/lib/timeline'
 import type { WaitingKind } from '@/lib/threadActivity'
@@ -132,6 +134,8 @@ export class Thread {
 
     draft = ''
     images: ImageContent[] = []
+    /** Tool call id of the subagent shown in place of the transcript (opened from the tree or its card). */
+    subagentView: string | null = null
     unread = false
     /** Bumps whenever files may have changed (tool writes, run end) so the review pane refetches. */
     changeTick = 0
@@ -227,6 +231,7 @@ export class Thread {
             widgets: this.widgets,
             draft: this.draft,
             images: this.images,
+            subagentView: this.subagentView,
             unread: this.unread,
             changeTick: this.changeTick,
             lastUsed: this.lastUsed,
@@ -372,6 +377,36 @@ export class Thread {
         if (!this.streaming)
             return []
         return buildTurns([{ key: 'streaming', message: this.streaming }], { tools: this.tools, running: true })[0]?.steps ?? []
+    }
+
+    /** Subagents the latest turn started, in call order: the ones running now, or that just ran. */
+    get subagents(): SubagentRun[] {
+        const turns = this.turns
+        return subagentsIn(turns[turns.length - 1]?.steps ?? [])
+    }
+
+    /** The subagent open in place of the transcript; null when none is, or its call left the branch. */
+    get openSubagent(): SubagentRun | null {
+        const id = this.subagentView
+        if (!id)
+            return null
+        for (const turn of this.turns) {
+            const run = subagentsIn(turn.steps).find(r => r.id === id)
+            if (run)
+                return run
+        }
+        return null
+    }
+
+    /** Shows a subagent's transcript in this thread's pane; null goes back to the thread. */
+    showSubagent(id: string | null) {
+        this.subagentView = id
+    }
+
+    /** The approval prompt pi is blocked on belongs to one of this subagent's tool calls. */
+    subagentWaiting(run: SubagentRun): boolean {
+        const approval = this.uiRequests[0]?.approval
+        return !!approval && !!run.details && childToolCallIds(run.details).has(approval.toolCallId)
     }
 
     get contextPercent(): number | null {

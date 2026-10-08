@@ -1,0 +1,62 @@
+[
+ {
+  "prompt": "Flat minimalist macOS app icon artwork in Apple's own simple icon style, like Apple Notes, Reminders, Shortcuts, Linear or Things. Full-bleed square, the background fills the entire canvas edge to edge, NO rounded corners, NO frame, NO border, NO drop shadow, NO vignette, NO texture, NO text, NO letters except where specified, NO small details. Exactly one bold glyph centered, occupying about 55% of the canvas, crisp geometric vector shapes that could be redrawn as a simple SVG. Maximum two colors total. Glyph: a single very thick white line with perfectly rounded caps that enters from the lower left, makes exactly one round loop in the middle, and exits to the right, like one thread tied into a single loop. Uniform stroke width, very bold. Background: solid deep blue #1F4FD8 with a very subtle top-to-bottom tonal gradient.",
+  "out": "01-loop.png",
+  "size": "1024x1024",
+  "quality": "high"
+ },
+ {
+  "prompt": "Flat minimalist macOS app icon artwork in Apple's own simple icon style, like Apple Notes, Reminders, Shortcuts, Linear or Things. Full-bleed square, the background fills the entire canvas edge to edge, NO rounded corners, NO frame, NO border, NO drop shadow, NO vignette, NO texture, NO text, NO letters except where specified, NO small details. Exactly one bold glyph centered, occupying about 55% of the canvas, crisp geometric vector shapes that could be redrawn as a simple SVG. Maximum two colors total. Glyph: a minimal lowercase letter f drawn as one single very thick white stroke with rounded caps: a tall vertical stem whose top curls over to the right like a hook, plus one short crossbar. Extremely clean geometric construction, uniform stroke width, nothing else. Background: solid near-black charcoal #17181B.",
+  "out": "02-f.png",
+  "size": "1024x1024",
+  "quality": "high"
+ },
+ {
+  "prompt": "Flat minimalist macOS app icon artwork in Apple's own simple icon style, like Apple Notes, Reminders, Shortcuts, Linear or Things. Full-bleed square, the background fills the entire canvas edge to edge, NO rounded corners, NO frame, NO border, NO drop shadow, NO vignette, NO texture, NO text, NO letters except where specified, NO small details. Exactly one bold glyph centered, occupying about 55% of the canvas, crisp geometric vector shapes that could be redrawn as a simple SVG. Maximum two colors total. Glyph: one thick solid white ring (circle outline with a heavy stroke) and one thick straight white line passing diagonally through it, going under the ring on one side and over it on the other, like a single thread passing through an eye. Only these two shapes. Background: solid bold orange #FF6A1A.",
+  "out": "03-ring.png",
+  "size": "1024x1024",
+  "quality": "high"
+ },
+ {
+  "prompt": "Flat minimalist macOS app icon artwork in Apple's own simple icon style, like Apple Notes, Reminders, Shortcuts, Linear or Things. Full-bleed square, the background fills the entire canvas edge to edge, NO rounded corners, NO frame, NO border, NO drop shadow, NO vignette, NO texture, NO text, NO letters except where specified, NO small details. Exactly one bold glyph centered, occupying about 55% of the canvas, crisp geometric vector shapes that could be redrawn as a simple SVG. Maximum two colors total. Glyph: one single very thick white horizontal wavy line, a smooth sine wave with exactly one and a half periods, rounded caps, uniform stroke width, like a single thread. Background: solid deep teal green #0E8F7E with a very subtle top-to-bottom tonal gradient.",
+  "out": "04-wave.png",
+  "size": "1024x1024",
+  "quality": "high"
+ },
+ {
+  "prompt": "Flat minimalist macOS app icon artwork in Apple's own simple icon style, like Apple Notes, Reminders, Shortcuts, Linear or Things. Full-bleed square, the background fills the entire canvas edge to edge, NO rounded corners, NO frame, NO border, NO drop shadow, NO vignette, NO texture, NO text, NO letters except where specified, NO small details. Exactly one bold glyph centered, occupying about 55% of the canvas, crisp geometric vector shapes that could be redrawn as a simple SVG. Maximum two colors total. Glyph: a single solid white vertical rounded capsule shape, tall and slightly tapered toward the bottom tip, with one elongated vertical slot cut out near the top, like the eye of a sewing needle, reduced to pure geometry. Background: solid dark indigo #24215E.",
+  "out": "05-eye.png",
+  "size": "1024x1024",
+  "quality": "high"
+ },
+ {
+  "prompt": "Flat minimalist macOS app icon artwork in Apple's own simple icon style, like Apple Notes, Reminders, Shortcuts, Linear or Things. Full-bleed square, the background fills the entire canvas edge to edge, NO rounded corners, NO frame, NO border, NO drop shadow, NO vignette, NO texture, NO text, NO letters except where specified, NO small details. Exactly one bold glyph centered, occupying about 55% of the canvas, crisp geometric vector shapes that could be redrawn as a simple SVG. Maximum two colors total. Glyph: two thick solid vertical rounded bars side by side, the same width, parallel, the right bar shifted lower than the left one by about a third of its height, like two threads running in parallel. Bars are solid royal blue #2F6BFF. Background: solid white #FFFFFF.",
+  "out": "06-bars.png",
+  "size": "1024x1024",
+  "quality": "high"
+ },
+ {
+  "prompt": "Flat minimalist macOS app icon artwork in Apple's own simple icon style, like Apple Notes, Reminders, Shortcuts, Linear or Things. Full-bleed square, the background fills the entire canvas edge to edge, NO rounded corners, NO frame, NO border, NO drop shadow, NO vignette, NO texture, NO text, NO letters except where specified, NO small details. Exactly one bold glyph centered, occupying about 55% of the canvas, crisp geometric vector shapes that could be redrawn as a simple SVG. Maximum two colors total. Glyph: one single very thick continuous line coiled into a round spiral with exactly two and a half turns, rounded end cap, uniform stroke width, like a thread wound up, reduced to geometry. Glyph color near-black #1C1C1E. Background: warm off-white #F4EFE6.",
+  "out": "07-spiral.png",
+  "size": "1024x1024",
+  "quality": "high"
+ },
+ {
+  "prompt": "Flat minimalist macOS app icon artwork in Apple's own simple icon style, like Apple Notes, Reminders, Shortcuts, Linear or Things. Full-bleed square, the background fills the entire canvas edge to edge, NO rounded corners, NO frame, NO border, NO drop shadow, NO vignette, NO texture, NO text, NO letters except where specified, NO small details. Exactly one bold glyph centered, occupying about 55% of the canvas, crisp geometric vector shapes that could be redrawn as a simple SVG. Maximum two colors total. Glyph: one single very thick white line rising from the bottom center that splits smoothly into two parallel lines going upward, like one thread branching into two, rounded caps, uniform stroke width. Background: solid violet #6B4EFF with a very subtle top-to-bottom tonal gradient.",
+  "out": "08-fork.png",
+  "size": "1024x1024",
+  "quality": "high"
+ },
+ {
+  "prompt": "Flat minimalist macOS app icon artwork in Apple's own simple icon style, like Apple Notes, Reminders, Shortcuts, Linear or Things. Full-bleed square, the background fills the entire canvas edge to edge, NO rounded corners, NO frame, NO border, NO drop shadow, NO vignette, NO texture, NO text, NO letters except where specified, NO small details. Exactly one bold glyph centered, occupying about 55% of the canvas, crisp geometric vector shapes that could be redrawn as a simple SVG. Maximum two colors total. Glyph: three thick solid horizontal rounded bars stacked with equal spacing, left aligned, of different lengths (long, short, medium), like threads of work progressing in parallel. Bars are solid white. Background: solid near-black #141517.",
+  "out": "09-lanes.png",
+  "size": "1024x1024",
+  "quality": "high"
+ },
+ {
+  "prompt": "Flat minimalist macOS app icon artwork in Apple's own simple icon style, like Apple Notes, Reminders, Shortcuts, Linear or Things. Full-bleed square, the background fills the entire canvas edge to edge, NO rounded corners, NO frame, NO border, NO drop shadow, NO vignette, NO texture, NO text, NO letters except where specified, NO small details. Exactly one bold glyph centered, occupying about 55% of the canvas, crisp geometric vector shapes that could be redrawn as a simple SVG. Maximum two colors total. Glyph: one single very thick white stroke forming a simple overhand knot reduced to clean geometry: a line that crosses over itself once making one closed loop, with a visible small gap at the crossing to show over and under. Uniform stroke width, rounded caps. Background: solid coral red #F2463C.",
+  "out": "10-knot.png",
+  "size": "1024x1024",
+  "quality": "high"
+ }
+]

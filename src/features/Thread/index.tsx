@@ -9,6 +9,7 @@ import appIcon from '@/assets/logo.png'
 import { Composer } from '../Composer'
 import { ExtensionRequest } from './ExtensionRequest'
 import { MessageList } from './MessageList'
+import { SubagentComposer, SubagentHeader } from './SubagentPane'
 import { newThreadLabel, tr } from '@/lib/i18n'
 
 /** Shortcut hints shown on empty editors, like WebStorm's empty editor area. */
@@ -115,21 +116,39 @@ export const ThreadPane = observer(({ thread, focused }: { thread: Thread, focus
         thread.onTerminalPresence(terminal)
     }, [thread, thread.loaded, terminal?.pid, terminal?.bridge])
     useEffect(() => () => thread.onTerminalPresence(undefined), [thread])
+    // Search opened a message of this thread: show the thread, not a subagent.
+    const reveal = appStore.reveal
+    useEffect(() => {
+        if (reveal?.key === thread.key)
+            thread.showSubagent(null)
+    }, [reveal, thread])
 
+    // A subagent opened from the tree or its card takes the transcript's place.
+    const subagent = thread.openSubagent
     return (
         <section
-            aria-label={thread.title}
+            aria-label={subagent ? `${thread.title} / ${subagent.title}` : thread.title}
             onMouseDownCapture={() => {
                 if (!focused)
                     appStore.focus(thread.key)
             }}
+            onKeyDown={(e) => {
+                const target = e.target as HTMLElement
+                if (subagent && e.key === 'Escape' && !e.defaultPrevented && !target.closest('input, textarea, [contenteditable="true"]')) {
+                    e.preventDefault()
+                    thread.showSubagent(null)
+                }
+            }}
             className="flex h-full min-w-0 flex-1 basis-0 flex-col bg-ide-editor"
         >
+            {subagent && <SubagentHeader thread={thread} run={subagent} />}
             {!thread.loaded
                 ? <div className="flex flex-1 items-center justify-center"><Loader2 size={18} className="animate-spin text-gray-300" /></div>
-                : thread.isEmpty && !thread.persisted ? <Hero thread={thread} /> : <MessageList thread={thread} />}
+                : subagent
+                    ? <MessageList thread={thread} subagent={subagent} />
+                    : thread.isEmpty && !thread.persisted ? <Hero thread={thread} /> : <MessageList thread={thread} />}
             {/* Requests normally render in the transcript's live row; without a running turn there is none. */}
-            {!(thread.running && thread.turns.length > 0) && thread.uiRequests.length > 0 && (
+            {!subagent && !(thread.running && thread.turns.length > 0) && thread.uiRequests.length > 0 && (
                 <div className="mx-auto w-full max-w-5xl px-5 pb-3">
                     <TranscriptTextContext value={TRANSCRIPT_TEXT[appStore.transcriptLang]}>
                         <ExtensionRequest thread={thread} />
@@ -137,7 +156,7 @@ export const ThreadPane = observer(({ thread, focused }: { thread: Thread, focus
                 </div>
             )}
             <TerminalNotice thread={thread} />
-            <Composer thread={thread} />
+            {subagent ? <SubagentComposer key={subagent.id} thread={thread} run={subagent} /> : <Composer thread={thread} />}
         </section>
     )
 })

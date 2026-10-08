@@ -365,6 +365,11 @@ export class AcpTranscript {
     private now: () => number
     private modelInfo: TranscriptOptions['model']
     private inputIncludesCache: boolean | undefined
+    /**
+     * Tool name override: maps an original tool name (e.g. 'collabAgentToolCall', 'AskUserQuestion')
+     * to the pi name it should be shown as ('subagent', 'ask'). Used by native adapters.
+     */
+    overrideToolName: Record<string, string> = {}
 
     constructor(private prefix: string, options: TranscriptOptions = {}) {
         this.emit = options.emit ?? (() => {})
@@ -384,9 +389,10 @@ export class AcpTranscript {
 
     /**
      * Details for a call's capability view while it waits on the user (an ask's questions, a plan to
-     * approve), or once they answered; the result carries the last ones. False if the call is unknown.
+     * approve, subagent tree), or once they answered; the result carries the last ones. False if the
+     * call is unknown.
      */
-    setDetails(toolCallId: string, details: AskDetails | PlanDetails): boolean {
+    setDetails(toolCallId: string, details: AskDetails | PlanDetails | import('@shared/capabilities').SubagentDetails): boolean {
         const tool = this.tools.get(toolCallId)
         const call = tool?.calls[0]
         if (!tool || !call || tool.done)
@@ -402,6 +408,19 @@ export class AcpTranscript {
 
     snapshot(): SessionItem[] {
         return this.messages.map((m, i) => ({ entryId: `${this.prefix}${i}`, message: m.message, endedAt: m.endedAt }))
+    }
+
+    /** Remove all messages after position `keep` (exclusive). Used by rewind. */
+    truncate(keep: number) {
+        if (keep < 0 || keep >= this.messages.length)
+            return
+        this.messages.splice(keep)
+        this.open = null
+        this.openBlock = -1
+        this.tools.clear()
+        this.userOpen = false
+        this.deferred = null
+        this.promptStart = Math.min(this.promptStart, this.messages.length)
     }
 
     /** The user's prompt, sent by this client (ACP does not echo it live). */
@@ -643,18 +662,22 @@ export class AcpTranscript {
 
     /** The capability view's result details: todo items, an ask's answers, a plan's outcome. */
     private resultDetails(tool: ToolState, call: ToolCall, output: string): unknown {
-        if (call.name === 'todo')
+        const piName = this.overrideToolName[call.name] ?? call.name
+        if (piName === 'todo')
             return { kind: 'todo', items: call.arguments.items }
-        const live = tool.details as AskDetails | PlanDetails | undefined
-        if (call.name === 'ask' && tool.xai) {
+        const live = tool.details as AskDetails | PlanDetails | import('@shared/capabilities').SubagentDetails | undefined
+        if (piName === 'ask') {
             const questions: AskQuestion[] = call.arguments.questions ?? []
-            return live && live.status !== 'pending' ? live : askDetailsOf(questions, output)
+            return live && live.kind === 'ask' && live.status !== 'pending' ? live : (tool.xai ? askDetailsOf(questions, output) : undefined)
         }
-        if (call.name === 'propose_plan' && tool.xai) {
+        if (piName === 'propose_plan') {
             const derived = planDetailsOf(tool.rawOutput, output)
             const plan = live?.kind === 'plan' ? live : undefined
             // The approved plan comes back in the result; the one asked about stays for the others.
-            return plan && plan.status !== 'pending' ? { ...plan, plan: derived.plan || plan.plan } : derived
+            return plan && plan.status !== 'pending' ? { ...plan, plan: derived.plan || plan.plan } : (tool.xai ? derived : undefined)
+        }
+        if (piName === 'subagent') {
+            return live?.kind === 'subagent' ? live : undefined
         }
         return undefined
     }

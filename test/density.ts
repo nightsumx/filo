@@ -13,6 +13,7 @@ import { existsSync } from 'node:fs'
 import { mkdir, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import process from 'node:process'
+import { BACKGROUND_ENV } from './app'
 import { findPi, startMockLlm, startPi } from './harness'
 
 const ROOT = path.resolve(import.meta.dirname, '..')
@@ -261,7 +262,7 @@ async function measure(agentDir: string, userData: string): Promise<Metrics> {
     const electron = createRequire(import.meta.url)('electron') as string
     const app = spawn(electron, ['.', `--remote-debugging-port=${PORT}`], {
         cwd: ROOT,
-        env: { ...process.env, PI_GUI_USER_DATA: userData, PI_CODING_AGENT_DIR: agentDir },
+        env: { ...process.env, ...BACKGROUND_ENV, PI_GUI_USER_DATA: userData, PI_CODING_AGENT_DIR: agentDir },
         stdio: 'ignore',
     })
     try {

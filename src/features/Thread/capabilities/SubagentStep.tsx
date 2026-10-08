@@ -3,13 +3,15 @@
 // talk to the child through /gui-subagent-steer and /gui-subagent-cancel.
 import type { SubagentDetails } from '@shared/capabilities'
 import type { ToolCall } from '@shared/pi'
-import type { TimelineMessage, ToolExecState, ToolResultView } from '@/lib/timeline'
+import type { ToolResultView } from '@/lib/timeline'
 import { Markdown } from '@/components/Markdown'
 import { flatFieldClass } from '@/components/ui/form'
-import { buildTurns, groupSteps } from '@/lib/timeline'
+import { childTurns } from '@/lib/subagents'
+import { groupSteps } from '@/lib/timeline'
 import { useT } from '@/lib/transcriptText'
 import { cn, formatCost, formatCount } from '@/lib/utils'
 import { observer } from 'mobx-react-lite'
+import { Maximize2 } from 'lucide-react'
 import { useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { StepView } from '../StepView'
 import { useThread } from '../ThreadContext'
@@ -18,19 +20,9 @@ import { useViewState } from '../viewState'
 import { tr } from '@/lib/i18n'
 import type { Localized } from '@shared/i18n'
 
-/** The child's transcript as parent-style turns; the first prompt is the task, shown separately. */
-function useChildTurns(details: SubagentDetails, running: boolean) {
-    return useMemo(() => {
-        const messages: TimelineMessage[] = details.messages.map((message, i) => ({ key: `sub:${i}`, message }))
-        const tools = new Map<string, ToolExecState>(Object.entries(details.tools ?? {}).map(([id, s]) => [id, { running: true, startedAt: s.startedAt, partial: s.partial as ToolResultView | undefined }]))
-        if (details.streaming)
-            messages.push({ key: 'sub:streaming', message: { ...details.streaming, stopReason: 'pending' } })
-        return buildTurns(messages, { tools, running })
-    }, [details, running])
-}
-
+/** The child's transcript, compact: the first prompt is the task, shown separately. */
 export const Transcript = observer(function Transcript({ details, running }: { details: SubagentDetails, running: boolean }) {
-    const turns = useChildTurns(details, running)
+    const turns = useMemo(() => childTurns(details, running), [details, running])
     const scrollRef = useRef<HTMLDivElement>(null)
     const stick = useRef(true)
     // Follow the child's output like the main transcript, unless the user scrolled up.
@@ -123,6 +115,7 @@ const STATUS: Record<SubagentDetails['status'], Localized> = {
 
 export const SubagentStep = observer(({ call, result, running }: { call: ToolCall, result?: ToolResultView, running: boolean }) => {
     const t = useT()
+    const thread = useThread()
     const details = result?.details as SubagentDetails | undefined
     const live = running && details?.kind === 'subagent' && details.status === 'running'
     const title = details?.title ?? (typeof call.arguments?.title === 'string' ? call.arguments.title : '')
@@ -148,12 +141,25 @@ export const SubagentStep = observer(({ call, result, running }: { call: ToolCal
 
     return (
         <Gutter mark={interrupted || details?.status === 'cancelled' ? <span className="text-gray-400">⎿</span> : <StatusMark status={status} />}>
-            <button type="button" onClick={() => setOpen(v => !v)} aria-expanded={open} className="group/res flex h-6 w-full min-w-0 items-center gap-1.5 text-left text-[12.5px]">
-                <span className="shrink-0 font-mono font-semibold text-gray-900">Subagent</span>
-                <span className="min-w-0 truncate text-gray-900">{title}</span>
-                <span className="shrink-0 tabular-nums text-gray-500">{meta}</span>
-                <span className="shrink-0 text-gray-400 group-hover/res:text-gray-800">{open ? t.collapse : t.expand}</span>
-            </button>
+            <div className="group/sub flex h-6 min-w-0 items-center gap-1">
+                <button type="button" onClick={() => setOpen(v => !v)} aria-expanded={open} className="group/res flex h-6 min-w-0 items-center gap-1.5 text-left text-[12.5px]">
+                    <span className="shrink-0 font-mono font-semibold text-gray-900">Subagent</span>
+                    <span className="min-w-0 truncate text-gray-900">{title}</span>
+                    <span className="shrink-0 tabular-nums text-gray-500">{meta}</span>
+                    <span className="shrink-0 text-gray-400 group-hover/res:text-gray-800">{open ? t.collapse : t.expand}</span>
+                </button>
+                {thread && (
+                    <button
+                        type="button"
+                        onClick={() => thread.showSubagent(call.id)}
+                        aria-label={tr(`打开子 Agent「${title}」`, `Open subagent “${title}”`)}
+                        title={tr('像线程一样打开', 'Open like a thread')}
+                        className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-gray-400 opacity-0 transition-opacity hover:bg-ide-hover hover:text-gray-800 focus-visible:opacity-100 group-hover/sub:opacity-100"
+                    >
+                        <Maximize2 size={12} />
+                    </button>
+                )}
+            </div>
             {details?.error && <div className="text-[12.5px] leading-5 text-red-600 [overflow-wrap:anywhere]">{details.error}</div>}
             {open && (
                 <div className="mt-0.5 mb-1 border-l-2 border-ide-line pl-3">

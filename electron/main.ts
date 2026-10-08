@@ -14,6 +14,7 @@ import { DEFAULT_THEME, IPC, THEME_PREFS } from '@shared/ipc'
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, net, Notification, shell } from 'electron'
 import { AcpService } from './acp/service'
 import { AgentManager } from './agents'
+import { BACKGROUND, reveal } from './background'
 import { applySave, savedWindows, StateFile } from './appState'
 import { repoEdits } from './edits'
 import { gitBranch, gitCommit, gitDiscard, gitFileBytes, gitFileDiff, gitFileEntries, gitFileThumbs, gitStatus } from './git'
@@ -26,8 +27,8 @@ import { Windows } from './windows'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
-// productName "Pi" would move userData to ~/Library/Application Support/Pi; keep the existing
-// pi-gui folder so saved projects and tabs survive the rename. PI_GUI_USER_DATA isolates test runs.
+// productName "Filo" would move userData to ~/Library/Application Support/Filo; keep the existing
+// pi-gui folder so saved projects and tabs survive the renames (pi-gui → Pi → Filo). PI_GUI_USER_DATA isolates test runs.
 app.setPath('userData', process.env.PI_GUI_USER_DATA || path.join(app.getPath('appData'), 'pi-gui'))
 app.setName(APP_INFO.name)
 const DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL
@@ -141,7 +142,8 @@ const notices = new Set<Notification>()
 
 function showNotice(notice: unknown) {
     const n = notice as Record<string, unknown> | null
-    if (!n || typeof n.title !== 'string' || typeof n.body !== 'string' || typeof n.key !== 'string' || !Notification.isSupported())
+    // A background (scripted) app never looks focused, so it would notify about every finished run.
+    if (BACKGROUND || !n || typeof n.title !== 'string' || typeof n.body !== 'string' || typeof n.key !== 'string' || !Notification.isSupported())
         return
     const key = n.key.slice(0, 1000)
     const shown = new Notification({ title: n.title.slice(0, 200), body: n.body.slice(0, 500) })
@@ -209,9 +211,10 @@ function createWindow(bounds: Partial<WindowBounds>): BrowserWindow {
             contextIsolation: true,
             nodeIntegration: false,
             sandbox: true,
+            backgroundThrottling: !BACKGROUND,
         },
     })
-    win.once('ready-to-show', () => win.show())
+    win.once('ready-to-show', () => reveal(win, false))
 
     // Links in agent output open in the system browser; the app window never navigates away.
     win.webContents.setWindowOpenHandler(({ url }) => {
@@ -503,7 +506,7 @@ app.whenReady().then(async () => {
             w.setBackgroundColor(windowBackground())
     })
     // Packaged builds take the icon from build/icon.icns; in dev the Dock would show Electron's.
-    if (process.platform === 'darwin' && !app.isPackaged)
+    if (process.platform === 'darwin' && !app.isPackaged && !BACKGROUND)
         app.dock?.setIcon(path.join(__dirname, '../../build/icon.png'))
     applyLang(state.lang)
     registerIpc()

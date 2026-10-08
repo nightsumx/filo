@@ -1,0 +1,50 @@
+[
+ {
+  "prompt": "Flat minimal macOS app icon artwork, full-bleed square, solid deep navy background (#131a28) edge to edge, no border, no rounded corners, no frame. Pure flat vector style: no gradients, no shadows, no glow, no 3D, no texture, no text, no letters. The line must be bold and thick, about 5% of the canvas width, with round ends, so it stays readable when the icon is shown at 32 pixels. Generous negative space; the motif fills about 60% of the canvas, centered. One continuous off-white (#f5f3ee) thread forming a loose, graceful knot with just two or three soft loops, both free ends trailing out at the bottom.",
+  "out": "v2.png",
+  "size": "1024x1024",
+  "quality": "high"
+ },
+ {
+  "prompt": "Flat minimal macOS app icon artwork, full-bleed square, solid deep navy background (#131a28) edge to edge, no border, no rounded corners, no frame. Pure flat vector style: no gradients, no shadows, no glow, no 3D, no texture, no text, no letters. The line must be bold and thick, about 5% of the canvas width, with round ends, so it stays readable when the icon is shown at 32 pixels. Generous negative space; the motif fills about 60% of the canvas, centered. Two threads, one off-white (#f5f3ee) and one soft blue (#3b82f6), braided together in a gentle S-curve, crossing over and under each other three times, ends loose.",
+  "out": "v3.png",
+  "size": "1024x1024",
+  "quality": "high"
+ },
+ {
+  "prompt": "Flat minimal macOS app icon artwork, full-bleed square, solid deep navy background (#131a28) edge to edge, no border, no rounded corners, no frame. Pure flat vector style: no gradients, no shadows, no glow, no 3D, no texture, no text, no letters. The line must be bold and thick, about 5% of the canvas width, with round ends, so it stays readable when the icon is shown at 32 pixels. Generous negative space; the motif fills about 60% of the canvas, centered. A small loose ball of yarn made of three or four wide, calm off-white (#f5f3ee) loops wrapped around each other, with a single blue (#3b82f6) thread end curling out of it to the lower right.",
+  "out": "v4.png",
+  "size": "1024x1024",
+  "quality": "high"
+ },
+ {
+  "prompt": "Flat minimal macOS app icon artwork, full-bleed square, solid deep navy background (#131a28) edge to edge, no border, no rounded corners, no frame. Pure flat vector style: no gradients, no shadows, no glow, no 3D, no texture, no text, no letters. The line must be bold and thick, about 5% of the canvas width, with round ends, so it stays readable when the icon is shown at 32 pixels. Generous negative space; the motif fills about 60% of the canvas, centered. Three parallel threads (off-white, light gray, soft blue #3b82f6) flowing from the left, weaving through each other in the middle like a simple braid, then fanning out to the right. Elegant, rhythmic.",
+  "out": "v5.png",
+  "size": "1024x1024",
+  "quality": "high"
+ },
+ {
+  "prompt": "Flat minimal macOS app icon artwork, full-bleed square, solid deep navy background (#131a28) edge to edge, no border, no rounded corners, no frame. Pure flat vector style: no gradients, no shadows, no glow, no 3D, no texture, no text, no letters. The line must be bold and thick, about 5% of the canvas width, with round ends, so it stays readable when the icon is shown at 32 pixels. Generous negative space; the motif fills about 60% of the canvas, centered. One off-white (#f5f3ee) thread tied into an elegant open infinity-like figure-eight knot, airy and balanced, one end crossing with a short blue (#3b82f6) thread.",
+  "out": "v6.png",
+  "size": "1024x1024",
+  "quality": "high"
+ },
+ {
+  "prompt": "Flat minimal macOS app icon artwork, full-bleed square, solid deep navy background (#131a28) edge to edge, no border, no rounded corners, no frame. Pure flat vector style: no gradients, no shadows, no glow, no 3D, no texture, no text, no letters. The line must be bold and thick, about 5% of the canvas width, with round ends, so it stays readable when the icon is shown at 32 pixels. Generous negative space; the motif fills about 60% of the canvas, centered. A single off-white (#f5f3ee) thread drawn in one calligraphic stroke that loops once into a soft open spiral and then flows away, like a ribbon caught mid-air. Minimal and poised.",
+  "out": "v7.png",
+  "size": "1024x1024",
+  "quality": "high"
+ },
+ {
+  "prompt": "Flat minimal macOS app icon artwork, full-bleed square, solid deep navy background (#131a28) edge to edge, no border, no rounded corners, no frame. Pure flat vector style: no gradients, no shadows, no glow, no 3D, no texture, no text, no letters. The line must be bold and thick, about 5% of the canvas width, with round ends, so it stays readable when the icon is shown at 32 pixels. Generous negative space; the motif fills about 60% of the canvas, centered. A loose, airy tangle of one thick off-white (#f5f3ee) thread with exactly three overlapping round loops of different sizes, over-under crossings clearly visible as small gaps where the line passes beneath, one loop in soft blue (#3b82f6).",
+  "out": "v8.png",
+  "size": "1024x1024",
+  "quality": "high"
+ },
+ {
+  "prompt": "Flat minimal macOS app icon artwork, full-bleed square, solid deep navy background (#131a28) edge to edge, no border, no rounded corners, no frame. Pure flat vector style: no gradients, no shadows, no glow, no 3D, no texture, no text, no letters. The line must be bold and thick, about 5% of the canvas width, with round ends, so it stays readable when the icon is shown at 32 pixels. Generous negative space; the motif fills about 60% of the canvas, centered. Kumihimo-inspired: four threads in off-white, warm sand, soft blue (#3b82f6) and pale gray converging from the top and twisting together into a single short braided cord that ends with a small loose tassel at the bottom.",
+  "out": "v9.png",
+  "size": "1024x1024",
+  "quality": "high"
+ }
+]

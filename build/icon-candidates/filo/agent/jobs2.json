@@ -1,0 +1,44 @@
+[
+ {
+  "prompt": "Solid deep navy background (#131a28), lines warm off-white (#f5f3ee), single accent soft blue (#3b82f6). Flat vector app icon artwork, full-bleed square, solid background edge to edge, no rounded corners, no frame, no border. Bold, perfectly even, rounded monoline stroke: stroke thickness about 62 pixels on the 1024 canvas (6% of width), round caps, round joins, every line the same weight. Completely flat: no gradients, no shadows, no glow, no 3D, no texture. No text, no letters. Motif centered, filling about 62% of the canvas, generous empty margin. Legible at 32 pixels. Redraw this exact concept much bolder and simpler: a large off-white '>' chevron, then a soft blue underscore cursor whose right end continues as one smooth blue line curving down and back in a single generous rounded hook (no tight tiny loop, no self-crossing), as if the cursor is pulling a thread. Make the '>' and the cursor bigger so the whole mark fills about 62% of the canvas and is optically centered.",
+  "out": "r1.png",
+  "size": "1024x1024",
+  "quality": "high",
+  "ref": "c1.png"
+ },
+ {
+  "prompt": "Solid deep navy background (#131a28), lines warm off-white (#f5f3ee), single accent soft blue (#3b82f6). Flat vector app icon artwork, full-bleed square, solid background edge to edge, no rounded corners, no frame, no border. Bold, perfectly even, rounded monoline stroke: stroke thickness about 62 pixels on the 1024 canvas (6% of width), round caps, round joins, every line the same weight. Completely flat: no gradients, no shadows, no glow, no 3D, no texture. No text, no letters. Motif centered, filling about 62% of the canvas, generous empty margin. Legible at 32 pixels. Redraw this concept as ONE continuous off-white stroke: a bold circle ring that is open at the right; the upper end of the ring curls inward and becomes the upper arm of a large '>' chevron inside the circle, so circle and chevron are drawn with a single unbroken line. Below the chevron tip, inside the circle, a bold soft blue underscore cursor. Clean, symmetric, heavy weight, like a premium developer tool logo.",
+  "out": "r2.png",
+  "size": "1024x1024",
+  "quality": "high",
+  "ref": "c8.png"
+ },
+ {
+  "prompt": "Solid deep navy background (#131a28), lines warm off-white (#f5f3ee), single accent soft blue (#3b82f6). Flat vector app icon artwork, full-bleed square, solid background edge to edge, no rounded corners, no frame, no border. Bold, perfectly even, rounded monoline stroke: stroke thickness about 62 pixels on the 1024 canvas (6% of width), round caps, round joins, every line the same weight. Completely flat: no gradients, no shadows, no glow, no 3D, no texture. No text, no letters. Motif centered, filling about 62% of the canvas, generous empty margin. Legible at 32 pixels. Redraw this concept much bolder and simpler, with only three strokes: one thick off-white line rises from the lower left and splits into two parallel horizontal branches going right; the upper branch ends in an off-white '>' chevron, the lower branch ends in a soft blue '>' chevron. No underscores. Big, balanced, centered, filling about 62% of the canvas. Reads as one task forking into two parallel agents.",
+  "out": "r3.png",
+  "size": "1024x1024",
+  "quality": "high",
+  "ref": "c6.png"
+ },
+ {
+  "prompt": "Solid deep navy background (#131a28), lines warm off-white (#f5f3ee), single accent soft blue (#3b82f6). Flat vector app icon artwork, full-bleed square, solid background edge to edge, no rounded corners, no frame, no border. Bold, perfectly even, rounded monoline stroke: stroke thickness about 62 pixels on the 1024 canvas (6% of width), round caps, round joins, every line the same weight. Completely flat: no gradients, no shadows, no glow, no 3D, no texture. No text, no letters. Motif centered, filling about 62% of the canvas, generous empty margin. Legible at 32 pixels. New variation: a bold off-white circle ring drawn as one continuous line that almost closes; its final segment at the lower right turns soft blue, like the tail end of a thread (the blue part is about one eighth of the ring). Inside the ring, a large bold off-white '>' chevron and, next to it, an off-white underscore cursor, together a terminal prompt. Heavy, uniform weight.",
+  "out": "r4.png",
+  "size": "1024x1024",
+  "quality": "high",
+  "ref": "c8.png"
+ },
+ {
+  "prompt": "Solid warm off-white background (#f5f3ee) edge to edge, lines deep navy (#131a28), single accent soft blue (#3b82f6). Flat vector app icon artwork, full-bleed square, solid background edge to edge, no rounded corners, no frame, no border. Bold, perfectly even, rounded monoline stroke: stroke thickness about 62 pixels on the 1024 canvas (6% of width), round caps, round joins, every line the same weight. Completely flat: no gradients, no shadows, no glow, no 3D, no texture. No text, no letters. Motif centered, filling about 62% of the canvas, generous empty margin. Legible at 32 pixels. Same composition as this image but with inverted colors: a bold navy circle ring open at the right, a large bold navy '>' chevron inside pointing at the gap, and a bold soft blue underscore cursor under the chevron tip. Thicker strokes than the reference.",
+  "out": "r5.png",
+  "size": "1024x1024",
+  "quality": "high",
+  "ref": "c8.png"
+ },
+ {
+  "prompt": "Solid deep navy background (#131a28), lines warm off-white (#f5f3ee), single accent soft blue (#3b82f6). Flat vector app icon artwork, full-bleed square, solid background edge to edge, no rounded corners, no frame, no border. Bold, perfectly even, rounded monoline stroke: stroke thickness about 62 pixels on the 1024 canvas (6% of width), round caps, round joins, every line the same weight. Completely flat: no gradients, no shadows, no glow, no 3D, no texture. No text, no letters. Motif centered, filling about 62% of the canvas, generous empty margin. Legible at 32 pixels. Redraw this concept as one continuous stroke: a rounded play triangle outline pointing right, whose bottom-left corner continues as a single line along the bottom, extending past the triangle to the right, and that extension is the underscore cursor, drawn in soft blue. So the mark reads as a terminal prompt '>_' where the '>' is a run/play triangle and the cursor is the thread coming out of it. Heavy, uniform weight, centered.",
+  "out": "r6.png",
+  "size": "1024x1024",
+  "quality": "high",
+  "ref": "c4.png"
+ }
+]

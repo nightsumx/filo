@@ -4,7 +4,8 @@
 
 import type { AcpAgentCaps, AcpAgentId, AcpAgentSpec, AgentAvailability } from '@shared/agents'
 import type { SessionItem, SessionSnapshot, SessionSummary } from '@shared/ipc'
-import type { AcpAgentCallbacks, AcpLaunch } from './agent'
+import type { AgentAdapter, AgentAdapterCallbacks } from '../acp/adapter'
+import type { AcpLaunch } from './agent'
 import { ACP_AGENTS, acpAgent, acpSessionKey, parseAcpSessionKey } from '@shared/agents'
 import { constants, readFileSync } from 'node:fs'
 import { access, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
@@ -145,7 +146,7 @@ export async function resolveLaunch(spec: AcpAgentSpec, appRoot?: string): Promi
 export class AcpService {
     private records = new Map<string, AcpSessionRecord>()
     /** Agents holding a session, by session key: their transcript is the freshest read. */
-    private live = new Map<string, AcpAgent>()
+    private live = new Map<string, AgentAdapter>()
     private replays = new Map<string, { updatedAt: number, snapshot: Promise<SessionSnapshot> }>()
     private saving: Promise<void> = Promise.resolve()
     /** Sessions the user removed from the app; the agent still lists them. */
@@ -233,14 +234,20 @@ export class AcpService {
     }
 
     /** Starts an agent process for a thread; `sessionKey` resumes that session. */
-    async start(agent: AcpAgentId, cwd: string, sessionKey: string | undefined, callbacks: AcpAgentCallbacks): Promise<AcpAgent> {
+    async start(agent: AcpAgentId, cwd: string, sessionKey: string | undefined, callbacks: AgentAdapterCallbacks): Promise<AgentAdapter> {
         const spec = acpAgent(agent)
         if (!spec)
             throw new Error(`Unknown agent: ${agent}`)
         const resume = parseAcpSessionKey(sessionKey)
         const record = sessionKey ? this.records.get(sessionKey) : undefined
         const launch = await this.launchOf(spec)
-        const instance = new AcpAgent(spec, launch, { cwd, sessionId: resume?.sessionId, replayTime: record?.updatedAt }, {
+
+        // Factory: pick adapter class by protocol
+        const AdapterClass = spec.protocol === 'codex-app-server' ? (await import('../native/codex')).CodexAgent
+            : spec.protocol === 'claude-stream' ? (await import('../native/claude')).ClaudeAgent
+            : AcpAgent
+
+        const instance = new AdapterClass(spec, launch, { cwd, sessionId: resume?.sessionId, replayTime: record?.updatedAt }, {
             onEvent: (id, event) => {
                 callbacks.onEvent(id, event)
                 if (event.type === 'message_end')
@@ -267,7 +274,7 @@ export class AcpService {
         return instance
     }
 
-    private note(agent: AcpAgent, change: { prompt?: string, title?: string, name?: string }) {
+    private note(agent: AgentAdapter, change: { prompt?: string, title?: string, name?: string }) {
         const now = Date.now()
         const existing = this.records.get(agent.key)
         // A session that never got a prompt is not worth listing (pi writes no file for it either).
@@ -478,7 +485,7 @@ export class AcpService {
     }
 
     /** A fork the agent just made: listed like the session it came from. */
-    private noteFork(from: AcpAgent, sessionId: string): string {
+    private noteFork(from: AgentAdapter, sessionId: string): string {
         const key = acpSessionKey(from.spec.id, sessionId)
         const source = this.records.get(from.key)
         const now = Date.now()

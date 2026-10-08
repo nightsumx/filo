@@ -46,7 +46,8 @@ const VERBS: Record<string, Localized> = {
 
 const thinking = () => tr('思考中', 'Thinking')
 
-function describeStep(step: Step | undefined, cwd?: string): string {
+/** One step as a present-tense action: "运行 npm test", "回复中"; no step means thinking. */
+export function describeStep(step: Step | undefined, cwd?: string): string {
     if (!step)
         return thinking()
     if (step.kind === 'tool') {
@@ -93,6 +94,8 @@ export function threadActivity(input: ActivityInput): ThreadActivity {
         return { phase: 'waiting', text: input.waitingFor ? `${label} · ${firstLine(input.waitingFor)}` : label, progress }
     }
     if (input.running) {
+        // Parallel subagents each get a row in the tree; the thread's own line just counts them.
+        const parallel = input.steps.filter(s => s.kind === 'tool' && s.running && s.call.name === 'subagent').length
         let text: string
         if (input.starting)
             text = tr('正在启动 pi', 'Starting pi')
@@ -100,6 +103,8 @@ export function threadActivity(input: ActivityInput): ThreadActivity {
             text = tr('正在压缩上下文', 'Compacting context')
         else if (input.retry)
             text = `${tr('重试中', 'Retrying')} ${input.retry.attempt}/${input.retry.maxAttempts}`
+        else if (parallel > 1)
+            text = tr(`${parallel} 个子 Agent 运行中`, `${parallel} subagents running`)
         else
             text = describeStep(input.steps[input.steps.length - 1], input.cwd)
         return { phase: 'running', text, progress }

@@ -1,0 +1,51 @@
+[
+ {
+  "prompt": "Minimal macOS app icon artwork, full-bleed square canvas filled edge to edge with pure solid black (#000000). A single pure white (#ffffff) flat shape in the center, occupying about 50% of the canvas. Exactly two colors: black and white, nothing else. Flat vector, no gradients, no shadows, no glow, no texture, no outlines, no text, no letters, no border, no rounded-square frame, no extra objects, no sparkles, no robot, no chat bubble. Extremely simple, Apple-level restraint, like a Dieter Rams or Apple SF Symbol glyph. Subject: a terminal block cursor (a tall rounded rectangle) that has come alive: two small vertical oval eyes cut out of it in black. Calm, friendly, intelligent.",
+  "out": "a1-cursor.png",
+  "size": "1024x1024",
+  "quality": "high"
+ },
+ {
+  "prompt": "Minimal macOS app icon artwork, full-bleed square canvas filled edge to edge with pure solid black (#000000). A single pure white (#ffffff) flat shape in the center, occupying about 50% of the canvas. Exactly two colors: black and white, nothing else. Flat vector, no gradients, no shadows, no glow, no texture, no outlines, no text, no letters, no border, no rounded-square frame, no extra objects, no sparkles, no robot, no chat bubble. Extremely simple, Apple-level restraint, like a Dieter Rams or Apple SF Symbol glyph. Subject: two tall rounded-rectangle terminal cursors standing side by side, each with two tiny black oval eyes cut out, one slightly taller than the other, as if two agents working together.",
+  "out": "a2-pair.png",
+  "size": "1024x1024",
+  "quality": "high"
+ },
+ {
+  "prompt": "Minimal macOS app icon artwork, full-bleed square canvas filled edge to edge with pure solid black (#000000). A single pure white (#ffffff) flat shape in the center, occupying about 50% of the canvas. Exactly two colors: black and white, nothing else. Flat vector, no gradients, no shadows, no glow, no texture, no outlines, no text, no letters, no border, no rounded-square frame, no extra objects, no sparkles, no robot, no chat bubble. Extremely simple, Apple-level restraint, like a Dieter Rams or Apple SF Symbol glyph. Subject: a soft rounded little creature peeking up from the bottom edge of the canvas, only its top half visible, with two small black oval eyes. Curious, intelligent.",
+  "out": "a3-peek.png",
+  "size": "1024x1024",
+  "quality": "high"
+ },
+ {
+  "prompt": "Minimal macOS app icon artwork, full-bleed square canvas filled edge to edge with pure solid black (#000000). A single pure white (#ffffff) flat shape in the center, occupying about 50% of the canvas. Exactly two colors: black and white, nothing else. Flat vector, no gradients, no shadows, no glow, no texture, no outlines, no text, no letters, no border, no rounded-square frame, no extra objects, no sparkles, no robot, no chat bubble. Extremely simple, Apple-level restraint, like a Dieter Rams or Apple SF Symbol glyph. Subject: just two large white vertical oval eyes floating in the darkness, slightly glancing to the right as if thinking. Nothing else.",
+  "out": "a4-eyes.png",
+  "size": "1024x1024",
+  "quality": "high"
+ },
+ {
+  "prompt": "Minimal macOS app icon artwork, full-bleed square canvas filled edge to edge with pure solid black (#000000). A single pure white (#ffffff) flat shape in the center, occupying about 50% of the canvas. Exactly two colors: black and white, nothing else. Flat vector, no gradients, no shadows, no glow, no texture, no outlines, no text, no letters, no border, no rounded-square frame, no extra objects, no sparkles, no robot, no chat bubble. Extremely simple, Apple-level restraint, like a Dieter Rams or Apple SF Symbol glyph. Subject: a small gumdrop-shaped character (a rounded dome with a flat bottom), two small black oval eyes, no mouth, no limbs. Quietly clever.",
+  "out": "a5-gumdrop.png",
+  "size": "1024x1024",
+  "quality": "high"
+ },
+ {
+  "prompt": "Minimal macOS app icon artwork, full-bleed square canvas filled edge to edge with pure solid black (#000000). A single pure white (#ffffff) flat shape in the center, occupying about 50% of the canvas. Exactly two colors: black and white, nothing else. Flat vector, no gradients, no shadows, no glow, no texture, no outlines, no text, no letters, no border, no rounded-square frame, no extra objects, no sparkles, no robot, no chat bubble. Extremely simple, Apple-level restraint, like a Dieter Rams or Apple SF Symbol glyph. Subject: a tiny clever spirit built from one simple geometric form, like a rounded triangle or a teardrop, with two small black eyes cut out. Not a robot, not a ghost, no limbs.",
+  "out": "a6-sprite.png",
+  "size": "1024x1024",
+  "quality": "high"
+ },
+ {
+  "prompt": "Minimal macOS app icon artwork, full-bleed square canvas filled edge to edge with pure solid black (#000000). A single pure white (#ffffff) flat shape in the center, occupying about 50% of the canvas. Exactly two colors: black and white, nothing else. Flat vector, no gradients, no shadows, no glow, no texture, no outlines, no text, no letters, no border, no rounded-square frame, no extra objects, no sparkles, no robot, no chat bubble. Extremely simple, Apple-level restraint, like a Dieter Rams or Apple SF Symbol glyph. Subject: a terminal block cursor (a tall rounded rectangle) with two small black eyes cut out, one eye open as an oval and the other as a short horizontal line, like a blinking cursor that winked.",
+  "out": "a7-blink.png",
+  "size": "1024x1024",
+  "quality": "high"
+ },
+ {
+  "prompt": "Refine this into a polished minimal macOS app icon artwork. Keep the exact concept: a white terminal block cursor with two black oval eyes on pure black, full-bleed square canvas. Exactly two colors, pure black and pure white. Perfect geometry, balanced proportions, optically centered, subtle character and personality in the eye shape and placement. Flat vector, no gradients, no shadows, no text, no border, no rounded-square frame, nothing else added.",
+  "out": "a8-refine.png",
+  "ref": "ref-n2.png",
+  "size": "1024x1024",
+  "quality": "high"
+ }
+]

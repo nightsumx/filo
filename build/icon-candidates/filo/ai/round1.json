@@ -1,0 +1,50 @@
+[
+ {
+  "prompt": "Flat vector app icon artwork, square, 1024x1024. The ENTIRE canvas is a single solid flat navy color #131a28, filling edge to edge to all four corners; do NOT draw a rounded-square tile, card, frame, border or vignette. Pure flat 2D vector: no 3D, no bevel, no shadows, no glow, no gradients, no texture, no grain, no sparkles, no text. Minimal, bold, geometric, Swiss-modernist logo quality, like a mark by Pentagram. Strokes are very thick: line weight about 8% of canvas width, rounded caps, perfectly uniform width. Centered composition, mark occupies about 60% of the canvas. The mark: a lowercase letter 'f' drawn by ONE continuous thick off-white (#f5f3ee) thread line. The thread starts at the bottom, rises as the vertical stem, curls over at the top into a hook, then loops back down in one soft open loop and crosses the stem horizontally to form the crossbar of the f, ending with a rounded cap. Reads clearly as the letter f and as a single thread. Only two colors: navy and off-white.",
+  "out": "r1-f.png",
+  "size": "1024x1024",
+  "quality": "high"
+ },
+ {
+  "prompt": "Flat vector app icon artwork, square, 1024x1024. The ENTIRE canvas is a single solid flat navy color #131a28, filling edge to edge to all four corners; do NOT draw a rounded-square tile, card, frame, border or vignette. Pure flat 2D vector: no 3D, no bevel, no shadows, no glow, no gradients, no texture, no grain, no sparkles, no text. Minimal, bold, geometric, Swiss-modernist logo quality, like a mark by Pentagram. Strokes are very thick: line weight about 8% of canvas width, rounded caps, perfectly uniform width. Centered composition, mark occupies about 60% of the canvas. The mark: a bold lowercase letter 'f' made of two thick threads. The stem with its curved top hook is one continuous off-white (#f5f3ee) thread. The crossbar is a second thread in soft blue (#3b82f6) that passes horizontally through the stem, weaving: it goes over the stem, with a small clean gap where they cross. Rounded caps. Only navy, off-white and one blue.",
+  "out": "r1-fx.png",
+  "size": "1024x1024",
+  "quality": "high"
+ },
+ {
+  "prompt": "Flat vector app icon artwork, square, 1024x1024. The ENTIRE canvas is a single solid flat navy color #131a28, filling edge to edge to all four corners; do NOT draw a rounded-square tile, card, frame, border or vignette. Pure flat 2D vector: no 3D, no bevel, no shadows, no glow, no gradients, no texture, no grain, no sparkles, no text. Minimal, bold, geometric, Swiss-modernist logo quality, like a mark by Pentagram. Strokes are very thick: line weight about 8% of canvas width, rounded caps, perfectly uniform width. Centered composition, mark occupies about 60% of the canvas. The mark: a simple plain-weave of thick rounded threads: two horizontal off-white (#f5f3ee) bands and two vertical soft blue (#3b82f6) bands, interlaced over-under like a 2x2 woven fabric swatch, with small navy gaps showing which thread is on top at each crossing. Thread ends are rounded. Very bold, very simple, like a monogram tile.",
+  "out": "r1-weave.png",
+  "size": "1024x1024",
+  "quality": "high"
+ },
+ {
+  "prompt": "Flat vector app icon artwork, square, 1024x1024. The ENTIRE canvas is a single solid flat navy color #131a28, filling edge to edge to all four corners; do NOT draw a rounded-square tile, card, frame, border or vignette. Pure flat 2D vector: no 3D, no bevel, no shadows, no glow, no gradients, no texture, no grain, no sparkles, no text. Minimal, bold, geometric, Swiss-modernist logo quality, like a mark by Pentagram. Strokes are very thick: line weight about 8% of canvas width, rounded caps, perfectly uniform width. Centered composition, mark occupies about 60% of the canvas. The mark: a weaving loom shuttle, drawn as a bold simple pointed-oval (boat/lens shape) in off-white (#f5f3ee), tilted about 20 degrees, moving to the right. A thick off-white thread trails out of its back end to the left in one smooth gentle S-curve, showing the shuttle is actively carrying the thread forward on its own. A small slot inside the shuttle in navy. Only navy and off-white, with an optional single soft blue (#3b82f6) accent on the shuttle's slot.",
+  "out": "r1-shuttle.png",
+  "size": "1024x1024",
+  "quality": "high"
+ },
+ {
+  "prompt": "Flat vector app icon artwork, square, 1024x1024. The ENTIRE canvas is a single solid flat navy color #131a28, filling edge to edge to all four corners; do NOT draw a rounded-square tile, card, frame, border or vignette. Pure flat 2D vector: no 3D, no bevel, no shadows, no glow, no gradients, no texture, no grain, no sparkles, no text. Minimal, bold, geometric, Swiss-modernist logo quality, like a mark by Pentagram. Strokes are very thick: line weight about 8% of canvas width, rounded caps, perfectly uniform width. Centered composition, mark occupies about 60% of the canvas. The mark: three thick parallel threads enter from the left side as horizontal lines (top off-white, middle soft blue #3b82f6, bottom off-white), then smoothly curve together and join into one single thick off-white thread that continues out to the right, like lanes merging into one. Rounded ends. Clean, symmetrical, readable.",
+  "out": "r1-merge.png",
+  "size": "1024x1024",
+  "quality": "high"
+ },
+ {
+  "prompt": "Flat vector app icon artwork, square, 1024x1024. The ENTIRE canvas is a single solid flat navy color #131a28, filling edge to edge to all four corners; do NOT draw a rounded-square tile, card, frame, border or vignette. Pure flat 2D vector: no 3D, no bevel, no shadows, no glow, no gradients, no texture, no grain, no sparkles, no text. Minimal, bold, geometric, Swiss-modernist logo quality, like a mark by Pentagram. Strokes are very thick: line weight about 8% of canvas width, rounded caps, perfectly uniform width. Centered composition, mark occupies about 60% of the canvas. The mark: the eye of a sewing needle as a large bold vertical rounded slot (a tall stadium/pill-shaped outline) in off-white (#f5f3ee), with a thick soft blue (#3b82f6) thread passing through it: the thread enters from the lower left, goes behind the right side of the slot and comes out in front, ending in a gentle curve. Clear over-under at the crossings. No needle body, just the eye and the thread.",
+  "out": "r1-eye.png",
+  "size": "1024x1024",
+  "quality": "high"
+ },
+ {
+  "prompt": "Flat vector app icon artwork, square, 1024x1024. The ENTIRE canvas is a single solid flat navy color #131a28, filling edge to edge to all four corners; do NOT draw a rounded-square tile, card, frame, border or vignette. Pure flat 2D vector: no 3D, no bevel, no shadows, no glow, no gradients, no texture, no grain, no sparkles, no text. Minimal, bold, geometric, Swiss-modernist logo quality, like a mark by Pentagram. Strokes are very thick: line weight about 8% of canvas width, rounded caps, perfectly uniform width. Centered composition, mark occupies about 60% of the canvas. The mark: a thick off-white (#f5f3ee) thread sweeps from the lower-left in one smooth confident curve and passes THROUGH a bold soft blue (#3b82f6) ring (a thick circle outline, like a thread guide eyelet on a loom) positioned at the upper right, going under the ring on one side and over on the other, then ends just beyond it. Two elements only: the thread and the ring.",
+  "out": "r1-ring.png",
+  "size": "1024x1024",
+  "quality": "high"
+ },
+ {
+  "prompt": "Flat vector app icon artwork, square, 1024x1024. The ENTIRE canvas is a single solid flat navy color #131a28, filling edge to edge to all four corners; do NOT draw a rounded-square tile, card, frame, border or vignette. Pure flat 2D vector: no 3D, no bevel, no shadows, no glow, no gradients, no texture, no grain, no sparkles, no text. Minimal, bold, geometric, Swiss-modernist logo quality, like a mark by Pentagram. Strokes are very thick: line weight about 8% of canvas width, rounded caps, perfectly uniform width. Centered composition, mark occupies about 60% of the canvas. The mark: a bold checkmark shape made from three thick off-white (#f5f3ee) running-stitch dashes (short rounded segments with clear navy gaps between them), like thread sewn through fabric along a check path. The final stitch on the right ends with the thread continuing up a little in soft blue (#3b82f6). Only three or four dashes total, very bold and legible.",
+  "out": "r1-stitch.png",
+  "size": "1024x1024",
+  "quality": "high"
+ }
+]

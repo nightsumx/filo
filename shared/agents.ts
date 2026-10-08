@@ -9,6 +9,11 @@ export type AcpAgentId = 'codex' | 'claude' | 'grok' | 'opencode' | 'gemini' | '
 export interface AcpAgentSpec {
     id: AcpAgentId
     label: string
+    /**
+     * Protocol to use: 'acp' (default), 'codex-app-server', or 'claude-stream'. Native protocols
+     * bypass the ACP adapter for richer features.
+     */
+    protocol?: 'acp' | 'codex-app-server' | 'claude-stream'
     /** The ACP command on the login shell's PATH (or in `dirs`), with its arguments. */
     bin: string
     args?: string[]
@@ -45,8 +50,9 @@ export const ACP_AGENTS: readonly AcpAgentSpec[] = [
     {
         id: 'codex',
         label: 'Codex',
-        bin: 'codex-acp',
-        npm: '@agentclientprotocol/codex-acp@2.1.1',
+        protocol: 'codex-app-server',
+        bin: 'codex',
+        args: ['app-server'],
         cli: { bin: 'codex', env: 'CODEX_PATH' },
         inputIncludesCache: true,
         signIn: { zh: '在终端里运行 codex 完成登录', en: 'run codex in a terminal and sign in' },
@@ -206,7 +212,7 @@ export function agentFeatures(kind: AgentKind, caps?: AcpAgentCaps, commands: re
         // ACP agents compact with their own /compact command, when they have one.
         compaction: pi || commands.some(c => c.name === 'compact'),
         autoCompaction: pi,
-        fork: pi,
+        fork: pi || !!caps?.forkAt,
         forkSession: !pi && !!caps?.fork,
         images: pi || caps?.images !== false,
         piPickers: pi,
@@ -232,6 +238,16 @@ export interface AcpAgentCaps {
      * fork / delete / rename are `x.ai/session/…`, and it asks the client questions and plan approvals.
      */
     xai: boolean
+    /** Fork or resume at a specific message (Codex lastTurnId/beforeTurnId, Claude --resume-session-at). */
+    forkAt?: boolean
+    /** Rewind/truncate to a message (Codex thread/revert, Claude rewind_files). */
+    rewind?: boolean
+    /** Ask-user questions (Codex item/tool/requestUserInput, Claude AskUserQuestion). */
+    ask?: boolean
+    /** Plan mode + approval (Codex collaborationMode:'plan', Claude ExitPlanMode). */
+    plan?: boolean
+    /** Subagent tree (Codex collabAgentToolCall, Claude Task with parent_tool_use_id). */
+    subagents?: boolean
 }
 
 export function acpCaps(init: any): AcpAgentCaps {
