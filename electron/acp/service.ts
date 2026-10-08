@@ -15,6 +15,8 @@ import process from 'node:process'
 import { tr } from '../i18n'
 import { loginShellPath } from '../pi-env'
 import { platform } from '../platform'
+import { ClaudeAgent } from '../native/claude'
+import { CodexAgent } from '../native/codex'
 import { agentDir } from '../piSettings'
 import { AcpAgent } from './agent'
 import { installAgent, installedAgent, installSource } from './install'
@@ -45,6 +47,14 @@ const IMPORT_EVERY_MS = 2 * 60_000
 const FIRST_IMPORT_WAIT_MS = 6000
 const MIRROR_DELAY_MS = 200
 
+/** The adapter speaking the agent's protocol, for running threads and read-only replays alike. */
+function adapterClass(spec: AcpAgentSpec) {
+    if (spec.protocol === 'codex-app-server')
+        return CodexAgent
+    if (spec.protocol === 'claude-stream')
+        return ClaudeAgent
+    return AcpAgent
+}
 
 const expandHome = (dir: string) => dir.replace(/^~(?=\/)/, os.homedir())
 
@@ -232,11 +242,7 @@ export class AcpService {
         const record = sessionKey ? this.records.get(sessionKey) : undefined
         const launch = await this.launchOf(spec)
 
-        // Factory: pick adapter class by protocol
-        const AdapterClass = spec.protocol === 'codex-app-server' ? (await import('../native/codex')).CodexAgent
-            : spec.protocol === 'claude-stream' ? (await import('../native/claude')).ClaudeAgent
-            : AcpAgent
-
+        const AdapterClass = adapterClass(spec)
         const instance = new AdapterClass(spec, launch, { cwd, sessionId: resume?.sessionId, replayTime: record?.updatedAt }, {
             onEvent: (id, event) => {
                 callbacks.onEvent(id, event)
@@ -253,6 +259,11 @@ export class AcpService {
                 if (!a.key)
                     return
                 this.noteCaps(spec.id, a.caps)
+                // An adapter that moved to a fork stands for that session only.
+                for (const [key, other] of this.live) {
+                    if (other === a && key !== a.key)
+                        this.live.delete(key)
+                }
                 this.live.set(a.key, a)
                 this.replays.delete(a.key)
                 this.note(a, change)
@@ -449,7 +460,8 @@ export class AcpService {
         const spec = acpAgent(record.agent)!
         const launch = await this.launchOf(spec)
         let failure = ''
-        const agent = new AcpAgent(spec, launch, { cwd: record.cwd, sessionId: record.sessionId, readOnly: true, replayTime: record.updatedAt }, {
+        const AdapterClass = adapterClass(spec)
+        const agent = new AdapterClass(spec, launch, { cwd: record.cwd, sessionId: record.sessionId, readOnly: true, replayTime: record.updatedAt }, {
             onEvent: () => {},
             onExit: (_id, info) => {
                 failure = info.stderr.trim().split('\n').slice(-3).join('\n')

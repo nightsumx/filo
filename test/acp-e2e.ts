@@ -1,6 +1,6 @@
 // End-to-end check of a non-pi agent over ACP in the built app, against test/fakeAcp.mjs (no
-// network, no tokens; it answers like codex-acp):
-//   - a new thread switches from pi to Codex in the composer, and gets the agent's own pickers
+// network, no tokens; it answers like an ACP agent such as OpenCode):
+//   - a new thread switches from pi to OpenCode in the composer, and gets the agent's own pickers
 //   - a run streams thinking, a command with output, an edit that waits on the approval prompt,
 //     and a plan (todo card); Allow lets the edit through
 //   - the session is listed with its agent, and a reopened tab replays it from the agent
@@ -45,12 +45,12 @@ async function main() {
     git('init', '-q')
     git('add', '-A')
     git('commit', '-qm', 'init')
-    // A Codex session from a terminal: the agent lists it, the app has never seen it.
+    // An OpenCode session from a terminal: the agent lists it, the app has never seen it.
     await writeFile(path.join(fakeDir, 'term-1.jsonl'), [
         { sessionUpdate: 'user_message_chunk', content: { type: 'text', text: 'from the terminal' } },
         { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'echo: from the terminal' } },
     ].map(u => JSON.stringify(u)).join('\n'))
-    await writeFile(path.join(fakeDir, 'term-1.meta.json'), JSON.stringify({ agent: 'codex', cwd: repo, title: 'From the terminal', updatedAt: new Date(Date.now() - 60_000).toISOString() }))
+    await writeFile(path.join(fakeDir, 'term-1.meta.json'), JSON.stringify({ agent: 'opencode', cwd: repo, title: 'From the terminal', updatedAt: new Date(Date.now() - 60_000).toISOString() }))
     await writeFile(path.join(userData, 'state.json'), JSON.stringify({
         projects: [repo],
         hiddenProjects: [],
@@ -68,6 +68,7 @@ async function main() {
         PI_CODING_AGENT_DIR: agentDir,
         PI_GUI_TEST: '1',
         // Every ACP agent runs the same scripted one here.
+        // Codex speaks app-server, not ACP (test/codex-e2e.ts runs it against the real CLI).
         PI_GUI_ACP_CODEX: JSON.stringify(['node', FAKE, '--agent=codex']),
         PI_GUI_ACP_CLAUDE: JSON.stringify(['node', FAKE, '--agent=claude']),
         PI_GUI_ACP_GROK: JSON.stringify(['node', FAKE, '--agent=grok', '--no-images']),
@@ -88,8 +89,8 @@ async function main() {
 
         await js(`(() => { window.__app.newThread(${R}); return true })()`)
         await until('a new thread', () => js<boolean>(`!!${T} && ${T}.isEmpty`))
-        const picker = await until('the agent picker lists Codex', () => js<boolean>(`(async () => (await window.pi.listAgents()).some(a => a.id === 'codex' && a.available))()`))
-        check(picker, 'Codex is available (fake adapter)')
+        const picker = await until('the agent picker lists OpenCode', () => js<boolean>(`(async () => (await window.pi.listAgents()).some(a => a.id === 'opencode' && a.available))()`))
+        check(picker, 'OpenCode is available (fake adapter)')
         const ids = await js<string[]>(`(async () => (await window.pi.listAgents()).map(a => a.id))()`)
         check(JSON.stringify(ids) === '["codex","claude","grok","opencode","gemini","copilot","cursor"]', `the picker offers every ACP agent (${ids.join(', ')})`)
         await until('the agent picker shows', () => js<boolean>(`!![...document.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'Agent: pi')`))
@@ -102,13 +103,13 @@ async function main() {
             await until('picker closed', () => js<boolean>(`!document.querySelector('[role=menu]')`))
         }
 
-        await js(`${T}.setAgent('codex')`)
-        await until('Codex ready', () => js<boolean>(`${T}.agent === 'codex' && ${T}.agentStatus === 'ready'`))
+        await js(`${T}.setAgent('opencode')`)
+        await until('OpenCode ready', () => js<boolean>(`${T}.agent === 'opencode' && ${T}.agentStatus === 'ready'`))
         check(await js<string>(`${T}.state?.model?.name`) === 'Fake One', 'the model picker shows the agent\'s model')
         check(JSON.stringify(await js<string[]>(`[...${T}.thinkingLevels]`)) === '["low","high"]', 'effort levels come from the agent\'s thought_level option')
         await until('the mode picker', () => js<boolean>(`!![...document.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'Mode: Read-only')`))
         check(true, 'the agent\'s own Mode option gets a picker')
-        check(await js<string>(`document.querySelector('textarea').placeholder`) === 'Ask Codex to do something, or type / for commands', 'the composer names the agent')
+        check(await js<string>(`document.querySelector('textarea').placeholder`) === 'Ask OpenCode to do something, or type / for commands', 'the composer names the agent')
         await until('slash commands', () => js<boolean>(`${T}.commands.some(c => c.name === 'review')`))
         check(true, 'available_commands_update fills the slash menu')
 
@@ -123,7 +124,7 @@ async function main() {
 
         await until('the run settles', () => js<boolean>(`(() => { const t = ${T}; return !t.running && t.persisted && t.key === t.sessionPath })()`), 20_000)
         const key = await js<string>(`${T}.key`)
-        check(key.startsWith('acp:codex:fake-'), `the thread is keyed by its ACP session (${key})`)
+        check(key.startsWith('acp:opencode:fake-'), `the thread is keyed by its ACP session (${key})`)
         check(await readFile(path.join(repo, 'notes.txt'), 'utf8') === 'written by fake\n', 'Allow let the edit through')
         const steps = await js<string[]>(`${T}.turns.at(-1).steps.map(s => s.kind === 'tool' ? 'tool:' + s.call.name + (s.result ? (s.result.isError ? ':error' : ':ok') : ':none') : s.kind)`)
         check(JSON.stringify(steps) === JSON.stringify(['thinking', 'tool:bash:ok', 'tool:write:ok', 'tool:todo:ok', 'text']), `the turn reads thinking, Bash, Write, Todo, text (${steps.join(', ')})`)
@@ -136,17 +137,17 @@ async function main() {
         check(await js<number>(`${T}.turns.at(-1).usage.output`) === 50, 'the prompt\'s usage lands on the turn')
         check(await js<number>(`Math.round(${T}.stats?.contextUsage?.percent * 10)`) === 12, 'usage_update feeds the context meter')
 
-        await until('the session is listed', () => js<boolean>(`window.__app.sessions.some(s => s.path === ${JSON.stringify(key)} && s.agent === 'codex')`))
+        await until('the session is listed', () => js<boolean>(`window.__app.sessions.some(s => s.path === ${JSON.stringify(key)} && s.agent === 'opencode')`))
         check(true, 'the session shows up in the project with its agent')
         check(await js<string>(`window.__app.sessions.find(s => s.path === ${JSON.stringify(key)}).name`) === 'Edit notes.txt', 'the agent\'s session title names it')
-        check(await js<boolean>(`[...document.querySelectorAll('[role=treeitem]')].some(r => r.textContent.includes('Codex'))`), 'the sidebar row says Codex')
+        check(await js<boolean>(`[...document.querySelectorAll('[role=treeitem]')].some(r => r.textContent.includes('OpenCode'))`), 'the sidebar row says OpenCode')
         check(await js<boolean>(`![...document.querySelectorAll('button')].some(b => b.getAttribute('title') === 'Fork from here')`), 'fork stays hidden for ACP threads')
 
         // The app's copy of the transcript feeds search and the edit log.
         const found = await until('search finds the ACP thread', () => js<boolean>(`(async () => (await window.pi.searchSessions('wrote notes')).some(r => r.session === ${JSON.stringify(key)} && r.hits.length > 0))()`))
-        check(found, 'session search finds the Codex thread by its reply, under its session key')
+        check(found, 'session search finds the OpenCode thread by its reply, under its session key')
         await until('the edit log names the thread', () => js<boolean>(`(async () => ((await window.pi.repoEdits(${R})).files['notes.txt'] ?? []).some(e => e.session === ${JSON.stringify(key)}))()`))
-        check(true, 'the changes panel knows the Codex thread wrote notes.txt')
+        check(true, 'the changes panel knows the OpenCode thread wrote notes.txt')
 
         await js(`${T}.setConfigOption('mode', 'agent')`)
         await until('mode changed', () => js<boolean>(`${T}.configOptions.find(o => o.id === 'mode')?.currentValue === 'agent'`))
@@ -191,7 +192,7 @@ async function main() {
         // Fork: the agent copies the session; the copy opens in its own tab with the history.
         check(await js<boolean>(`!!${K}.state.agentCaps.fork`), 'the agent says it can fork')
         const forkKey = await js<string>(`${K}.forkSession()`)
-        check(!!forkKey && forkKey.startsWith('acp:codex:fork-'), `session/fork makes a new session (${forkKey})`)
+        check(!!forkKey && forkKey.startsWith('acp:opencode:fork-'), `session/fork makes a new session (${forkKey})`)
         await js(`window.__app.revealHere(${JSON.stringify(forkKey)})`)
         await until('the fork opens', () => js<boolean>(`(() => { const t = window.__app.threads.get(${JSON.stringify(forkKey)}); return !!t && t.loaded && JSON.stringify(t.turns).includes('echo: after slow') })()`), 20_000)
         check(await js<string>(`window.__app.sessions.find(s => s.path === ${JSON.stringify(forkKey)}).name`) === 'Edit notes.txt (fork)', 'the fork is listed under its source\'s name')
@@ -199,12 +200,12 @@ async function main() {
         // Delete from the agent: its own record goes too.
         await js(`(() => { void window.__app.deleteSession(window.__app.sessions.find(s => s.path === ${JSON.stringify(forkKey)}), { history: true }); return true })()`)
         await until('the fork is gone', () => js<boolean>(`!window.__app.sessions.some(s => s.path === ${JSON.stringify(forkKey)})`))
-        const forkFile = path.join(fakeDir, `${forkKey.slice('acp:codex:'.length)}.jsonl`)
-        check(!(await readFile(forkFile).then(() => true, () => false)), 'Delete from Codex removes the agent\'s own session')
+        const forkFile = path.join(fakeDir, `${forkKey.slice('acp:opencode:'.length)}.jsonl`)
+        check(!(await readFile(forkFile).then(() => true, () => false)), 'Delete from OpenCode removes the agent\'s own session')
 
         // The terminal session the agent listed: in the sidebar with its agent, and it opens.
-        const termKey = 'acp:codex:term-1'
-        check(await js<boolean>(`window.__app.sessions.some(s => s.path === '${termKey}' && s.name === 'From the terminal' && s.agent === 'codex')`), 'a session the agent lists itself shows up in the project')
+        const termKey = 'acp:opencode:term-1'
+        check(await js<boolean>(`window.__app.sessions.some(s => s.path === '${termKey}' && s.name === 'From the terminal' && s.agent === 'opencode')`), 'a session the agent lists itself shows up in the project')
         await js(`(() => { window.__app.openSession(window.__app.sessions.find(s => s.path === '${termKey}')); return true })()`)
         await until('the terminal session replays', () => js<boolean>(`(() => { const t = window.__app.threads.get('${termKey}'); return !!t && t.loaded && JSON.stringify(t.turns).includes('echo: from the terminal') })()`), 20_000)
         check(true, 'it opens with its history from the agent')

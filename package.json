@@ -25,6 +25,7 @@
         "e2e:providers": "bun --tsconfig-override=tsconfig.node.json test/providers-e2e.ts",
         "e2e:acp": "bun --tsconfig-override=tsconfig.node.json test/acp-e2e.ts",
         "e2e:terminal": "bun --tsconfig-override=tsconfig.node.json test/terminal-e2e.ts",
+        "e2e:codex": "bun --tsconfig-override=tsconfig.node.json test/codex-e2e.ts",
         "e2e:shell": "bun --tsconfig-override=tsconfig.node.json test/shell-e2e.ts",
         "e2e:shell-agent": "bun --tsconfig-override=tsconfig.node.json test/shell-agent-e2e.ts",
         "site:shots": "bun --tsconfig-override=tsconfig.node.json site/shots.ts",

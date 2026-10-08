@@ -62,6 +62,10 @@ export interface ToolState {
     exitCode?: number | null
     /** Result details for the capability views (ask, plan), set while the agent waits for the user. */
     details?: unknown
+    /** Native adapters (`_meta.piCalls`): the pi calls to show, instead of reading them from the ACP fields. */
+    fixedCalls?: ToolCall[]
+    /** Native adapters (`_meta.piDetails`): result details by pi call id (an edit's patch, a plan's outcome). */
+    fixedDetails?: Record<string, unknown>
     /** The pi tool calls standing for it: one, or one per file for a multi-file edit. */
     calls: ToolCall[]
     done: boolean
@@ -293,6 +297,8 @@ function xaiCalls(tool: ToolState, xai: XaiTool, input: Record<string, any>): To
 
 /** How an ACP tool call reads as pi tool calls, so the transcript's tool views apply. */
 export function piToolCalls(tool: ToolState): ToolCall[] {
+    if (tool.fixedCalls)
+        return tool.fixedCalls
     const call = (id: string, name: string, args: Record<string, any>): ToolCall => ({ type: 'toolCall', id, name, arguments: args })
     const diffs = (tool.content ?? []).filter(c => c?.type === 'diff' && typeof c.path === 'string')
     if (diffs.length) {
@@ -607,6 +613,10 @@ export class AcpTranscript {
         const xai = meta['x.ai/tool']
         if (typeof xai?.name === 'string')
             tool.xai = { name: xai.name, kind: String(xai.kind ?? '') }
+        if (Array.isArray(meta.piCalls))
+            tool.fixedCalls = meta.piCalls
+        if (meta.piDetails && typeof meta.piDetails === 'object')
+            tool.fixedDetails = meta.piDetails
         const delta = meta.terminal_output_delta?.data ?? meta.terminal_output?.data
         if (typeof delta === 'string')
             tool.output += delta
@@ -662,6 +672,9 @@ export class AcpTranscript {
 
     /** The capability view's result details: todo items, an ask's answers, a plan's outcome. */
     private resultDetails(tool: ToolState, call: ToolCall, output: string): unknown {
+        const fixed = tool.fixedDetails?.[call.id]
+        if (fixed !== undefined)
+            return fixed
         const piName = this.overrideToolName[call.name] ?? call.name
         if (piName === 'todo')
             return { kind: 'todo', items: call.arguments.items }

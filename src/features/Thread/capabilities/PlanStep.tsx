@@ -86,7 +86,7 @@ const Review = observer(({ toolCallId }: { toolCallId: string }) => {
             <Button variant="primary" disabled={sending} onClick={() => void decide({ approve: true })}>{tr('批准并开始执行', 'Approve and start')}</Button>
             <Button disabled={sending} onClick={() => setRevising(true)}>{tr('修改…', 'Revise…')}</Button>
             <Button variant="ghost" disabled={sending} onClick={() => void decide({ cancelled: true })}>{tr('先不做', 'Not now')}</Button>
-            <span className="ml-auto text-[12px] text-[var(--jb-comment)]">{tr('批准后退出计划模式，pi 接着按计划改代码', 'Approving leaves plan mode and pi starts on the plan')}</span>
+            <span className="ml-auto text-[12px] text-[var(--jb-comment)]">{tr(`批准后退出计划模式，${thread?.agentLabel ?? 'pi'} 接着按计划改代码`, `Approving leaves plan mode and ${thread?.agentLabel ?? 'pi'} starts on the plan`)}</span>
         </div>
     )
 })
