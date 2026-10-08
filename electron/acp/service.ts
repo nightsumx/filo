@@ -18,6 +18,7 @@ import { platform } from '../platform'
 import { agentDir } from '../piSettings'
 import { AcpAgent } from './agent'
 import { installAgent, installedAgent, installSource } from './install'
+import { withAppNode } from './node'
 import { deleteAgentSession, listAgentSessions } from './list'
 import { mirrorFile, mirrorFiles, mirrorKey, mirrorText } from './mirror'
 
@@ -104,7 +105,7 @@ export class AgentNotInstalled extends Error {
  * folders), else the app's install under `appRoot` (install.ts). Nothing is downloaded here.
  */
 export async function resolveLaunch(spec: AcpAgentSpec, appRoot?: string): Promise<AcpLaunch> {
-    const searchPath = await loginShellPath()
+    const searchPath = await withAppNode(await loginShellPath())
     const env = platform.withPath({ ...process.env as Record<string, string> }, searchPath)
     delete env.ELECTRON_RUN_AS_NODE
     // The user's own CLI: same version and sign-in as in their terminal.
@@ -208,7 +209,7 @@ export class AcpService {
         let running = this.installs.get(agent)
         if (!running) {
             running = (async () => {
-                const searchPath = await loginShellPath()
+                const searchPath = await withAppNode(await loginShellPath())
                 const env = platform.withPath({ ...process.env as Record<string, string> }, searchPath)
                 delete env.ELECTRON_RUN_AS_NODE
                 await installAgent(root, installSpec(spec), { searchPath, env, fetch: this.download })

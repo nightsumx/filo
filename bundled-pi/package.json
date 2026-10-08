@@ -1,8 +1,9 @@
 {
     "name": "pi-kit-bundled-pi",
     "private": true,
-    "description": "The pi the app ships for users without one; scripts/bundle-pi.sh installs it from the lockfile",
+    "description": "The pi the app ships for users without one, and the npm that installs agents without Node.js; scripts/bundle-pi.sh installs them from the lockfile",
     "dependencies": {
-        "@earendil-works/pi-coding-agent": "1.0.3"
+        "@earendil-works/pi-coding-agent": "1.0.3",
+        "npm": "11.21.0"
     }
 }

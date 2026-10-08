@@ -12,6 +12,7 @@ import { SessionFollower } from './follow'
 import { PresenceWatcher, presenceDir } from './presence'
 import { DEFAULT_THEME, IPC, THEME_PREFS } from '@shared/ipc'
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, net, Notification, shell } from 'electron'
+import { setAppNode } from './acp/node'
 import { AcpService } from './acp/service'
 import { AgentManager } from './agents'
 import { BACKGROUND, reveal } from './background'
@@ -48,6 +49,13 @@ const PI_CLI = path.join('node_modules', '@earendil-works', 'pi-coding-agent', '
 setBundledPi(app.isPackaged
     ? { cli: path.join(process.resourcesPath, 'pi', PI_CLI), launcher: path.join(process.resourcesPath, 'piLauncher.mjs') }
     : { cli: path.join(__dirname, '../..', PI_CLI), launcher: path.join(__dirname, '../../electron/piLauncher.mjs') })
+// node and npm for the agents the app installs when the Mac has no Node.js (electron/acp/node.ts):
+// this Electron, and the npm shipped next to the bundled pi.
+setAppNode({
+    dir: path.join(app.getPath('userData'), 'node'),
+    electron: process.execPath,
+    npm: app.isPackaged ? path.join(process.resourcesPath, 'pi', 'node_modules', 'npm') : path.join(__dirname, '../../bundled-pi/node_modules/npm'),
+})
 
 const agents = new AgentManager({
     onEvent: (agentId, event) => windows.deliver(agentId, IPC.agentEvent, event),
