@@ -72,9 +72,12 @@ export const ACP_AGENTS: readonly AcpAgentSpec[] = [
         id: 'grok',
         label: 'Grok Build',
         bin: 'grok',
-        args: ['agent', 'stdio'],
+        // The app pins its install, so the CLI must not update itself under it; --no-leader keeps the
+        // session in this process rather than a shared ~/.grok/leader.sock one the user may enable.
+        args: ['--no-auto-update', 'agent', '--no-leader', 'stdio'],
         dirs: ['~/.grok/bin'],
-        npm: '@xai-official/grok@1.0.50',
+        // npm's `latest`; newer versions are on the `alpha` tag.
+        npm: '@xai-official/grok@1.0.46',
         inputIncludesCache: true,
         signIn: { zh: '在终端里运行 grok 完成登录', en: 'run grok in a terminal and sign in' },
     },
@@ -224,17 +227,24 @@ export interface AcpAgentCaps {
     delete: boolean
     /** session/list. */
     list: boolean
+    /**
+     * Grok Build's `x.ai/…` extensions (initialize `_meta.grokShell`): steering is `x.ai/interject`,
+     * fork / delete / rename are `x.ai/session/…`, and it asks the client questions and plan approvals.
+     */
+    xai: boolean
 }
 
 export function acpCaps(init: any): AcpAgentCaps {
     const agent = init?.agentCapabilities ?? {}
     const session = agent.sessionCapabilities ?? {}
+    const xai = init?._meta?.grokShell === true
     return {
         images: !!agent.promptCapabilities?.image,
-        steering: !!init?._meta?.steering?.supported,
-        fork: !!session.fork,
-        delete: !!session.delete,
+        steering: xai || !!init?._meta?.steering?.supported,
+        fork: xai || !!session.fork,
+        delete: xai || !!session.delete,
         list: !!session.list,
+        xai,
     }
 }
 

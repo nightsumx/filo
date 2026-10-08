@@ -7,7 +7,7 @@
 
 import type { AcpAgentCaps, AcpAgentSpec, AcpConfigOption } from '@shared/agents'
 import type { AgentExitInfo, SessionItem } from '@shared/ipc'
-import type { ApprovalChoice, ApprovalRequest } from '@shared/capabilities'
+import type { ApprovalChoice, ApprovalRequest, AskQuestion, AskResponse, PlanDecision } from '@shared/capabilities'
 import type { ImageContent, PiEvent, PiModel, RpcResponse, SlashCommand } from '@shared/pi'
 import type { ChildProcessWithoutNullStreams } from 'node:child_process'
 import type { PromptUsage } from './transcript'
@@ -18,7 +18,7 @@ import { randomUUID } from 'node:crypto'
 import { realpath } from 'node:fs/promises'
 import { tr } from '../i18n'
 import { AcpConnection, methodNotFound } from './connection'
-import { AcpTranscript, piToolCalls } from './transcript'
+import { AcpTranscript, askQuestions, piToolCalls, XAI_OTHER, xaiAskAnswer, xaiUsage } from './transcript'
 
 const STDERR_LIMIT = 64 * 1024
 
@@ -61,12 +61,40 @@ interface PermissionWait {
     options: { optionId: string, kind: string, name: string }[]
 }
 
-/** Client capabilities: the agent runs its own tools; we want plans and command output chunks. */
+/** A Grok Build x.ai/ask_user_question or x.ai/exit_plan_mode waiting for the user. */
+interface AskWait {
+    resolve: (response: unknown) => void
+    questions: AskQuestion[]
+}
+interface PlanWait {
+    resolve: (response: unknown) => void
+    plan: string
+}
+
+/** Grok Build turns it starts itself, for an interjection that missed the turn it was meant for. */
+const XAI_FALLBACK_PREFIX = 'interject-fallback-'
+
+/** Grok Build's session modes (SessionMode); it announces none, but takes them in session/set_mode. */
+const xaiModeOption = (current = 'default'): AcpConfigOption => ({
+    id: 'mode',
+    name: tr('模式', 'Mode'),
+    category: 'mode',
+    currentValue: current,
+    options: [
+        { value: 'default', name: tr('默认', 'Default') },
+        { value: 'plan', name: tr('计划', 'Plan'), description: tr('只读探索并写计划，你批准后再动手', 'Explores read-only and writes a plan; changes start once you approve it') },
+    ],
+})
+
+/**
+ * Client capabilities: the agent runs its own tools; we want plans and command output chunks
+ * (codex-acp / Claude Code: terminal_output_delta; Grok Build: the output so far in each update).
+ */
 const CLIENT_CAPABILITIES = {
     fs: { readTextFile: false, writeTextFile: false },
     terminal: false,
     plan: {},
-    _meta: { terminal_output_delta: true },
+    _meta: { 'terminal_output_delta': true, 'x.ai/incrementalBashOutput': true },
 }
 
 function selectOptions(raw: unknown): AcpConfigOption[] {
@@ -111,13 +139,36 @@ export class AcpAgent {
     private queued: { message: string, images: ImageContent[] }[] = []
     /** The session cwd as ACP knows it (real path). */
     private sessionCwd = ''
+    /** Our session/prompt is out (`running` also covers turns the agent starts itself). */
+    private prompting = false
+    /** The last agent timestamp seen (Grok Build stamps every update); replayed messages take it. */
+    private clock: number | undefined
+
+    // Grok Build (caps.xai) ------------------------------------------------
+    /** Prompt ids we sent, and turns Grok reported done (turn_completed), live or replayed. */
+    private sentPrompts = new Set<string>()
+    private doneTurns = new Set<string>()
+    /** Turns Grok runs on its own (a stranded interjection's fallback), until prompt_complete. */
+    private ownTurns = new Set<string>()
+    /** Interjections sent with x.ai/interject, shown queued until Grok takes them in. */
+    private steers: string[] = []
+    /** Interjections shown when a run ended without them; a fallback turn for one adds no second message. */
+    private strays: string[] = []
+    /** A model call is streaming; an interjection joins before the next one. */
+    private inModelCall = false
+    private retrying = false
+    private compactingByHand = false
+    /** Context window per model id (`_meta.totalContextTokens`). */
+    private contextWindows = new Map<string, number>()
+    private asks = new Map<string, AskWait>()
+    private plans = new Map<string, PlanWait>()
 
     /** The launch environment holds the agent's API key (from the environment or pi's providers). */
     private hasApiKey: boolean
 
     constructor(readonly spec: AcpAgentSpec, launch: AcpLaunch, private options: AcpAgentOptions, private callbacks: AcpAgentCallbacks) {
         this.hasApiKey = !!(spec.apiKey && launch.env[spec.apiKey.env])
-        this.transcript = new AcpTranscript('', { model: () => this.modelStamp(), inputIncludesCache: spec.inputIncludesCache, now: () => (this.loading && options.replayTime ? options.replayTime : Date.now()) })
+        this.transcript = new AcpTranscript('', { model: () => this.modelStamp(), inputIncludesCache: spec.inputIncludesCache, now: () => (this.loading ? this.clock ?? options.replayTime ?? Date.now() : Date.now()) })
         this.child = spawn(launch.file, launch.args, { cwd: options.cwd, env: launch.env, stdio: ['pipe', 'pipe', 'pipe'] })
         this.connection = new AcpConnection(this.child.stdin, this.child.stdout, {
             onNotification: (method, params) => this.notification(method, params),
@@ -134,6 +185,7 @@ export class AcpAgent {
             for (const wait of this.permissions.values())
                 wait.resolve({ outcome: { outcome: 'cancelled' } })
             this.permissions.clear()
+            this.cancelWaits()
             callbacks.onExit(this.id, { code, signal, stderr: this.stderr })
         }
         this.child.on('exit', finish)
@@ -197,6 +249,8 @@ export class AcpAgent {
         }
         this.transcript.finish('end_turn')
         this.loading = false
+        this.noteModels(this.initResult?._meta?.modelState?.availableModels)
+        this.noteModels(result?.models?.availableModels)
         this.applyConfig(result)
         this.transcript.setEmitter(event => this.emit(event))
         if (!this.options.readOnly)
@@ -232,7 +286,7 @@ export class AcpAgent {
     private applyConfig(result: any) {
         const options = selectOptions(result?.configOptions)
         if (options.length) {
-            this.configOptions = options
+            this.configOptions = this.withModes(options)
             this.legacyConfig = false
             return
         }
@@ -247,8 +301,26 @@ export class AcpAgent {
             legacy.push({ id: 'mode', name: 'Mode', category: 'mode', currentValue: String(modes.currentModeId ?? ''), options: modes.availableModes.map((m: any) => ({ value: String(m.id), name: String(m.name ?? m.id), description: m.description })) })
         }
         if (legacy.length) {
-            this.configOptions = legacy
+            this.configOptions = this.withModes(legacy)
             this.legacyConfig = true
+        }
+    }
+
+    /** Grok Build's modes join its config options (it lists none of its own). */
+    private withModes(options: AcpConfigOption[]): AcpConfigOption[] {
+        if (!this.caps.xai || options.some(o => o.category === 'mode' || o.id === 'mode'))
+            return options
+        return [...options, xaiModeOption(this.configOptions.find(o => o.id === 'mode')?.currentValue)]
+    }
+
+    /** Context windows from Grok Build's model list (initialize `_meta.modelState`, session models, x.ai/models/update). */
+    private noteModels(models: unknown) {
+        if (!Array.isArray(models))
+            return
+        for (const m of models) {
+            const size = m?._meta?.contextWindow ?? m?._meta?.totalContextTokens
+            if (typeof m?.modelId === 'string' && typeof size === 'number' && size > 0)
+                this.contextWindows.set(m.modelId, size)
         }
     }
 
@@ -276,8 +348,15 @@ export class AcpAgent {
     // ---------------------------------------------------------------- agent → client
 
     private notification(method: string, params: any) {
+        // Grok Build's extensions go out as `_x.ai/…` (ACP's leading underscore for extension methods).
+        const name = method.replace(/^_/, '')
+        if (name.startsWith('x.ai/')) {
+            this.xaiNotification(name, params)
+            return
+        }
         if (method !== 'session/update' || (this.sessionId && params?.sessionId && params.sessionId !== this.sessionId))
             return
+        this.noteMeta(params?._meta)
         const update = params?.update
         switch (update?.sessionUpdate) {
             case 'available_commands_update':
@@ -289,7 +368,7 @@ export class AcpAgent {
             case 'config_option_update':
             case 'current_mode_update': {
                 if (update.sessionUpdate === 'config_option_update')
-                    this.configOptions = selectOptions(update.configOptions)
+                    this.configOptions = this.withModes(selectOptions(update.configOptions))
                 else
                     this.setLocal('mode', String(update.currentModeId ?? update.modeId ?? ''))
                 this.emit({ type: 'acp_config_changed', configOptions: this.configOptions })
@@ -309,9 +388,177 @@ export class AcpAgent {
                 }
                 break
             default:
+                if (this.caps.xai && !this.xaiContent(update, params))
+                    break
                 this.transcript.update(update)
                 break
         }
+    }
+
+    /** Notification `_meta`: Grok Build stamps the agent's clock and the context it fills. */
+    private noteMeta(meta: any) {
+        if (typeof meta?.agentTimestampMs === 'number')
+            this.clock = meta.agentTimestampMs
+        if (this.caps.xai && typeof meta?.totalTokens === 'number' && meta.totalTokens > 0) {
+            const size = this.contextWindows.get(this.option('model')?.currentValue ?? '') ?? this.context?.size ?? 0
+            this.context = { used: meta.totalTokens, size }
+        }
+    }
+
+    /**
+     * A Grok Build session/update before it reaches the transcript; false drops it. The plan Grok sends
+     * as a turn ends, to clear the list, has no eventId: it is never stored, so a replay would differ.
+     */
+    private xaiContent(update: any, params: any): boolean {
+        const kind = update?.sessionUpdate
+        if (kind === 'plan' && !params?._meta?.eventId)
+            return false
+        if (kind === 'agent_message_chunk' || kind === 'agent_thought_chunk')
+            this.modelOutput()
+        return true
+    }
+
+    /**
+     * The model is streaming. Grok sends a response's tool calls after its response_completed, so only
+     * text, thinking and tool-argument chunks mean a model call; interjections join right before one.
+     */
+    private modelOutput() {
+        this.endRetry()
+        if (!this.inModelCall && this.steers.length && !this.loading) {
+            for (const steer of this.steers.splice(0))
+                this.transcript.userPrompt(steer)
+            this.emitQueue()
+        }
+        this.inModelCall = true
+    }
+
+    /** Grok Build's `x.ai/…` notifications; params come unwrapped, or wrapped once by older shells. */
+    private xaiNotification(name: string, raw: any) {
+        const params = raw?.sessionId === undefined && raw?.params && typeof raw.params === 'object' ? raw.params : raw
+        if (this.sessionId && params?.sessionId && params.sessionId !== this.sessionId)
+            return
+        switch (name) {
+            case 'x.ai/session_notification':
+            case 'x.ai/session/update':
+                this.noteMeta(params?._meta)
+                this.xaiUpdate(params?.update ?? {})
+                break
+            case 'x.ai/queue/changed':
+                this.queueChanged(params)
+                break
+            case 'x.ai/session/prompt_complete':
+                this.ownTurnEnded(String(params?.promptId ?? ''), params?.stopReason)
+                break
+            case 'x.ai/models/update':
+                this.noteModels(params?.availableModels)
+                break
+            default:
+                break
+        }
+    }
+
+    private xaiUpdate(update: any) {
+        switch (update.sessionUpdate) {
+            case 'response_completed':
+                this.inModelCall = false
+                break
+            case 'tool_call_delta_chunk':
+                this.modelOutput()
+                break
+            case 'turn_completed':
+                this.turnCompleted(String(update.prompt_id ?? ''), update.stop_reason, xaiUsage(update.usage))
+                break
+            case 'auto_compact_started':
+                if (!this.compactingByHand && !this.loading)
+                    this.emit({ type: 'compaction_start', reason: 'threshold' })
+                break
+            case 'auto_compact_completed': {
+                const before = typeof update.tokens_before === 'number' ? update.tokens_before : 0
+                const after = typeof update.tokens_after === 'number' ? update.tokens_after : undefined
+                const summary = typeof update.summary_preview === 'string' && update.summary_preview
+                    ? update.summary_preview
+                    : tr(`上下文从 ${before.toLocaleString()} 压缩到 ${after?.toLocaleString() ?? '?'} tokens。`, `Context compacted from ${before.toLocaleString()} to ${after?.toLocaleString() ?? '?'} tokens.`)
+                this.transcript.compaction(summary, before)
+                if (after !== undefined && this.context)
+                    this.context = { ...this.context, used: after }
+                if (!this.compactingByHand && !this.loading)
+                    this.emit({ type: 'compaction_end', reason: 'threshold', aborted: false })
+                break
+            }
+            case 'auto_compact_failed':
+            case 'auto_compact_cancelled':
+                if (!this.compactingByHand && !this.loading)
+                    this.emit({ type: 'compaction_end', reason: 'threshold', aborted: update.sessionUpdate === 'auto_compact_cancelled', errorMessage: typeof update.error === 'string' ? update.error : undefined })
+                break
+            case 'retry_state':
+                if (this.loading)
+                    break
+                if (update.type === 'retrying') {
+                    this.retrying = true
+                    this.emit({ type: 'auto_retry_start', attempt: update.attempt, maxAttempts: update.max_retries, delayMs: 0, errorMessage: String(update.reason ?? '') })
+                }
+                else if (update.type === 'exhausted' || update.type === 'failed') {
+                    this.retrying = false
+                    this.emit({ type: 'auto_retry_end', success: false, attempt: update.attempts, finalError: String(update.reason ?? update.message ?? '') })
+                }
+                break
+            default:
+                break
+        }
+    }
+
+    private endRetry() {
+        if (!this.retrying)
+            return
+        this.retrying = false
+        this.emit({ type: 'auto_retry_end', success: true })
+    }
+
+    /** A turn ended (live or replayed): its messages close, with the turn's usage. */
+    private turnCompleted(promptId: string, stopReason: string | undefined, usage: PromptUsage | undefined) {
+        if (promptId && this.doneTurns.has(promptId))
+            return
+        if (promptId)
+            this.doneTurns.add(promptId)
+        this.inModelCall = false
+        this.endRetry()
+        this.transcript.finish(stopReason, usage)
+    }
+
+    /** Grok's prompt queue: a running prompt we did not send is a turn of its own (a stranded interjection). */
+    private queueChanged(params: any) {
+        const id = typeof params?.runningPromptId === 'string' ? params.runningPromptId : ''
+        if (this.loading || !id || this.sentPrompts.has(id) || this.doneTurns.has(id) || this.ownTurns.has(id))
+            return
+        this.ownTurns.add(id)
+        if (id.startsWith(XAI_FALLBACK_PREFIX)) {
+            // Its user message is stored but not sent; it is the interjection we still show queued.
+            const text = typeof params.runningText === 'string' ? params.runningText : ''
+            const stray = this.strays.indexOf(text)
+            if (stray >= 0) {
+                // Already shown when the run ended without taking it in.
+                this.strays.splice(stray, 1)
+            }
+            else {
+                const at = this.steers.indexOf(text)
+                if (at >= 0)
+                    this.steers.splice(at, 1)
+                this.emitQueue()
+                this.transcript.userPrompt(text)
+            }
+        }
+        if (!this.running) {
+            this.running = true
+            this.emit({ type: 'agent_start' })
+        }
+    }
+
+    private ownTurnEnded(promptId: string, stopReason: string | undefined) {
+        if (!this.ownTurns.delete(promptId))
+            return
+        if (!this.doneTurns.has(promptId))
+            this.turnCompleted(promptId, stopReason, undefined)
+        this.afterTurn(false)
     }
 
     private setLocal(id: string, value: string) {
@@ -323,7 +570,123 @@ export class AcpAgent {
     private async agentRequest(method: string, params: any): Promise<unknown> {
         if (method === 'session/request_permission')
             return this.permission(params)
+        const name = method.replace(/^_/, '')
+        if (this.caps.xai && name === 'x.ai/ask_user_question')
+            return this.xaiAsk(params)
+        if (this.caps.xai && name === 'x.ai/exit_plan_mode')
+            return this.xaiPlan(params)
         throw methodNotFound(method)
+    }
+
+    /**
+     * ask_user_question → the ask capability's form on the tool's row. Grok waits for the reply
+     * (AskUserQuestionExtResponse); the form answers through `/gui-ask-answer`.
+     */
+    private xaiAsk(params: any): Promise<unknown> {
+        const id = String(params?.toolCallId ?? '')
+        const questions = askQuestions(params?.questions)
+        if (this.options.readOnly || !questions.length || this.asks.has(id))
+            return Promise.resolve({ outcome: 'cancelled' })
+        return new Promise((resolve) => {
+            this.asks.set(id, { resolve, questions })
+            if (!this.transcript.setDetails(id, { kind: 'ask', status: 'pending', questions })) {
+                this.asks.delete(id)
+                resolve({ outcome: 'cancelled' })
+            }
+        })
+    }
+
+    private answerAsk(id: string, response: AskResponse) {
+        const wait = this.asks.get(id)
+        if (!wait)
+            throw new Error(tr('这个问题已经不在等回答了', 'This question is no longer waiting for an answer'))
+        this.asks.delete(id)
+        // Grok keys answers by question text, as option labels; typed text rides as notes on "Other".
+        const answers: Record<string, string[]> = {}
+        const annotations: Record<string, { notes: string }> = {}
+        if ('answers' in response) {
+            for (const q of wait.questions) {
+                const answer = response.answers[q.id]
+                const text = answer?.text?.trim()
+                const labels = answer?.selected.length ? answer.selected : text ? [XAI_OTHER] : []
+                if (!labels.length)
+                    continue
+                answers[q.question] = labels
+                if (text)
+                    annotations[q.question] = { notes: text }
+            }
+        }
+        if (!Object.keys(answers).length) {
+            this.transcript.setDetails(id, { kind: 'ask', status: 'cancelled', questions: wait.questions })
+            wait.resolve({ outcome: 'cancelled' })
+            return
+        }
+        const shown = Object.fromEntries(wait.questions.filter(q => answers[q.question]).map(q => [q.id, xaiAskAnswer(answers[q.question], annotations[q.question]?.notes)]))
+        this.transcript.setDetails(id, { kind: 'ask', status: 'answered', questions: wait.questions, answers: shown })
+        wait.resolve({ outcome: 'accepted', answers, ...(Object.keys(annotations).length ? { annotations } : {}) })
+    }
+
+    /**
+     * exit_plan_mode → the plan capability's approval on the tool's row (ExitPlanModeExtResponse).
+     * Unanswered, Grok stays in plan mode; a cancel abandons the plan and leaves plan mode.
+     */
+    private xaiPlan(params: any): Promise<unknown> {
+        const id = String(params?.toolCallId ?? '')
+        const plan = typeof params?.planContent === 'string' ? params.planContent : ''
+        if (this.options.readOnly || this.plans.has(id))
+            return Promise.resolve({ outcome: 'cancelled' })
+        return new Promise((resolve) => {
+            this.plans.set(id, { resolve, plan })
+            if (!this.transcript.setDetails(id, { kind: 'plan', status: 'pending', plan })) {
+                this.plans.delete(id)
+                resolve({ outcome: 'cancelled' })
+            }
+        })
+    }
+
+    private decidePlan(id: string, decision: PlanDecision) {
+        const wait = this.plans.get(id)
+        if (!wait)
+            throw new Error(tr('这个计划已经不在等审批了', 'This plan is no longer waiting for a decision'))
+        this.plans.delete(id)
+        const { plan } = wait
+        if ('approve' in decision) {
+            this.transcript.setDetails(id, { kind: 'plan', status: 'approved', plan })
+            wait.resolve({ outcome: 'approved' })
+        }
+        else if ('feedback' in decision && decision.feedback.trim()) {
+            this.transcript.setDetails(id, { kind: 'plan', status: 'revised', plan, feedback: decision.feedback.trim() })
+            wait.resolve({ outcome: 'cancelled', feedback: decision.feedback.trim() })
+        }
+        else {
+            this.transcript.setDetails(id, { kind: 'plan', status: 'cancelled', plan })
+            wait.resolve({ outcome: 'abandoned' })
+        }
+    }
+
+    /** Questions and plans still waiting get a cancel (stop, exit). */
+    private cancelWaits() {
+        for (const [id] of this.asks)
+            this.answerAsk(id, { cancelled: true })
+        for (const [id, wait] of this.plans) {
+            this.plans.delete(id)
+            this.transcript.setDetails(id, { kind: 'plan', status: 'cancelled', plan: wait.plan })
+            // Unanswered (not abandoned): Grok keeps plan mode and its plan.
+            wait.resolve({ outcome: 'cancelled' })
+        }
+    }
+
+    /** The capability forms' hidden commands (`/gui-ask-answer <id> <json>`, `/gui-plan-decide …`); false if not one. */
+    private guiCommand(message: string): boolean {
+        const m = /^\/(gui-ask-answer|gui-plan-decide) (\S+) ([\s\S]+)$/.exec(message)
+        if (!m || !this.caps.xai)
+            return false
+        const payload = JSON.parse(m[3])
+        if (m[1] === 'gui-ask-answer')
+            this.answerAsk(m[2], payload as AskResponse)
+        else
+            this.decidePlan(m[2], payload as PlanDecision)
+        return true
     }
 
     /** request_permission → the approval prompt; its choice maps back to the agent's option ids. */
@@ -410,17 +773,22 @@ export class AcpAgent {
                     const context = this.context
                     return ok({
                         tokens,
-                        cost: this.cost,
+                        cost: this.cost ?? (tokens.cost || undefined),
                         contextUsage: context ? { tokens: context.used, contextWindow: context.size, percent: context.size ? (context.used / context.size) * 100 : null } : undefined,
                     })
                 }
-                case 'prompt':
-                    return ok(await this.prompt(String(command.message ?? ''), Array.isArray(command.images) ? command.images as ImageContent[] : [], command.streamingBehavior === 'steer'))
+                case 'prompt': {
+                    const message = String(command.message ?? '')
+                    if (this.guiCommand(message))
+                        return ok({ disposition: 'handled' })
+                    return ok(await this.prompt(message, Array.isArray(command.images) ? command.images as ImageContent[] : [], command.streamingBehavior === 'steer'))
+                }
                 case 'abort':
                     if (this.running)
                         this.connection.notify('session/cancel', { sessionId: this.sessionId })
                     for (const [id] of this.permissions)
                         this.answerPermission(id, { cancelled: true })
+                    this.cancelWaits()
                     return ok()
                 case 'clear_queue': {
                     const followUp = this.queued.map(q => q.message).filter(Boolean)
@@ -429,19 +797,24 @@ export class AcpAgent {
                     return ok({ steering: [], followUp })
                 }
                 case 'compact':
+                    if (this.running)
+                        throw new Error(tr('运行中不能压缩，等它结束或先停止', 'Cannot compact while running; wait or stop it first'))
+                    if (this.caps.xai)
+                        return ok(await this.xaiCompact())
                     // The agent's own command; it runs as a turn of the session.
                     if (!this.commands.some(c => c.name === 'compact'))
                         throw new Error(tr(`${this.spec.label} 没有 /compact 命令`, `${this.spec.label} has no /compact command`))
-                    if (this.running)
-                        throw new Error(tr('运行中不能压缩，等它结束或先停止', 'Cannot compact while running; wait or stop it first'))
                     return ok(await this.prompt('/compact', [], false))
                 case 'acp_fork': {
                     if (!this.caps.fork)
                         throw new Error(tr(`${this.spec.label} 不支持分叉会话`, `${this.spec.label} cannot fork sessions`))
                     if (this.running)
                         throw new Error(tr('运行中不能分叉，先停止或等它结束', 'Cannot fork while running; stop it or wait for it to finish'))
-                    const result: any = await this.connection.request('session/fork', { sessionId: this.sessionId, cwd: this.sessionCwd || this.options.cwd, mcpServers: [] })
-                    const forked = String(result?.sessionId ?? '')
+                    const cwd = this.sessionCwd || this.options.cwd
+                    const result: any = this.caps.xai
+                        ? await this.connection.request('_x.ai/session/fork', { sourceSessionId: this.sessionId, sourceCwd: cwd, newCwd: cwd })
+                        : await this.connection.request('session/fork', { sessionId: this.sessionId, cwd, mcpServers: [] })
+                    const forked = String(result?.newSessionId ?? result?.sessionId ?? '')
                     if (!forked)
                         throw new Error(tr('分叉没有返回会话', 'The fork returned no session'))
                     return ok({ sessionFile: this.callbacks.onFork?.(this, forked) ?? acpSessionKey(this.spec.id, forked) })
@@ -455,10 +828,16 @@ export class AcpAgent {
                 case 'set_config_option':
                     await this.setConfig(String(command.configId ?? ''), String(command.value ?? ''))
                     return ok({ configOptions: this.configOptions })
-                case 'set_session_name':
-                    // ACP has no rename; the app keeps the name in its session index.
-                    this.callbacks.onSession?.(this, { name: String(command.name ?? '') })
+                case 'set_session_name': {
+                    // The app keeps the name in its session index; Grok Build also titles its own history.
+                    const name = String(command.name ?? '')
+                    this.callbacks.onSession?.(this, { name })
+                    if (this.caps.xai) {
+                        await this.connection.request('_x.ai/session/rename', { sessionId: this.sessionId, cwd: this.sessionCwd || this.options.cwd, ...(name.trim() ? { title: name.trim() } : { resetToAuto: true }) })
+                            .catch(error => console.warn(`[acp] ${this.spec.label} rename failed:`, error?.message ?? error))
+                    }
                     return ok()
+                }
                 default:
                     return { type: 'response', command: type, success: false, error: tr(`${this.spec.label} 不支持这个操作（${type}）`, `${this.spec.label} does not support this (${type})`) }
             }
@@ -474,13 +853,13 @@ export class AcpAgent {
         let result: any
         if (this.legacyConfig && configId === 'model')
             result = await this.connection.request('session/set_model', { sessionId: this.sessionId, modelId: value })
-        else if (this.legacyConfig && configId === 'mode')
+        else if ((this.legacyConfig || this.caps.xai) && configId === 'mode')
             result = await this.connection.request('session/set_mode', { sessionId: this.sessionId, modeId: value })
         else
             result = await this.connection.request('session/set_config_option', { sessionId: this.sessionId, configId, value })
         const updated = selectOptions(result?.configOptions)
         if (updated.length)
-            this.configOptions = updated
+            this.configOptions = this.withModes(updated)
         else
             this.setLocal(configId, value)
         this.emit({ type: 'acp_config_changed', configOptions: this.configOptions })
@@ -490,6 +869,13 @@ export class AcpAgent {
         if (images.length && !this.caps.images)
             throw new Error(tr(`${this.spec.label} 不接受图片`, `${this.spec.label} does not take images`))
         if (this.running) {
+            if (steer && this.caps.xai) {
+                // Grok takes it in before its next model call, or runs it as a turn of its own after this one.
+                await this.connection.request('_x.ai/interject', { sessionId: this.sessionId, text: message, interjectionId: randomUUID() })
+                this.steers.push(message)
+                this.emitQueue()
+                return {}
+            }
             if (steer && this.caps.steering) {
                 // promptRequired: the turn ended meanwhile, and the message is still ours to send.
                 const result: any = await this.connection.request('_session/steering', { sessionId: this.sessionId, prompt: blocksOf(message, images), _meta: { steering: { idleBehavior: 'promptRequired' } } })
@@ -517,26 +903,71 @@ export class AcpAgent {
     private run(message: string, images: ImageContent[]) {
         this.transcript.userPrompt(message, images)
         this.callbacks.onSession?.(this, { prompt: message })
-        this.connection.request('session/prompt', { sessionId: this.sessionId, prompt: blocksOf(message, images) }).then(
-            // Grok Build reports the prompt's usage only under _meta.
-            (result: any) => this.settle(result?.stopReason, result?.usage ?? result?._meta?.usage),
-            (error: any) => this.settle(undefined, undefined, this.explain(error)),
+        this.prompting = true
+        // Grok Build tags the turn's updates with this id, and runs turns of its own under others.
+        const promptId = this.caps.xai ? randomUUID() : undefined
+        if (promptId)
+            this.sentPrompts.add(promptId)
+        this.connection.request('session/prompt', { sessionId: this.sessionId, prompt: blocksOf(message, images), ...(promptId ? { _meta: { promptId } } : {}) }).then(
+            (result: any) => {
+                this.noteMeta(result?._meta)
+                this.settle(result?.stopReason, result?.usage ?? xaiUsage(result?._meta?.usage), undefined, promptId)
+            },
+            (error: any) => this.settle(undefined, undefined, this.explain(error), promptId),
         )
     }
 
-    private emitQueue() {
-        this.emit({ type: 'queue_update', steering: [], followUp: this.queued.map(q => q.message) })
+    /** Grok Build's compact (x.ai/compact_conversation); its auto_compact_completed leaves the note. */
+    private async xaiCompact() {
+        this.compactingByHand = true
+        this.emit({ type: 'compaction_start', reason: 'manual' })
+        try {
+            await this.connection.request('_x.ai/compact_conversation', { sessionId: this.sessionId })
+        }
+        finally {
+            this.compactingByHand = false
+            // A failure reaches the user as this request's error.
+            this.emit({ type: 'compaction_end', reason: 'manual', aborted: false })
+        }
+        return {}
     }
 
-    private settle(stopReason?: string, usage?: PromptUsage, errorMessage?: string) {
-        this.transcript.finish(stopReason, usage, errorMessage)
+    private emitQueue() {
+        this.emit({ type: 'queue_update', steering: [...this.steers], followUp: this.queued.map(q => q.message) })
+    }
+
+    private settle(stopReason?: string, usage?: PromptUsage, errorMessage?: string, promptId?: string) {
+        // Grok Build closed the turn already (turn_completed); an error still gets its message.
+        if (!promptId || !this.doneTurns.has(promptId) || errorMessage)
+            this.transcript.finish(stopReason, usage, errorMessage)
+        if (promptId)
+            this.doneTurns.add(promptId)
+        this.prompting = false
+        this.afterTurn(stopReason === 'cancelled')
+    }
+
+    /** A turn ended: the next follow-up goes, or the run ends once no turn is left. */
+    private afterTurn(cancelled: boolean) {
+        if (this.prompting || this.ownTurns.size)
+            return
         // A follow-up typed during the run goes next, in the same run (Stop pulls them back first).
-        const next = stopReason === 'cancelled' ? undefined : this.queued.shift()
+        const next = cancelled ? undefined : this.queued.shift()
         if (next && !this.exited) {
             this.emitQueue()
             this.run(next.message, next.images)
             return
         }
+        if (this.steers.length) {
+            // Not taken in by the end of the run: shown as sent (the agent has them, and may still
+            // run them as a turn of their own).
+            for (const steer of this.steers.splice(0)) {
+                this.transcript.userPrompt(steer)
+                this.strays.push(steer)
+            }
+            this.transcript.finish('end_turn')
+            this.emitQueue()
+        }
+        this.inModelCall = false
         this.running = false
         this.emit({ type: 'agent_end' })
         this.emit({ type: 'agent_settled' })

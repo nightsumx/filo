@@ -88,11 +88,12 @@ export async function listAgentSessions(spec: AcpAgentSpec, launch: AcpLaunch, {
     return { caps, list: result }
 }
 
-/** Deletes a session from the agent's own history (session/delete). */
+/** Deletes a session from the agent's own history (session/delete; Grok Build's x.ai/session/delete). */
 export async function deleteAgentSession(spec: AcpAgentSpec, launch: AcpLaunch, sessionId: string): Promise<void> {
     await withAgent(spec, launch, async (connection, caps) => {
         if (!caps.delete)
             throw new Error(`${spec.label} cannot delete sessions`)
-        await connection.request('session/delete', { sessionId })
+        // No cwd: Grok then finds the session among all of them, whatever path the app knows it by.
+        await connection.request(caps.xai ? '_x.ai/session/delete' : 'session/delete', { sessionId })
     })
 }
