@@ -14,6 +14,7 @@ import { Gutter, StatusMark } from '../ToolRow'
 import { useViewState } from '../viewState'
 import { tr } from '@/lib/i18n'
 import type { Localized } from '@shared/i18n'
+import { keys } from '@/platform'
 
 const STATUS_LABEL: Record<PlanDetails['status'], Localized> = {
     pending: { zh: '等你审阅', en: 'waiting for your review' },
@@ -75,7 +76,7 @@ const Review = observer(({ toolCallId }: { toolCallId: string }) => {
                 <div className="flex items-center gap-2">
                     <Button type="submit" variant="primary" disabled={sending || !feedback.trim()} className="min-w-[72px]">{tr('发送修改意见', 'Send feedback')}</Button>
                     <Button type="button" variant="ghost" onClick={() => setRevising(false)}>{tr('返回', 'Back')}</Button>
-                    <span className="ml-auto text-[12px] text-[var(--jb-comment)]">{tr('⌘ Enter 发送', '⌘ Enter to send')}</span>
+                    <span className="ml-auto text-[12px] text-[var(--jb-comment)]">{tr(`${keys('⌘ Enter')} 发送`, `${keys('⌘ Enter')} to send`)}</span>
                 </div>
             </form>
         )

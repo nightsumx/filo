@@ -17,6 +17,7 @@ import { ShortcutHints, ThreadPane } from './features/Thread'
 import { MainToolbar } from './features/Toolbar'
 import { Welcome } from './features/Welcome'
 import { newThreadLabel, tr } from '@/lib/i18n'
+import { commandKey, projectDigit } from '@/platform'
 
 const EnvError = observer(({ error }: { error: string }) => (
     <div className="app-drag flex h-full w-full flex-col items-center justify-center gap-4 px-8 text-center">
@@ -114,7 +115,7 @@ const Workspace = observer(() => {
     )
 })
 
-/** Tab and layout shortcuts. Ctrl+1–9 goes to a project (its window), ⌘1–9 to a tab. */
+/** Tab and layout shortcuts. ⌃1–9 goes to a project (its window), ⌘1–9 to a tab (src/platform.ts has them elsewhere). */
 function useShortcuts() {
     useEffect(() => {
         const onKey = (e: KeyboardEvent) => {
@@ -130,15 +131,16 @@ function useShortcuts() {
                 terminalStore.toggle(e.target instanceof Element && !!e.target.closest('.xterm'))
                 return
             }
-            if (e.ctrlKey && !e.metaKey && /^[1-9]$/.test(e.key)) {
-                const project = appStore.projects[Number(e.key) - 1]
+            const digit = projectDigit(e)
+            if (digit) {
+                const project = appStore.projects[digit - 1]
                 if (project) {
                     e.preventDefault()
                     appStore.selectProject(project.cwd)
                 }
                 return
             }
-            if (!e.metaKey || e.ctrlKey || e.altKey)
+            if (!commandKey(e))
                 return
             if (key === 't' && !e.shiftKey && appStore.activeProject) {
                 e.preventDefault()

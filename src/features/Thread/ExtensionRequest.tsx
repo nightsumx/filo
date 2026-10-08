@@ -10,6 +10,7 @@ import { observer } from 'mobx-react-lite'
 import { useContext, useState } from 'react'
 import { CwdContext, Gutter } from './ToolRow'
 import { tr } from '@/lib/i18n'
+import { keys } from '@/platform'
 
 type Payload = { value?: string, confirmed?: boolean, cancelled?: boolean }
 
@@ -89,7 +90,7 @@ const RequestForm = observer(function RequestForm({ request, onRespond }: { requ
             <div className="flex items-center gap-2">
                 <Button type="submit" variant="primary" className="min-w-[72px]">{tr('确定', 'OK')}</Button>
                 <Button type="button" variant="ghost" onClick={cancel}>{tr('取消', 'Cancel')}</Button>
-                {editor && <span className="ml-auto text-[12px] text-[var(--jb-comment)]">{tr('⌘ Enter 提交', '⌘ Enter to submit')}</span>}
+                {editor && <span className="ml-auto text-[12px] text-[var(--jb-comment)]">{tr(`${keys('⌘ Enter')} 提交`, `${keys('⌘ Enter')} to submit`)}</span>}
             </div>
         </form>
     )

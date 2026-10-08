@@ -12,6 +12,7 @@ import { useId, useState } from 'react'
 import { useThread } from '../ThreadContext'
 import { Gutter, StatusMark } from '../ToolRow'
 import { tr } from '@/lib/i18n'
+import { keys } from '@/platform'
 
 function answerText(a?: AskAnswer): string {
     const parts = [...(a?.selected ?? []), ...(a?.text?.trim() ? [a.text.trim()] : [])]
@@ -91,10 +92,10 @@ const AskForm = observer(({ toolCallId, questions }: { toolCallId: string, quest
                 <QuestionField key={q.id} index={i} question={q} answer={answers[q.id]} onChange={a => setAnswers(prev => ({ ...prev, [q.id]: a }))} />
             ))}
             <div className="flex items-center gap-2">
-                <Button type="submit" variant="primary" disabled={sending || !answered} title={tr('提交（⌘ Enter）', 'Submit (⌘ Enter)')} className="min-w-[72px]">{tr('提交', 'Submit')}</Button>
+                <Button type="submit" variant="primary" disabled={sending || !answered} title={tr(`提交（${keys('⌘ Enter')}）`, `Submit (${keys('⌘ Enter')})`)} className="min-w-[72px]">{tr('提交', 'Submit')}</Button>
                 <Button type="button" variant="ghost" disabled={sending} onClick={() => void send({ cancelled: true })}>{tr('跳过', 'Skip')}</Button>
                 <span className="ml-auto text-[12px] text-[var(--jb-comment)] tabular-nums">
-                    {questions.length > 1 ? tr(`已回答 ${answered}/${questions.length} · ⌘ Enter 提交`, `${answered}/${questions.length} answered · ⌘ Enter to submit`) : tr('⌘ Enter 提交', '⌘ Enter to submit')}
+                    {questions.length > 1 ? tr(`已回答 ${answered}/${questions.length} · ${keys('⌘ Enter')} 提交`, `${answered}/${questions.length} answered · ${keys('⌘ Enter')} to submit`) : tr(`${keys('⌘ Enter')} 提交`, `${keys('⌘ Enter')} to submit`)}
                 </span>
             </div>
         </form>

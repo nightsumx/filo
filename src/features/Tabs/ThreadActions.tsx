@@ -8,6 +8,7 @@ import { AppWindow, Archive, ArrowRightToLine, EyeOff, FolderOpen, GitFork, Penc
 import { observable, runInAction } from 'mobx'
 import { observer } from 'mobx-react-lite'
 import { tr } from '@/lib/i18n'
+import { keys, showInFolderLabel } from '@/platform'
 
 interface MenuParts {
     Item: React.ComponentType<{ onSelect?: () => void, disabled?: boolean, className?: string, children: React.ReactNode }>
@@ -88,7 +89,7 @@ export const ThreadActions = observer(({ thread, parts: { Item, Separator } }: {
             )}
             <Item onSelect={() => void window.pi.openFolder(thread.cwd)}>
                 <FolderOpen size={14} />
-                {tr('在 Finder 中打开', 'Show in Finder')}
+                {showInFolderLabel()}
             </Item>
             <Separator />
             {/* Same as dragging the tab out of the window, or onto another window's tab bar. */}
@@ -106,7 +107,7 @@ export const ThreadActions = observer(({ thread, parts: { Item, Separator } }: {
             <Item onSelect={() => void closeTabWithConfirm(thread)}>
                 <X size={14} />
                 <span className="flex-1">{tr('关闭标签', 'Close tab')}</span>
-                <span className="text-[11px] text-gray-400">⌘W</span>
+                <span className="text-[11px] text-gray-400">{keys('⌘W')}</span>
             </Item>
             <Item disabled={!hasOthers} onSelect={() => void closeOthers(thread)}>
                 <XCircle size={14} />

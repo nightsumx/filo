@@ -10,6 +10,7 @@ import type { ITheme } from '@xterm/xterm'
 import { Terminal } from '@xterm/xterm'
 import { theme } from '@/lib/theme'
 import { reaction } from 'mobx'
+import { appTakesFromTerminal, lineMotion } from '@/platform'
 
 const api = () => window.pi
 
@@ -73,24 +74,6 @@ function xtermTheme(): ITheme {
     return { ...PALETTES[theme.dark ? 'dark' : 'light'], background }
 }
 
-/** Shortcuts the app handles even while a terminal has focus; xterm would swallow them otherwise. */
-function appShortcut(e: KeyboardEvent) {
-    if (e.ctrlKey && !e.metaKey && (e.key === 'Tab' || e.code === 'Backquote'))
-        return true
-    // ⌘ combos never mean anything to the shell; copy and paste come through the Edit menu.
-    return e.metaKey && !['ArrowLeft', 'ArrowRight', 'Backspace'].includes(e.key)
-}
-
-/** macOS text-field motions, translated to what line editors (zsh, bash, fish) understand. */
-const MOTIONS: Record<string, string> = {
-    'Meta+ArrowLeft': '\x01',
-    'Meta+ArrowRight': '\x05',
-    'Meta+Backspace': '\x15',
-    'Alt+ArrowLeft': '\x1Bb',
-    'Alt+ArrowRight': '\x1Bf',
-    'Alt+Backspace': '\x17',
-}
-
 export class TermView {
     readonly term: Terminal
     readonly element = document.createElement('div')
@@ -126,15 +109,16 @@ export class TermView {
         this.term.onBinary(data => api().terminalWrite(id, data))
         this.term.onResize(({ cols, rows }) => api().terminalResize(id, cols, rows))
         this.term.attachCustomKeyEventHandler((e) => {
+            // Shortcuts the app handles even while a terminal has focus; xterm would swallow them otherwise.
             if (e.type !== 'keydown')
-                return !appShortcut(e)
-            const motion = MOTIONS[`${e.metaKey ? 'Meta+' : e.altKey ? 'Alt+' : ''}${e.key}`]
-            if (motion && !e.shiftKey && !e.ctrlKey) {
+                return !appTakesFromTerminal(e)
+            const motion = lineMotion(e)
+            if (motion) {
                 e.preventDefault()
                 api().terminalWrite(id, motion)
                 return false
             }
-            return !appShortcut(e)
+            return !appTakesFromTerminal(e)
         })
     }
 

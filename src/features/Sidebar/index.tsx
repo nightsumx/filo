@@ -19,6 +19,7 @@ import { observer } from 'mobx-react-lite'
 import { useEffect, useState } from 'react'
 import { ProjectBadge } from '../Toolbar/ProjectBadge'
 import { newThreadLabel, tr } from '@/lib/i18n'
+import { keys, projectKeys, showInFolderLabel } from '@/platform'
 
 /** Threads listed per project before a "show more" row. */
 const PAGE = 12
@@ -238,7 +239,7 @@ const ProjectNode = observer(({ project, index, expanded, onToggle }: { project:
                 aria-selected={active}
                 tabIndex={active ? 0 : -1}
                 data-tree-row
-                title={index < 9 ? `${project.cwd}（⌃${index + 1}）` : project.cwd}
+                title={index < 9 ? `${project.cwd}（${projectKeys(index + 1)}）` : project.cwd}
                 onClick={select}
                 onDoubleClick={() => onToggle()}
                 onKeyDown={(e) => {
@@ -301,7 +302,7 @@ const ProjectNode = observer(({ project, index, expanded, onToggle }: { project:
                             </DropdownMenuItem>
                             <DropdownMenuItem onSelect={() => void window.pi.openFolder(project.cwd)}>
                                 <FolderOpen size={14} />
-                                {tr('在 Finder 中打开', 'Show in Finder')}
+                                {showInFolderLabel()}
                             </DropdownMenuItem>
                             <DropdownMenuSeparator />
                             {appStore.windowProjects.length > 1 && (
@@ -380,7 +381,7 @@ export const Sidebar = observer(() => {
                 <button type="button" aria-label={toggleAllLabel} title={toggleAllLabel} onClick={toggleAll} className={toolBtn}>
                     {anyExpanded ? <ChevronsDownUp size={14} /> : <ChevronsUpDown size={14} />}
                 </button>
-                <button type="button" aria-label={tr('隐藏项目面板', 'Hide projects panel')} title={tr('隐藏（⌘B）', 'Hide (⌘B)')} onClick={appStore.toggleSidebar} className={toolBtn}>
+                <button type="button" aria-label={tr('隐藏项目面板', 'Hide projects panel')} title={tr(`隐藏（${keys('⌘B')}）`, `Hide (${keys('⌘B')})`)} onClick={appStore.toggleSidebar} className={toolBtn}>
                     <Minus size={14} />
                 </button>
             </div>

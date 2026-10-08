@@ -11,6 +11,7 @@ import { reaction } from 'mobx'
 import { observer } from 'mobx-react-lite'
 import { useEffect, useRef } from 'react'
 import { existingView, pruneViews, viewOf } from './views'
+import { keys, terminalCommand, terminalKeys } from '@/platform'
 
 const headerBtn = 'flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-gray-500 outline-none hover:bg-black/[0.06] hover:text-gray-800'
 
@@ -59,7 +60,7 @@ const Tab = observer(({ info, active }: { info: TerminalInfo, active: boolean })
             <button
                 type="button"
                 aria-label={tr(`关闭终端 ${info.title}`, `Close terminal ${info.title}`)}
-                title={tr('关闭（⌘W）', 'Close (⌘W)')}
+                title={tr(`关闭（${terminalKeys('W')}）`, `Close (${terminalKeys('W')})`)}
                 onClick={(e) => {
                     e.stopPropagation()
                     void terminalStore.close(info.id)
@@ -121,12 +122,12 @@ const TerminalBody = observer(({ info }: { info: TerminalInfo }) => {
                 <ContextMenuItem onSelect={() => document.execCommand('copy')}>
                     <Copy size={14} />
                     {tr('复制', 'Copy')}
-                    <span className="ml-auto text-[11px] text-gray-500">⌘C</span>
+                    <span className="ml-auto text-[11px] text-gray-500">{terminalKeys('C')}</span>
                 </ContextMenuItem>
                 <ContextMenuItem onSelect={() => existingView(info.id)?.term.clear()}>
                     <Eraser size={14} />
                     {tr('清屏', 'Clear')}
-                    <span className="ml-auto text-[11px] text-gray-500">⌘K</span>
+                    <span className="ml-auto text-[11px] text-gray-500">{terminalKeys('K')}</span>
                 </ContextMenuItem>
                 <ContextMenuSeparator />
                 <ContextMenuItem disabled={!hasThread} onSelect={() => void send()}>
@@ -144,7 +145,7 @@ export const TerminalPanel = observer(() => {
     const project = terminalStore.project
 
     const onKeyDown = (e: React.KeyboardEvent) => {
-        if (!e.metaKey || e.ctrlKey || e.altKey || e.shiftKey || !active)
+        if (!terminalCommand(e) || !active)
             return
         const key = e.key.toLowerCase()
         // Inside the terminal these act on terminals, not on threads.
@@ -156,6 +157,14 @@ export const TerminalPanel = observer(() => {
         }
         else if (key === 'k') {
             existingView(active.id)?.term.clear()
+        }
+        // Copy and paste: the Edit menu has them on macOS (so these never fire there), Ctrl+Shift+C/V elsewhere.
+        else if (key === 'c') {
+            document.execCommand('copy')
+        }
+        else if (key === 'v') {
+            const view = existingView(active.id)
+            void navigator.clipboard.readText().then(text => text && view?.term.paste(text))
         }
         else {
             return
@@ -171,7 +180,7 @@ export const TerminalPanel = observer(() => {
                 <div role="tablist" className="flex min-w-0 items-center gap-0.5 overflow-x-auto">
                     {tabs.map(t => <Tab key={t.id} info={t} active={t.id === active?.id} />)}
                 </div>
-                <button type="button" aria-label={tr('新终端', 'New terminal')} title={tr('新终端（⌘T）', 'New terminal (⌘T)')} disabled={!project} onClick={() => project && void terminalStore.create(project)} className={headerBtn}>
+                <button type="button" aria-label={tr('新终端', 'New terminal')} title={tr(`新终端（${terminalKeys('T')}）`, `New terminal (${terminalKeys('T')})`)} disabled={!project} onClick={() => project && void terminalStore.create(project)} className={headerBtn}>
                     <Plus size={14} />
                 </button>
                 <span className="flex-1" />
@@ -180,7 +189,7 @@ export const TerminalPanel = observer(() => {
                         <RotateCw size={13} />
                     </button>
                 )}
-                <button type="button" aria-label={tr('隐藏终端', 'Hide terminal')} title={tr('隐藏（⌃`）', 'Hide (⌃`)')} onClick={terminalStore.hide} className={headerBtn}>
+                <button type="button" aria-label={tr('隐藏终端', 'Hide terminal')} title={tr(`隐藏（${keys('⌃`')}）`, `Hide (${keys('⌃`')})`)} onClick={terminalStore.hide} className={headerBtn}>
                     <ChevronDown size={15} />
                 </button>
             </div>

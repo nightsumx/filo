@@ -1,3 +1,5 @@
+import { hasQuickLook } from '@/platform'
+
 /**
  * How the review panel shows a file besides its text diff:
  * - image / svg / pdf / audio / video / font: the browser renders the bytes
@@ -59,7 +61,8 @@ export function previewOf(path: string): { kind: PreviewKind, mime: string } | n
     const dot = name.lastIndexOf('.')
     if (dot <= 0)
         return null
-    return byExt[name.slice(dot + 1).toLowerCase()] ?? null
+    const preview = byExt[name.slice(dot + 1).toLowerCase()] ?? null
+    return preview?.kind === 'quicklook' && !hasQuickLook ? null : preview
 }
 
 /** 1536 → "1.5 KB"; binary units, one decimal under 10. */

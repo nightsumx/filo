@@ -9,6 +9,7 @@ import { Check, ChevronRight, Loader2, Monitor, Moon, Settings, SquareTerminal, 
 import { observer } from 'mobx-react-lite'
 import { ProjectBadge } from '../Toolbar/ProjectBadge'
 import { newThreadLabel, tr } from '@/lib/i18n'
+import { keys } from '@/platform'
 
 const widget = 'flex h-5 shrink-0 items-center gap-1 rounded px-1.5 text-gray-600 outline-none hover:bg-black/[0.06] hover:text-gray-900 data-[state=open]:bg-black/[0.08]'
 
@@ -92,7 +93,7 @@ export const StatusBar = observer(() => {
                     type="button"
                     aria-pressed={terminalOpen}
                     className={cn(widget, terminalOpen && 'bg-black/[0.08] text-gray-900')}
-                    title={terminalOpen ? tr('隐藏终端（⌃`）', 'Hide terminal (⌃`)') : tr('打开终端（⌃`）', 'Open terminal (⌃`)')}
+                    title={terminalOpen ? tr(`隐藏终端（${keys('⌃`')}）`, `Hide terminal (${keys('⌃`')})`) : tr(`打开终端（${keys('⌃`')}）`, `Open terminal (${keys('⌃`')})`)}
                     onClick={() => (terminalOpen ? terminalStore.hide() : terminalStore.show())}
                 >
                     <SquareTerminal size={12} />
@@ -109,7 +110,7 @@ export const StatusBar = observer(() => {
                 {env?.ok ? `pi ${env.env.version}${env.env.bundled ? tr(' · 内置', ' · built-in') : ''}` : env ? tr('pi 不可用', 'pi unavailable') : tr('正在查找 pi…', 'Looking for pi…')}
             </span>
             <ThemeMenu />
-            <button type="button" className={widget} aria-label={tr('设置', 'Settings')} title={tr('设置（⌘,）', 'Settings (⌘,)')} onClick={() => appStore.setSettingsOpen(true)}>
+            <button type="button" className={widget} aria-label={tr('设置', 'Settings')} title={tr(`设置（${keys('⌘,')}）`, `Settings (${keys('⌘,')})`)} onClick={() => appStore.setSettingsOpen(true)}>
                 <Settings size={12} />
             </button>
         </footer>

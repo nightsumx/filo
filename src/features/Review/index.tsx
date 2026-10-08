@@ -17,6 +17,7 @@ import { Segmented } from './previewParts'
 import { TextPreview } from './TextPreview'
 import { useGitStatus } from './useGitStatus'
 import { newThreadLabel, tr } from '@/lib/i18n'
+import { keys } from '@/platform'
 
 function statusBadge(status: string): { letter: string, className: string, nameClass: string, label: string } {
     if (status === '??')
@@ -508,7 +509,7 @@ export const ReviewPanel = observer(({ thread, onClose }: { thread: Thread, onCl
                             type="button"
                             disabled={!picked.length || !message.trim() || committing}
                             onClick={() => void commit()}
-                            title={tr('提交所选文件（⌘↩）', 'Commit the selected files (⌘↩)')}
+                            title={tr(`提交所选文件（${keys('⌘↩')}）`, `Commit the selected files (${keys('⌘↩')})`)}
                             className="flex h-7 items-center gap-1.5 rounded-md bg-ide-accent px-3 text-[12px] font-medium text-white hover:bg-ide-accent-hover disabled:opacity-40 disabled:hover:bg-ide-accent light:disabled:bg-[var(--jb-fill)] light:disabled:text-[var(--jb-disabled-fg)] light:disabled:opacity-100 light:disabled:hover:bg-[var(--jb-fill)]"
                         >
                             {committing && <Loader2 size={12} className="animate-spin" />}

@@ -11,15 +11,16 @@ import { ExtensionRequest } from './ExtensionRequest'
 import { MessageList } from './MessageList'
 import { SubagentComposer, SubagentHeader } from './SubagentPane'
 import { newThreadLabel, tr } from '@/lib/i18n'
+import { keys } from '@/platform'
 
 /** Shortcut hints shown on empty editors, like WebStorm's empty editor area. */
 export const ShortcutHints = observer(function ShortcutHints({ className }: { className?: string }) {
     const rows: [string, string][] = [
-        [newThreadLabel(), '⌘T'],
-        [tr('切换项目', 'Switch project'), '⌘P'],
-        [tr('切换标签', 'Switch tab'), '⌃Tab'],
-        [tr('项目面板', 'Projects panel'), '⌘B'],
-        [tr('分栏 / 单栏', 'Split / single'), '⌘\\'],
+        [newThreadLabel(), keys('⌘T')],
+        [tr('切换项目', 'Switch project'), keys('⌘P')],
+        [tr('切换标签', 'Switch tab'), keys('⌃Tab')],
+        [tr('项目面板', 'Projects panel'), keys('⌘B')],
+        [tr('分栏 / 单栏', 'Split / single'), keys('⌘\\')],
     ]
     return (
         <dl className={cn('grid grid-cols-[auto_auto] gap-x-4 gap-y-1.5 text-[13px]', className)}>

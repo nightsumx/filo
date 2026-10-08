@@ -12,6 +12,7 @@ import { observer } from 'mobx-react-lite'
 import { useEffect, useRef, useState } from 'react'
 import { closeTabWithConfirm, renaming, ThreadActions } from './ThreadActions'
 import { newThreadLabel, tr } from '@/lib/i18n'
+import { keys } from '@/platform'
 
 const iconBtn = 'flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-gray-500 hover:bg-black/[0.06] hover:text-gray-800 outline-none data-[state=open]:bg-black/[0.08]'
 
@@ -182,7 +183,7 @@ const Tab = observer(({ thread, index, visible }: { thread: Thread, index: numbe
             <button
                 type="button"
                 aria-label={tr(`关闭 ${thread.title}`, `Close ${thread.title}`)}
-                title={index < 9 ? tr('关闭（⌘W）', 'Close (⌘W)') : tr('关闭', 'Close')}
+                title={index < 9 ? tr(`关闭（${keys('⌘W')}）`, `Close (${keys('⌘W')})`) : tr('关闭', 'Close')}
                 onClick={(e) => {
                     e.stopPropagation()
                     void closeTabWithConfirm(thread)
@@ -242,7 +243,7 @@ const HistoryMenu = observer(() => {
                 <DropdownMenuItem onSelect={() => appStore.newThread(project.cwd)}>
                     <Plus size={14} />
                     {newThreadLabel()}
-                    <span className="ml-auto text-[11px] text-gray-400">⌘T</span>
+                    <span className="ml-auto text-[11px] text-gray-400">{keys('⌘T')}</span>
                 </DropdownMenuItem>
             </DropdownMenuContent>
         </DropdownMenu>
@@ -288,7 +289,7 @@ export const TabBar = observer(() => {
                 ))}
             </div>
             {appStore.project && (
-                <button type="button" aria-label={newThreadLabel()} title={tr('新线程（⌘T）', 'New thread (⌘T)')} onClick={() => appStore.newThread(appStore.project!.cwd)} className={iconBtn}>
+                <button type="button" aria-label={newThreadLabel()} title={tr(`新线程（${keys('⌘T')}）`, `New thread (${keys('⌘T')})`)} onClick={() => appStore.newThread(appStore.project!.cwd)} className={iconBtn}>
                     <Plus size={15} />
                 </button>
             )}

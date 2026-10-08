@@ -12,6 +12,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useGitStatus } from '../Review/useGitStatus'
 import { ProjectBadge } from './ProjectBadge'
 import { newThreadLabel, tr } from '@/lib/i18n'
+import { commandKey, keys, projectKeys, titleBarInset } from '@/platform'
 
 export const toolbarBtn = 'flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-[13px] text-gray-800 outline-none transition-colors hover:bg-black/[0.06] data-[state=open]:bg-black/[0.08] focus-visible:ring-2 focus-visible:ring-ide-accent/50 disabled:opacity-40 disabled:hover:bg-transparent'
 const iconBtn = cn(toolbarBtn, 'w-7 justify-center px-0 text-gray-600')
@@ -55,7 +56,7 @@ export const ProjectItem = observer(function ProjectItem({ project, branch, acti
                     </div>
                 )}
             </div>
-            {shortcut != null && <span className={cn('shrink-0 pt-px text-[11px] text-gray-400', hasActions && 'group-hover/item:invisible')}>{`⌃${shortcut}`}</span>}
+            {shortcut != null && <span className={cn('shrink-0 pt-px text-[11px] text-gray-400', hasActions && 'group-hover/item:invisible')}>{projectKeys(shortcut)}</span>}
             {hasActions && (
                 <span className="absolute right-1.5 top-1.5 hidden items-center gap-0.5 group-hover/item:flex">
                     {onAttach && (
@@ -121,7 +122,7 @@ const ProjectSwitcher = observer(() => {
     const actions = q
         ? []
         : [
-                { key: 'new', label: newThreadLabel(), hint: '⌘T', Icon: Plus, run: () => project && appStore.newThread(project.cwd), disabled: !project },
+                { key: 'new', label: newThreadLabel(), hint: keys('⌘T'), Icon: Plus, run: () => project && appStore.newThread(project.cwd), disabled: !project },
                 { key: 'open', label: tr('打开文件夹…', 'Open folder…'), hint: '', Icon: FolderOpen, run: () => void appStore.addProject(), disabled: false },
                 ...(otherWindows && here.length ? [{ key: 'merge', label: tr('合并所有窗口', 'Merge all windows'), hint: '', Icon: Merge, run: () => void appStore.mergeAllWindows(), disabled: false }] : []),
             ]
@@ -129,7 +130,7 @@ const ProjectSwitcher = observer(() => {
 
     useEffect(() => {
         const onKey = (e: KeyboardEvent) => {
-            if (e.metaKey && !e.shiftKey && !e.ctrlKey && !e.altKey && e.key.toLowerCase() === 'p') {
+            if (commandKey(e) && !e.shiftKey && e.key.toLowerCase() === 'p') {
                 e.preventDefault()
                 setOpen(v => !v)
             }
@@ -211,7 +212,7 @@ const ProjectSwitcher = observer(() => {
 
     return (
         <Popover open={open} onOpenChange={setOpen}>
-            <PopoverTrigger className={cn(toolbarBtn, 'max-w-[280px] pl-1.5 font-semibold')} title={tr('切换项目（⌘P）', 'Switch project (⌘P)')}>
+            <PopoverTrigger className={cn(toolbarBtn, 'max-w-[280px] pl-1.5 font-semibold')} title={tr(`切换项目（${keys('⌘P')}）`, `Switch project (${keys('⌘P')})`)}>
                 {project ? <ProjectBadge name={project.name} /> : <FolderPlus size={15} className="text-gray-500" />}
                 <span className="truncate">{project?.name ?? tr('选择项目', 'Choose project')}</span>
                 <ChevronDown size={13} className="shrink-0 text-gray-500" />
@@ -313,7 +314,7 @@ const TerminalToggle = observer(() => {
             type="button"
             aria-pressed={open}
             aria-label={tr('终端', 'Terminal')}
-            title={busy ? tr(`终端：${busy} 个在运行（⌃\`）`, `Terminal: ${busy} running (⌃\`)`) : tr('终端（⌃\`）', 'Terminal (⌃\`)')}
+            title={busy ? tr(`终端：${busy} 个在运行（${keys('⌃`')}）`, `Terminal: ${busy} running (${keys('⌃`')})`) : tr(`终端（${keys('⌃`')}）`, `Terminal (${keys('⌃`')})`)}
             disabled={!appStore.activeProject}
             onClick={() => (open ? terminalStore.hide() : terminalStore.show())}
             className={cn(iconBtn, 'relative', open && 'text-gray-900')}
@@ -328,18 +329,18 @@ export const MainToolbar = observer(() => {
     const split = appStore.layout === 'split'
     const project = appStore.project
     return (
-        <header className="app-drag flex h-[38px] shrink-0 items-center gap-1 pl-[78px] pr-2">
+        <header className={cn('app-drag flex h-[38px] shrink-0 items-center gap-1', titleBarInset.className)} style={titleBarInset.style}>
             <ProjectSwitcher />
             {project && <BranchWidget cwd={project.cwd} />}
             <span className="min-w-4 flex-1 self-stretch" />
-            <button type="button" aria-label={tr('搜索线程', 'Search threads')} title={tr('搜索线程（⌘⇧F）', 'Search threads (⌘⇧F)')} onClick={() => appStore.setSearchOpen(true)} className={iconBtn}>
+            <button type="button" aria-label={tr('搜索线程', 'Search threads')} title={tr(`搜索线程（${keys('⌘⇧F')}）`, `Search threads (${keys('⌘⇧F')})`)} onClick={() => appStore.setSearchOpen(true)} className={iconBtn}>
                 <Search size={15} />
             </button>
             <button
                 type="button"
                 aria-pressed={split}
                 aria-label={split ? tr('切换为单栏', 'Switch to single pane') : tr('切换为自动分栏', 'Switch to auto split')}
-                title={split ? tr(`自动分栏：当前 ${appStore.visibleTabs.length} 栏（⌘\\）`, `Auto split: ${appStore.visibleTabs.length} panes now (⌘\\)`) : tr('单栏（⌘\\ 切换自动分栏）', 'Single pane (⌘\\ for auto split)')}
+                title={split ? tr(`自动分栏：当前 ${appStore.visibleTabs.length} 栏（${keys('⌘\\')}）`, `Auto split: ${appStore.visibleTabs.length} panes now (${keys('⌘\\')})`) : tr(`单栏（${keys('⌘\\')} 切换自动分栏）`, `Single pane (${keys('⌘\\')} for auto split)`)}
                 onClick={appStore.toggleLayout}
                 className={cn(toolbarBtn, 'text-gray-600')}
             >
@@ -347,7 +348,7 @@ export const MainToolbar = observer(() => {
                 <span className="text-[12.5px]">{split ? tr('分栏', 'Split') : tr('单栏', 'Single')}</span>
             </button>
             <span className="mx-1 h-4 w-px bg-gray-300 dark:bg-gray-200" />
-            <button type="button" aria-pressed={appStore.sidebarOpen} aria-label={tr('项目面板', 'Projects panel')} title={tr('项目面板（⌘B）', 'Projects panel (⌘B)')} onClick={appStore.toggleSidebar} className={cn(iconBtn, appStore.sidebarOpen && 'text-gray-900')}>
+            <button type="button" aria-pressed={appStore.sidebarOpen} aria-label={tr('项目面板', 'Projects panel')} title={tr(`项目面板（${keys('⌘B')}）`, `Projects panel (${keys('⌘B')})`)} onClick={appStore.toggleSidebar} className={cn(iconBtn, appStore.sidebarOpen && 'text-gray-900')}>
                 <PanelLeft size={16} />
             </button>
             <TerminalToggle />
