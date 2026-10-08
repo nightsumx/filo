@@ -58,6 +58,18 @@ async function main() {
         const threadTabs = () => page.evaluate<number>('window.__app.tabs.length')
         const tabsBefore = await threadTabs()
 
+        // The status bar button is there with no terminal yet; it opens one and closes the panel again.
+        const statusButton = `[...document.querySelectorAll('footer button')].find(b => b.textContent.startsWith('Terminal'))`
+        check(await page.evaluate<boolean>(`!!${statusButton} && window.__terminals.list.length === 0`), 'the status bar has a Terminal button before any terminal exists')
+        await page.evaluate(`${statusButton}.click()`)
+        await until('panel from the status bar', () => page.evaluate<boolean>(`!!document.querySelector("section[aria-label=Terminal] .xterm") && ${statusButton}.getAttribute('aria-pressed') === 'true'`))
+        check(await page.evaluate<number>('window.__terminals.list.length') === 1, 'it opens the panel with a first shell')
+        await page.evaluate(`${statusButton}.click()`)
+        await until('panel closed from the status bar', () => page.evaluate<boolean>('!document.querySelector("section[aria-label=Terminal]")'))
+        check(true, 'clicked again, it closes the panel')
+        await page.evaluate('window.__terminals.close(window.__terminals.list[0].id)')
+        await until('back to none', () => page.evaluate<boolean>('window.__terminals.list.length === 0'))
+
         // ⌃` opens the tool window with a shell, focused.
         await key(page, '`', 'Backquote', 2)
         const id = await until('a terminal', () => page.evaluate<string | undefined>('window.__terminals.tabs[0]?.id'))

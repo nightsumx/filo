@@ -57,6 +57,7 @@ export const StatusBar = observer(() => {
     const env = appStore.env
     const running = [...appStore.threads.values()].filter(t => t.running).length
     const terminalsBusy = project ? terminalStore.busyIn(project.cwd) : 0
+    const terminalOpen = terminalStore.open && terminalStore.tabs.length > 0
 
     return (
         <footer className="flex h-[26px] shrink-0 items-center gap-0.5 px-2 text-[12px]">
@@ -84,10 +85,24 @@ export const StatusBar = observer(() => {
                     {tr(`${running} 个线程运行中`, `${running} running`)}
                 </span>
             )}
-            {terminalsBusy > 0 && (
-                <button type="button" className={widget} title={tr('显示终端（⌃`）', 'Show terminal (⌃`)')} onClick={terminalStore.show}>
+            {project && (
+                // Always there, like a JetBrains tool window button: opens the panel (with a first
+                // shell when there is none) and closes it again; counts what runs in it.
+                <button
+                    type="button"
+                    aria-pressed={terminalOpen}
+                    className={cn(widget, terminalOpen && 'bg-black/[0.08] text-gray-900')}
+                    title={terminalOpen ? tr('隐藏终端（⌃`）', 'Hide terminal (⌃`)') : tr('打开终端（⌃`）', 'Open terminal (⌃`)')}
+                    onClick={() => (terminalOpen ? terminalStore.hide() : terminalStore.show())}
+                >
                     <SquareTerminal size={12} />
-                    {tr(`${terminalsBusy} 个终端运行中`, `${terminalsBusy} in terminal`)}
+                    {tr('终端', 'Terminal')}
+                    {terminalsBusy > 0 && (
+                        <>
+                            <span className="h-1.5 w-1.5 rounded-full bg-[#99d58f]" aria-hidden />
+                            <span>{tr(`${terminalsBusy} 个运行中`, `${terminalsBusy} running`)}</span>
+                        </>
+                    )}
                 </button>
             )}
             <span className={cn(widget, 'cursor-default')} title={piTitle(env)}>
