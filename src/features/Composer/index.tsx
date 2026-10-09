@@ -17,6 +17,8 @@ import { tr } from '@/lib/i18n'
 import type { Localized } from '@shared/i18n'
 
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024
+/** The last composer focus request each thread has taken (requests are numbered app-wide). */
+const focusHandled = new WeakMap<Thread, number>()
 
 function readImage(file: File): Promise<ImageContent> {
     return new Promise((resolve, reject) => {
@@ -100,11 +102,15 @@ export const Composer = observer(({ thread }: { thread: Thread }) => {
         setSlashIndex(0)
     }, [slashQuery])
 
-    // Tab switches and new threads move keyboard focus here; clicks inside a pane do not.
+    // Tab switches and new threads move keyboard focus here; clicks inside a pane do not. Each request
+    // once: a thread that gets its session changes key, which must not take focus back from where the
+    // user has moved it since (the terminal).
     const focusRequest = appStore.composerFocus
     useEffect(() => {
-        if (focusRequest.key === thread.key)
-            textareaRef.current?.focus()
+        if (focusRequest.key !== thread.key || focusHandled.get(thread) === focusRequest.n)
+            return
+        focusHandled.set(thread, focusRequest.n)
+        textareaRef.current?.focus()
     }, [focusRequest.n, focusRequest.key, thread.key])
 
     // Auto-grow up to 40% of the window, then scroll.

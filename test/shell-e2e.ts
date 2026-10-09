@@ -58,6 +58,18 @@ async function main() {
         const threadTabs = () => page.evaluate<number>('window.__app.tabs.length')
         const tabsBefore = await threadTabs()
 
+        // ⌃` right after launch: the terminal keeps focus when the window's first thread gets its
+        // session a moment later (the thread's key changes then; its composer must not take focus back).
+        const firstKey = await page.evaluate<string>('window.__app.activeKey')
+        await key(page, '`', 'Backquote', 2)
+        await until('first terminal focused', () => page.evaluate<boolean>('!!document.activeElement?.closest(".xterm")'))
+        if (firstKey?.startsWith('new:'))
+            await until('the first thread has its session', () => page.evaluate<boolean>(`window.__app.activeKey !== ${JSON.stringify(firstKey)}`))
+        await new Promise(r => setTimeout(r, 500))
+        check(await page.evaluate<boolean>('!!document.activeElement?.closest(".xterm")'), `⌃\` at launch keeps the focus in the terminal once the thread has started (${firstKey?.slice(0, 4)}…)`)
+        await page.evaluate('window.__terminals.close(window.__terminals.list[0].id)')
+        await until('no terminal yet again', () => page.evaluate<boolean>('window.__terminals.list.length === 0 && !document.querySelector("section[aria-label=Terminal]")'))
+
         // The status bar button is there with no terminal yet; it opens one and closes the panel again.
         const statusButton = `document.querySelector('footer button[aria-label="Terminal"]')`
         check(await page.evaluate<boolean>(`!!${statusButton} && window.__terminals.list.length === 0`), 'the status bar has a Terminal button before any terminal exists')
@@ -134,6 +146,11 @@ async function main() {
         await key(page, '`', 'Backquote', 2)
         await until('panel hidden', () => page.evaluate<boolean>('!document.querySelector("section[aria-label=Terminal]")'))
         check(await page.evaluate<boolean>(`window.__terminals.list.some(t => t.id === ${JSON.stringify(id)})`), '⌃` from inside hides the panel and the shell keeps running')
+        check(await until('composer focused', () => page.evaluate<boolean>('document.activeElement?.tagName === "TEXTAREA" && !document.activeElement.closest(".xterm")'), 3000).catch(() => false), 'and the keyboard goes back to the composer')
+        // A new thread focuses its composer too (another request, after the one already handled).
+        await page.evaluate('document.activeElement?.blur()')
+        await page.evaluate(`window.__app.newThread(${JSON.stringify(project)})`)
+        check(await until('new thread composer focused', () => page.evaluate<boolean>('document.activeElement?.tagName === "TEXTAREA"'), 3000).catch(() => false), 'a new thread focuses its composer')
 
         // Light theme: same layout, the terminal follows the colours.
         await page.evaluate('window.__app.setTheme("light")')
