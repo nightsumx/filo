@@ -48,8 +48,11 @@ export interface Platform {
     shellArgs: (shell: string, command?: string) => string[]
     /** A program called `name` in `dir`, if there is one that can be run. */
     findIn: (name: string, dirs: readonly string[]) => Promise<string | undefined>
-    /** How to start a program found by findIn with `args`. */
-    command: (file: string, args: readonly string[]) => Command
+    /**
+     * How to start a program found by findIn with `args`. `searchPath`: the PATH it will run with
+     * (default the app's), where Windows looks for the node an npm shim needs.
+     */
+    command: (file: string, args: readonly string[], searchPath?: string) => Command
     /** `env` with PATH set to `value`. */
     withPath: (env: Record<string, string>, value: string) => Record<string, string>
     /** A command named `name` that runs `argv` (and what it is given) with `env` (electron/acp/node.ts). */

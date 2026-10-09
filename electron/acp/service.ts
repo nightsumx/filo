@@ -135,10 +135,10 @@ export async function resolveLaunch(spec: AcpAgentSpec, appRoot?: string): Promi
     const dirs = [...searchPath.split(path.delimiter), ...(spec.dirs ?? []).map(expandHome)]
     const adapter = await platform.findIn(spec.bin, dirs)
     if (adapter)
-        return { ...platform.command(adapter, spec.args ?? []), bin: adapter, env, via: 'path' }
+        return { ...platform.command(adapter, spec.args ?? [], searchPath), bin: adapter, env, via: 'path' }
     const installed = appRoot ? await installedAgent(appRoot, spec) : undefined
     if (installed)
-        return { ...platform.command(installed.file, spec.args ?? []), bin: installed.file, env, via: 'app', outdated: installed.outdated }
+        return { ...platform.command(installed.file, spec.args ?? [], searchPath), bin: installed.file, env, via: 'app', outdated: installed.outdated }
     throw new AgentNotInstalled(spec, !!appRoot && !!installSource(spec))
 }
 

@@ -97,15 +97,20 @@ export function cmdLine(file: string, args: readonly string[]): string[] {
     return ['/d', '/s', '/c', `"${[cmdEscape(file), ...args.map(cmdArgument)].join(' ')}"`]
 }
 
-function command(file: string, args: readonly string[]): Command {
+function command(file: string, args: readonly string[], searchPath?: string): Command {
     if (!/\.(cmd|bat)$/i.test(file))
         return { file, args: [...args] }
     const script = readShim(file)
     if (script) {
-        // The shim prefers a node.exe next to it, as cmd-shim does.
+        // The shim prefers a node.exe next to it, as cmd-shim does, then the node on the child's
+        // PATH: the user's, or the app's node.cmd (electron/acp/node.ts), itself a batch file.
         const local = path.join(path.dirname(file), 'node.exe')
-        const node = isFile(local) ? local : findSync('node', pathDirs()) ?? 'node.exe'
-        return { file: node, args: [script, ...args] }
+        const dirs = searchPath === undefined ? pathDirs() : searchPath.split(path.delimiter)
+        const node = isFile(local) ? local : findSync('node', dirs)
+        if (node && !/\.(cmd|bat)$/i.test(node))
+            return { file: node, args: [script, ...args] }
+        if (node)
+            return command(node, [script, ...args])
     }
     // Any other batch file runs through cmd.exe, as Windows would run it.
     return { file: process.env.ComSpec || path.join(system32(), 'cmd.exe'), args: cmdLine(file, args), windowsVerbatimArguments: true }

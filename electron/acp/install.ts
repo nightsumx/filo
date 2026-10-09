@@ -95,7 +95,7 @@ export async function installAgent(root: string, spec: AcpAgentSpec, tools: Inst
 }
 
 function run(program: string, programArgs: string[], options: { cwd: string, env: Record<string, string>, timeoutMs: number }): Promise<void> {
-    const { file, args, windowsVerbatimArguments } = platform.command(program, programArgs)
+    const { file, args, windowsVerbatimArguments } = platform.command(program, programArgs, options.env.PATH)
     return new Promise((resolve, reject) => {
         const child = spawn(file, args, { cwd: options.cwd, env: options.env, stdio: ['ignore', 'ignore', 'pipe'], windowsVerbatimArguments })
         let stderr = ''

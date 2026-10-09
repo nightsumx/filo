@@ -109,7 +109,7 @@ describe.runIf(process.env.PI_GUI_SKIP_E2E !== '1')('terminal capability (real p
     // macOS: /tmp is a link to /private/tmp, which pi reports. Windows has no /tmp.
     const tmpIsLink = () => {
         try {
-            return realpathSync('/tmp') !== '/tmp'
+            return realpathSync('/tmp') === '/private/tmp'
         }
         catch {
             return false

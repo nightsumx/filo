@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process'
-import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -111,6 +111,28 @@ describe('win32', () => {
             const command = win32.command(file, args)
             const out = spawnSync(command.file, [...command.args, '--plain'], { windowsVerbatimArguments: command.windowsVerbatimArguments, encoding: 'utf8' })
             expect(JSON.parse(out.stdout)).toEqual([...args, '--plain'])
+        }
+        finally {
+            rmSync(dir, { recursive: true, force: true })
+        }
+    })
+
+    // The app's node is a batch file (launcher): a shim found with only that on PATH runs through it.
+    it.runIf(platform.id === 'win32')('runs an npm shim with the node on the PATH it is given', () => {
+        const dir = mkdtempSync(path.join(os.tmpdir(), 'filo shim '))
+        try {
+            const bin = path.join(dir, 'bin')
+            const pkg = path.join(dir, 'node_modules', 'x', 'cli.js')
+            mkdirSync(path.dirname(pkg), { recursive: true })
+            mkdirSync(bin)
+            writeFileSync(pkg, 'console.log(process.env.VIA_APP_NODE, JSON.stringify(process.argv.slice(2)))')
+            const launcher = win32.launcher('node', { VIA_APP_NODE: 'yes' }, [process.execPath])
+            writeFileSync(path.join(bin, launcher.file), launcher.text)
+            const shim = path.join(dir, 'x.cmd')
+            writeFileSync(shim, '@ECHO off\r\n"%_prog%"  "%dp0%\\node_modules\\x\\cli.js" %*\r\n')
+            const command = win32.command(shim, ['a b'], bin)
+            const out = spawnSync(command.file, command.args, { windowsVerbatimArguments: command.windowsVerbatimArguments, encoding: 'utf8' })
+            expect(out.stdout.trim()).toBe('yes ["a b"]')
         }
         finally {
             rmSync(dir, { recursive: true, force: true })

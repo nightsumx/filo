@@ -1,5 +1,5 @@
 import type { AcpAgentSpec } from '@shared/agents'
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawnSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
@@ -62,6 +62,8 @@ describe('the app as node, without Node.js on PATH', () => {
         await writeFile(path.join(pkg, 'bin', 'agent.js'), '#!/usr/bin/env node\nconsole.log("agent on", process.versions.node)\n', { mode: 0o755 })
         const spec: AcpAgentSpec = { id: 'gemini', label: 'Fake', bin: 'fake-agent', npm: pkg, signIn: { zh: '', en: '' } }
         const file = await installAgent(path.join(dir, 'agents'), spec, { searchPath: env.PATH, env, fetch: url => fetch(url) })
-        expect(execFileSync(file, { env }).toString().trim()).toBe(`agent on ${execFileSync(electron, ['-p', 'process.versions.node'], { env: { ...env, ELECTRON_RUN_AS_NODE: '1' } }).toString().trim()}`)
+        // As the app runs it: a .cmd shim on Windows goes through cmd.exe.
+        const run = platform.command(file, [], env.PATH)
+        expect(spawnSync(run.file, run.args, { env, windowsVerbatimArguments: run.windowsVerbatimArguments }).stdout.toString().trim()).toBe(`agent on ${execFileSync(electron, ['-p', 'process.versions.node'], { env: { ...env, ELECTRON_RUN_AS_NODE: '1' } }).toString().trim()}`)
     }, 120_000)
 })
