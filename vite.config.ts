@@ -1,8 +1,8 @@
-import { rmSync } from 'node:fs'
+import { existsSync, realpathSync, rmSync } from 'node:fs'
 import { resolve } from 'node:path'
 import type { Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
-import { defineConfig } from 'vite'
+import { defineConfig, searchForWorkspaceRoot } from 'vite'
 import electron from 'vite-plugin-electron/simple'
 import pkg from './package.json'
 
@@ -24,7 +24,12 @@ function strictCsp(): Plugin {
 
 export default defineConfig(({ command }) => {
     const isBuild = command === 'build'
-    rmSync('dist-electron', { recursive: true, force: true })
+    // Not for tests: they would delete the build the e2e scripts run.
+    if (!process.env.VITEST)
+        rmSync('dist-electron', { recursive: true, force: true })
+    // node_modules can be a link to another checkout (scripts/release.sh builds a snapshot that way);
+    // files under its real path are still ours to serve.
+    const modules = existsSync('node_modules') ? [realpathSync('node_modules')] : []
 
     return {
         define: { __APP_VERSION__: JSON.stringify(pkg.version) },
@@ -70,7 +75,7 @@ export default defineConfig(({ command }) => {
                 '@shared': resolve('shared'),
             },
         },
-        server: { port: 5288 },
+        server: { port: 5288, fs: { allow: [searchForWorkspaceRoot(process.cwd()), ...modules] } },
         clearScreen: false,
         test: {
             include: ['src/**/*.test.ts', 'electron/**/*.test.ts', 'shared/**/*.test.ts', 'test/**/*.test.ts'],
