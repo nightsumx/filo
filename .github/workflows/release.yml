@@ -73,7 +73,10 @@ jobs:
           scripts/bundle-pi.sh
 
       - name: Package
-        run: npx electron-builder ${{ matrix.target }} --publish never
+        run: |
+          npx electron-builder ${{ matrix.target }} --publish never
+          # AppImage names x64 x86_64; the install script and the site ask for Filo-x64.AppImage.
+          if [ -f release/Filo-x86_64.AppImage ]; then mv release/Filo-x86_64.AppImage release/Filo-x64.AppImage; fi
 
       - name: Checksums
         run: |
