@@ -122,11 +122,17 @@ export const ACP_AGENTS: readonly AcpAgentSpec[] = [
         bin: 'cursor-agent',
         args: ['acp'],
         dirs: ['~/.local/bin'],
-        // From the ACP registry (cdn.agentclientprotocol.com/registry/v1); the hashes are of the
-        // archives as downloaded on 2026-10-07 (the registry lists none for Cursor).
+        // From the ACP registry (cdn.agentclientprotocol.com/registry/v1/latest/registry.json); the
+        // hashes are of the archives as downloaded (macOS 2026-10-07, Linux and Windows 2026-10-09;
+        // the registry lists none for Cursor).
         archive: {
             'darwin-arm64': { url: 'https://downloads.cursor.com/lab/2026.10.01-14929f9/darwin/arm64/agent-cli-package.tar.gz', sha256: '778d04e542adc5c8b6760fda3ebe0757f903b1764f2792c232ef9a35e6e2151b', cmd: 'dist-package/cursor-agent' },
             'darwin-x64': { url: 'https://downloads.cursor.com/lab/2026.10.01-14929f9/darwin/x64/agent-cli-package.tar.gz', sha256: '8930008f9902a4d02d3185c0d34071e0536bac3426439b55bcfd48b78765a3dd', cmd: 'dist-package/cursor-agent' },
+            'linux-arm64': { url: 'https://downloads.cursor.com/lab/2026.10.01-14929f9/linux/arm64/agent-cli-package.tar.gz', sha256: 'c31ef0ba6b827fdf8053919de57abae4a7bd71afefdf2cab061e276faac42b3a', cmd: 'dist-package/cursor-agent' },
+            'linux-x64': { url: 'https://downloads.cursor.com/lab/2026.10.01-14929f9/linux/x64/agent-cli-package.tar.gz', sha256: 'ba9a855f8f813c91b9f2707127572d2dc9ae5a62818e1c36719625d0fb8bd452', cmd: 'dist-package/cursor-agent' },
+            // A batch file that runs the PowerShell script next to it on the node.exe it ships.
+            'win32-arm64': { url: 'https://downloads.cursor.com/lab/2026.10.01-14929f9/windows/arm64/agent-cli-package.zip', sha256: 'eda025bf9cc7632e48d290fa52468104916f0db261e2fa44306ad184cd1274c9', cmd: 'dist-package/cursor-agent.cmd' },
+            'win32-x64': { url: 'https://downloads.cursor.com/lab/2026.10.01-14929f9/windows/x64/agent-cli-package.zip', sha256: '2558ae1ddc155f43791e8eed145afa0366c5ad6a266b0e40c0b5c9490a945a5f', cmd: 'dist-package/cursor-agent.cmd' },
         },
         signIn: { zh: '在终端里运行 cursor-agent login', en: 'run cursor-agent login in a terminal' },
     },
