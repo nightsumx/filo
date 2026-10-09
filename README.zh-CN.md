@@ -1,6 +1,6 @@
 # Filo
 
-编码 Agent 的 Mac 工作台。[pi](https://pi.dev)、Codex、Claude Code 等 Agent 在多个线程里并排跑，每处改动都知道是哪个线程做的，另起一个只读的 pi 审查结果，所有会话都能搜。和终端里的 pi 用同一份会话和配置，随时切回终端。
+编码 Agent 的桌面工作台，支持 macOS、Linux 和 Windows。[pi](https://pi.dev)、Codex、Claude Code 等 Agent 在多个线程里并排跑，每处改动都知道是哪个线程做的，另起一个只读的 pi 审查结果，所有会话都能搜。和终端里的 pi 用同一份会话和配置，随时切回终端。
 
 ![Filo 的主窗口：左侧项目树，中间是线程的对话和 diff，右侧改动面板](site/public/shots/zh/main.webp)
 
@@ -8,22 +8,34 @@
 
 ## 安装
 
+macOS（Apple Silicon，11 及以上）和 Linux（x64、arm64）：
+
 ```bash
 curl -fsSL https://filoapp.dev/install.sh | bash
 ```
 
-需要 Apple Silicon，macOS 11 及以上。脚本从 GitHub 下载最新的 [release](https://github.com/nightsumx/filo/releases)，先校验签名，再装到 `/Applications`；没有管理员权限的话装到 `~/Applications`。再运行一次就是更新，运行前先退出 Filo。旧名 Pi 的安装会被替换掉。
+Windows（10 或 11，x64），在 PowerShell 里：
+
+```powershell
+irm https://filoapp.dev/install.ps1 | iex
+```
+
+脚本从 GitHub 下载最新的 [release](https://github.com/nightsumx/filo/releases)，校验之后再安装；再运行一次就是更新，运行前先退出 Filo。不需要管理员或 root 权限。
+
+- macOS：校验签名，装到 `/Applications`；没有管理员权限的话装到 `~/Applications`。旧名 Pi 的安装会被替换掉。
+- Linux：校验 SHA-256，把 AppImage 放到 `~/.local/share/filo`，加上应用菜单项和 `~/.local/bin/filo` 命令。AppImage 需要 FUSE（`fuse3`），大多数发行版自带。
+- Windows：校验 SHA-256，为当前用户静默安装到 `%LOCALAPPDATA%\Programs\Filo`，加上开始菜单和桌面快捷方式。
 
 不需要 Node.js 或 pi 命令行：Filo 自带一份 pi，登录 shell 里有你自己的 pi 就用你的。在“设置 → 模型供应商”里登录订阅、填 API key，或者接入本地模型，配置都存在 pi 自己的 `~/.pi/agent`。
 
-应用没有经过 Apple 公证。也可以从 releases 页面下载 `.dmg`，但第一次打开会被 macOS 拦下：先打开一次，再到“系统设置 → 隐私与安全性”点“仍要打开”。
+也可以从 releases 页面手动下载 `.dmg`、AppImage 或 `Filo-Setup-x64.exe`。macOS 版没有经过 Apple 公证，浏览器下载的第一次打开会被拦下：先打开一次，再到“系统设置 → 隐私与安全性”点“仍要打开”。Windows 安装程序没有代码签名，SmartScreen 会拦一次：点“更多信息”，再点“仍要运行”。
 
 ## 功能
 
 - **一个项目一个窗口**，像 JetBrains 那样，也能把几个项目合到一个窗口。标签可以拖到别的窗口，标签里正在跑的 pi 不会中断。
 - **改动归属到线程**。改动面板标出每个文件是哪个线程改的，两个线程改了同一个文件会提示；勾选文件直接提交或回滚。
 - **独立审查**。一轮结束后，另起一个只读的 pi 对照你的要求审查 diff（看不到 Agent 的推理过程），并跑命令取证。真正复现的问题标“已复现”，附命令、退出码和输出；只靠读代码推断的标“推测”。你挑好条目再交回 Agent。
-- **搜索所有会话**：⌘⇧F，终端里跑过的会话也在内，回车直接打开那个线程并定位到那条消息。
+- **搜索所有会话**：⌘⇧F（Linux 和 Windows 上是 Ctrl+Shift+F），终端里跑过的会话也在内，回车直接打开那个线程并定位到那条消息。
 - **分叉**：从任意一次提问分叉出新标签。
 - **不弹窗**：工具审批、Agent 的提问、计划确认都在对话里原地处理。
 - **终端里的 pi 也在这里**。终端里运行的 pi 会出现在项目树里（在跑、等你回答、空闲）。装了 [pi-cc-tui](packages/pi-cc-tui) 的话，在桌面端打开同一个会话会直接连上那个 pi：终端里的运行实时显示在桌面端，在桌面端发送的消息也在那个 pi 里执行，会话文件只有一条线。没装的话，桌面端跟随会话文件刷新，并提醒你两边同时发送会让对话分叉。

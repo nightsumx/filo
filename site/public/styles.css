@@ -19,6 +19,13 @@ html[data-lang="en"] [lang="zh"] {
     display: none !important;
 }
 
+/* Per-system install steps; the same script picks the visitor's system, the switcher changes it. */
+html[data-os="mac"] [data-for]:not([data-for~="mac"]),
+html[data-os="linux"] [data-for]:not([data-for~="linux"]),
+html[data-os="win"] [data-for]:not([data-for~="win"]) {
+    display: none !important;
+}
+
 * { box-sizing: border-box; }
 html { scroll-behavior: smooth; scroll-padding-top: 64px; }
 body {
@@ -104,6 +111,19 @@ h1 { font-size: clamp(40px, 6vw, 64px); line-height: 1.1; }
 .meta a { color: var(--muted); text-decoration: underline; text-underline-offset: 3px; text-decoration-color: rgba(255, 255, 255, 0.2); }
 .meta a:hover { color: var(--text); }
 .sep { margin: 0 6px; }
+.os { display: inline-flex; gap: 2px; margin: 36px auto 0; padding: 3px; border-radius: 8px; background: var(--panel); }
+.os button {
+    padding: 5px 14px;
+    border: 0;
+    border-radius: 6px;
+    background: none;
+    color: var(--muted);
+    font: 500 13.5px var(--sans);
+    cursor: pointer;
+}
+.os button:hover { color: var(--text); }
+.os button[aria-pressed="true"] { background: var(--panel-2); color: var(--text); }
+.os + .install { margin-top: 12px; }
 
 /* ---------------------------------------------------------------- screenshots */
 .shot { margin: 0; }
@@ -142,6 +162,8 @@ h1 { font-size: clamp(40px, 6vw, 64px); line-height: 1.1; }
 /* ---------------------------------------------------------------- install */
 .install-section { padding: 72px 0 40px; }
 .install-section h2 { font-size: 30px; }
+.install-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.install-head .os { margin: 0; }
 .steps { display: grid; grid-template-columns: 3fr 2fr; gap: 12px; margin-top: 24px; }
 .steps > div { padding: 26px; border-radius: 10px; background: var(--panel); }
 .steps h3 { font-size: 17px; }

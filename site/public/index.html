@@ -3,14 +3,14 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Filo · 编码 Agent 的 Mac 工作台</title>
-<meta name="description" content="Filo is a Mac app for coding agents: run pi, Codex, Claude Code and more in threads side by side, see which thread made each change, get an independent read-only review, and search every session.">
+<title>Filo · 编码 Agent 的桌面工作台</title>
+<meta name="description" content="Filo is a desktop app for coding agents on macOS, Linux and Windows: run pi, Codex, Claude Code and more in threads side by side, see which thread made each change, get an independent read-only review, and search every session.">
 <meta name="theme-color" content="#1e1f22">
 <link rel="canonical" href="https://filoapp.dev/">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <meta property="og:type" content="website">
-<meta property="og:title" content="Filo · coding agents side by side on your Mac">
+<meta property="og:title" content="Filo · coding agents side by side">
 <meta property="og:description" content="pi, Codex, Claude Code and more in threads side by side, changes tied to the thread that made them, an independent review, search across every session.">
 <meta property="og:url" content="https://filoapp.dev/">
 <meta property="og:image" content="https://filoapp.dev/og.png">
@@ -24,6 +24,13 @@
         const lang = ['zh', 'en'].includes(asked) ? asked : ['zh', 'en'].includes(saved) ? saved : navigator.language.toLowerCase().startsWith('zh') ? 'zh' : 'en'
         document.documentElement.dataset.lang = lang
         document.documentElement.lang = lang === 'zh' ? 'zh-CN' : 'en'
+        // Which install command to show: ?os= wins, then the visitor's system.
+        const os = new URLSearchParams(location.search).get('os')
+        const ua = `${navigator.userAgentData?.platform ?? ''} ${navigator.userAgent}`
+        document.documentElement.dataset.os = ['mac', 'linux', 'win'].includes(os) ? os
+            : /Win/i.test(ua) ? 'win'
+            : /Linux|X11|CrOS/i.test(ua) && !/Android/i.test(ua) ? 'linux'
+            : 'mac'
     })()
 </script>
 <link rel="stylesheet" href="/styles.css">
@@ -43,21 +50,35 @@
 
 <main>
     <section class="hero wrap">
-        <p class="kicker"><span lang="zh">编码 Agent 的 Mac 工作台</span><span lang="en">A Mac app for coding agents</span></p>
+        <p class="kicker"><span lang="zh">编码 Agent 的桌面工作台</span><span lang="en">A desktop app for coding agents</span></p>
         <h1><span lang="zh">多个 Agent，并排干活</span><span lang="en">Coding agents, side by side</span></h1>
         <p class="lede">
             <span lang="zh">pi、Codex、Claude Code 等 Agent 在多个线程里并排跑，每处改动都知道是哪个线程做的，另起一个只读的 pi 审查结果，所有会话都能搜。和终端里的 pi 用同一份会话和配置，随时切回终端。</span>
             <span lang="en">Run pi, Codex, Claude Code and other agents in threads side by side, see which thread made each change, have a separate read-only pi review the work, and search every session. It shares sessions and settings with pi in your terminal, so you can switch back any time.</span>
         </p>
+        <div class="os" role="group" aria-label="System / 系统"><button type="button" data-os="mac">macOS</button><button type="button" data-os="linux">Linux</button><button type="button" data-os="win">Windows</button></div>
         <div class="install" role="group" aria-label="Install command">
-            <code id="cmd">curl -fsSL https://filoapp.dev/install.sh | bash</code>
-            <button type="button" class="copy" data-copy="cmd" aria-live="polite"><span class="idle"><span lang="zh">复制</span><span lang="en">Copy</span></span><span class="ok"><span lang="zh">已复制</span><span lang="en">Copied</span></span></button>
+            <code id="cmd" data-for="mac linux">curl -fsSL https://filoapp.dev/install.sh | bash</code>
+            <code id="cmd-win" data-for="win">irm https://filoapp.dev/install.ps1 | iex</code>
+            <button type="button" class="copy" data-copy="cmd cmd-win" aria-live="polite"><span class="idle"><span lang="zh">复制</span><span lang="en">Copy</span></span><span class="ok"><span lang="zh">已复制</span><span lang="en">Copied</span></span></button>
         </div>
-        <p class="meta">
+        <p class="meta" data-for="mac">
             <span lang="zh">在终端里运行 · Apple Silicon · macOS 11 及以上 · 再运行一次就是更新</span>
             <span lang="en">Run it in Terminal · Apple Silicon · macOS 11 or later · run it again to update</span>
             <span class="sep">·</span>
             <a href="https://github.com/nightsumx/filo/releases/latest/download/Filo-arm64.dmg"><span lang="zh">下载 .dmg</span><span lang="en">Download .dmg</span></a>
+        </p>
+        <p class="meta" data-for="linux">
+            <span lang="zh">在终端里运行 · x64 / arm64 · 不需要 root · 再运行一次就是更新</span>
+            <span lang="en">Run it in a terminal · x64 / arm64 · no root needed · run it again to update</span>
+            <span class="sep">·</span>
+            <a href="https://github.com/nightsumx/filo/releases/latest/download/Filo-x64.AppImage"><span lang="zh">下载 AppImage</span><span lang="en">Download AppImage</span></a>
+        </p>
+        <p class="meta" data-for="win">
+            <span lang="zh">在 PowerShell 里运行 · Windows 10 / 11 x64 · 再运行一次就是更新</span>
+            <span lang="en">Run it in PowerShell · Windows 10 / 11 x64 · run it again to update</span>
+            <span class="sep">·</span>
+            <a href="https://github.com/nightsumx/filo/releases/latest/download/Filo-Setup-x64.exe"><span lang="zh">下载安装程序</span><span lang="en">Download the installer</span></a>
         </p>
     </section>
 
@@ -85,7 +106,7 @@
         </article>
         <article>
             <h3><span lang="zh">搜索所有会话</span><span lang="en">Search every session</span></h3>
-            <p><span lang="zh">⌘⇧F 搜所有项目里的提问和回复，终端里跑过的会话也在内。回车直接打开那个线程，并定位到那条消息。</span><span lang="en">⌘⇧F searches prompts and replies in every project, sessions from the terminal included. Enter opens the thread at that message.</span></p>
+            <p><span lang="zh"><span data-for="mac">⌘⇧F</span><span data-for="linux win">Ctrl+Shift+F</span> 搜所有项目里的提问和回复，终端里跑过的会话也在内。回车直接打开那个线程，并定位到那条消息。</span><span lang="en"><span data-for="mac">⌘⇧F</span><span data-for="linux win">Ctrl+Shift+F</span> searches prompts and replies in every project, sessions from the terminal included. Enter opens the thread at that message.</span></p>
         </article>
         <article>
             <h3><span lang="zh">分叉与重问</span><span lang="en">Fork and ask again</span></h3>
@@ -115,7 +136,7 @@
     <section class="wrap showcase">
         <div class="showcase-copy">
             <h2><span lang="zh">上周那次对话，几秒找到</span><span lang="en">Find last week's conversation in seconds</span></h2>
-            <p><span lang="zh">索引在后台建好并保存在本机，重启后只读新增的会话。所有词都要出现才算命中，不区分大小写。工具输出不进索引，结果里只有对话本身。</span><span lang="en">The index is built in the background and kept on your Mac; after a restart only new sessions are read. A hit needs every word, case-insensitive. Tool output isn't indexed, so results are the conversation itself.</span></p>
+            <p><span lang="zh">索引在后台建好并保存在本机，重启后只读新增的会话。所有词都要出现才算命中，不区分大小写。工具输出不进索引，结果里只有对话本身。</span><span lang="en">The index is built in the background and kept on your computer; after a restart only new sessions are read. A hit needs every word, case-insensitive. Tool output isn't indexed, so results are the conversation itself.</span></p>
         </div>
         <figure class="shot">
             <img lang="zh" src="/shots/zh/search.webp" width="2880" height="1800" loading="lazy" alt="⌘⇧F 搜索框：搜“小时”，结果按线程分组，命中的词高亮">
@@ -124,26 +145,38 @@
     </section>
 
     <section id="install" class="wrap install-section">
-        <h2><span lang="zh">安装</span><span lang="en">Install</span></h2>
+        <div class="install-head">
+            <h2><span lang="zh">安装</span><span lang="en">Install</span></h2>
+            <div class="os" role="group" aria-label="System / 系统"><button type="button" data-os="mac">macOS</button><button type="button" data-os="linux">Linux</button><button type="button" data-os="win">Windows</button></div>
+        </div>
         <div class="steps">
             <div>
                 <h3><span lang="zh">一行命令（推荐）</span><span lang="en">One command (recommended)</span></h3>
                 <div class="install">
-                    <code id="cmd2">curl -fsSL https://filoapp.dev/install.sh | bash</code>
-                    <button type="button" class="copy" data-copy="cmd2" aria-live="polite"><span class="idle"><span lang="zh">复制</span><span lang="en">Copy</span></span><span class="ok"><span lang="zh">已复制</span><span lang="en">Copied</span></span></button>
+                    <code id="cmd2" data-for="mac linux">curl -fsSL https://filoapp.dev/install.sh | bash</code>
+                    <code id="cmd2-win" data-for="win">irm https://filoapp.dev/install.ps1 | iex</code>
+                    <button type="button" class="copy" data-copy="cmd2 cmd2-win" aria-live="polite"><span class="idle"><span lang="zh">复制</span><span lang="en">Copy</span></span><span class="ok"><span lang="zh">已复制</span><span lang="en">Copied</span></span></button>
                 </div>
                 <ul>
-                    <li><span lang="zh">从 GitHub 下载最新版，先校验签名，再装到 /Applications。没有管理员权限的话装到 ~/Applications。</span><span lang="en">Downloads the latest release from GitHub, checks its signature, and installs to /Applications (or ~/Applications without admin rights).</span></li>
+                    <li data-for="mac"><span lang="zh">从 GitHub 下载最新版，先校验签名，再装到 /Applications。没有管理员权限的话装到 ~/Applications。</span><span lang="en">Downloads the latest release from GitHub, checks its signature, and installs to /Applications (or ~/Applications without admin rights).</span></li>
+                    <li data-for="linux"><span lang="zh">从 GitHub 下载最新的 AppImage，校验 SHA-256，放到 ~/.local/share/filo，并加上应用菜单项和 ~/.local/bin/filo 命令。不需要 root。</span><span lang="en">Downloads the latest AppImage from GitHub, checks its SHA-256, puts it in ~/.local/share/filo, and adds an app menu entry and a ~/.local/bin/filo command. No root needed.</span></li>
+                    <li data-for="win"><span lang="zh">从 GitHub 下载最新的安装程序，校验 SHA-256，静默装到当前用户的 %LOCALAPPDATA%\Programs\Filo，并加上开始菜单和桌面快捷方式。不需要管理员权限。</span><span lang="en">Downloads the latest installer from GitHub, checks its SHA-256, and installs it silently for your user in %LOCALAPPDATA%\Programs\Filo, with Start menu and desktop shortcuts. No admin rights needed.</span></li>
                     <li><span lang="zh">不需要 Node.js 或 pi 命令行：Filo 自带一份 pi。你装了自己的 pi，就用你的。</span><span lang="en">No Node.js or pi CLI needed: Filo comes with its own pi, and uses yours if you have one.</span></li>
                     <li><span lang="zh">要更新，再运行一次同样的命令。运行前请先退出 Filo。</span><span lang="en">To update, run the same command again. Quit Filo first.</span></li>
-                    <li><a href="/install.sh"><span lang="zh">先看看脚本内容</span><span lang="en">Read the script first</span></a></li>
+                    <li data-for="linux">AppImage <span lang="zh">靠 FUSE 挂载自己运行，大多数发行版自带；没有的话装上 fuse3。</span><span lang="en">runs by mounting itself with FUSE, which most distributions have; if yours doesn't, install fuse3.</span></li>
+                    <li data-for="mac linux"><a href="/install.sh"><span lang="zh">先看看脚本内容</span><span lang="en">Read the script first</span></a></li>
+                    <li data-for="win"><a href="/install.ps1"><span lang="zh">先看看脚本内容</span><span lang="en">Read the script first</span></a></li>
                 </ul>
             </div>
             <div>
                 <h3><span lang="zh">手动下载</span><span lang="en">Manual download</span></h3>
-                <p><a class="button" href="https://github.com/nightsumx/filo/releases/latest/download/Filo-arm64.dmg"><span lang="zh">下载 Filo-arm64.dmg</span><span lang="en">Download Filo-arm64.dmg</span></a></p>
+                <p data-for="mac"><a class="button" href="https://github.com/nightsumx/filo/releases/latest/download/Filo-arm64.dmg"><span lang="zh">下载 Filo-arm64.dmg</span><span lang="en">Download Filo-arm64.dmg</span></a></p>
+                <p data-for="linux"><a class="button" href="https://github.com/nightsumx/filo/releases/latest/download/Filo-x64.AppImage"><span lang="zh">下载 x64 版</span><span lang="en">Download for x64</span></a> <a class="button" href="https://github.com/nightsumx/filo/releases/latest/download/Filo-arm64.AppImage"><span lang="zh">下载 arm64 版</span><span lang="en">Download for arm64</span></a></p>
+                <p data-for="win"><a class="button" href="https://github.com/nightsumx/filo/releases/latest/download/Filo-Setup-x64.exe"><span lang="zh">下载 Filo-Setup-x64.exe</span><span lang="en">Download Filo-Setup-x64.exe</span></a></p>
                 <ul>
-                    <li><span lang="zh">应用没有经过 Apple 公证，第一次打开会被拦下。先双击打开一次，再到「系统设置 → 隐私与安全性」，点「仍要打开」。</span><span lang="en">The app isn't notarized by Apple, so macOS blocks the first launch. Open it once, then go to System Settings → Privacy &amp; Security and click Open Anyway.</span></li>
+                    <li data-for="linux"><span lang="zh">下载后加上可执行权限再运行：</span><span lang="en">Make it executable, then run it:</span><code class="block">chmod +x Filo-*.AppImage &amp;&amp; ./Filo-*.AppImage</code></li>
+                    <li data-for="win"><span lang="zh">安装程序没有代码签名，浏览器下载的文件第一次运行时 SmartScreen 会拦一下：点「更多信息」，再点「仍要运行」。</span><span lang="en">The installer isn't code-signed, so SmartScreen stops a browser download the first time: click More info, then Run anyway.</span></li>
+                    <li data-for="mac"><span lang="zh">应用没有经过 Apple 公证，第一次打开会被拦下。先双击打开一次，再到「系统设置 → 隐私与安全性」，点「仍要打开」。</span><span lang="en">The app isn't notarized by Apple, so macOS blocks the first launch. Open it once, then go to System Settings → Privacy &amp; Security and click Open Anyway.</span></li>
                     <li><span lang="zh">想在终端里也用 pi，再装命令行，两边共用同一份配置和会话：</span><span lang="en">For pi in the terminal too, install the CLI; both share the same setup and sessions:</span><code class="block">npm install -g @earendil-works/pi-coding-agent</code></li>
                 </ul>
             </div>
@@ -164,15 +197,25 @@
         document.documentElement.lang = lang === 'zh' ? 'zh-CN' : 'en'
         try { localStorage.setItem('lang', lang) } catch {}
     })
+    const showOs = (os) => {
+        document.documentElement.dataset.os = os
+        for (const b of document.querySelectorAll('.os button'))
+            b.setAttribute('aria-pressed', String(b.dataset.os === os))
+    }
+    showOs(document.documentElement.dataset.os)
+    for (const b of document.querySelectorAll('.os button'))
+        b.addEventListener('click', () => showOs(b.dataset.os))
     for (const button of document.querySelectorAll('[data-copy]')) {
         button.addEventListener('click', async () => {
-            const text = document.getElementById(button.dataset.copy).textContent
+            // The command shown for the chosen system.
+            const code = button.dataset.copy.split(' ').map(id => document.getElementById(id)).find(el => el.offsetParent !== null)
+            const text = code.textContent
             try {
                 await navigator.clipboard.writeText(text)
             }
             catch {
                 // Clipboard API refused (insecure context, permissions): select it for ⌘C instead.
-                getSelection().selectAllChildren(document.getElementById(button.dataset.copy))
+                getSelection().selectAllChildren(code)
                 return
             }
             button.classList.add('done')

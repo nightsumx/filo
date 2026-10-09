@@ -1,6 +1,6 @@
 # Filo
 
-A Mac app for coding agents. Run [pi](https://pi.dev), Codex, Claude Code and others in threads side by side, see which thread made each change, have a separate read-only pi review the work, and search every session. It shares sessions and settings with pi in your terminal, so you can switch back any time.
+A desktop app for coding agents, on macOS, Linux and Windows. Run [pi](https://pi.dev), Codex, Claude Code and others in threads side by side, see which thread made each change, have a separate read-only pi review the work, and search every session. It shares sessions and settings with pi in your terminal, so you can switch back any time.
 
 ![Filo's main window: the project tree, a thread with its diff, and the changes panel](site/public/shots/en/main.webp)
 
@@ -8,22 +8,34 @@ A Mac app for coding agents. Run [pi](https://pi.dev), Codex, Claude Code and ot
 
 ## Install
 
+macOS (Apple Silicon, 11 or later) and Linux (x64, arm64):
+
 ```bash
 curl -fsSL https://filoapp.dev/install.sh | bash
 ```
 
-Apple Silicon, macOS 11 or later. The script downloads the latest [release](https://github.com/nightsumx/filo/releases), checks its signature and installs to `/Applications` (`~/Applications` without admin rights). Run it again to update; quit Filo first. It replaces an older install named Pi.
+Windows (10 or 11, x64), in PowerShell:
+
+```powershell
+irm https://filoapp.dev/install.ps1 | iex
+```
+
+The scripts download the latest [release](https://github.com/nightsumx/filo/releases) and check it before installing; run one again to update, after quitting Filo. No admin or root rights needed.
+
+- macOS: checks the signature and installs to `/Applications` (`~/Applications` without admin rights). It replaces an older install named Pi.
+- Linux: checks the SHA-256 and puts the AppImage in `~/.local/share/filo`, with an app menu entry and a `~/.local/bin/filo` command. AppImages need FUSE (`fuse3`), which most distributions have.
+- Windows: checks the SHA-256 and runs the installer silently for your user (`%LOCALAPPDATA%\Programs\Filo`, Start menu and desktop shortcuts).
 
 No Node.js or pi CLI needed: Filo comes with its own pi, and uses yours if your login shell has one. Sign in to a subscription, add an API key or connect a local model under Settings → Model providers. It all goes to pi's own `~/.pi/agent`.
 
-The app is not notarized. The `.dmg` from the releases page works too, but macOS blocks its first launch: open it once, then System Settings → Privacy & Security → Open Anyway.
+The releases page has the `.dmg`, the AppImages and `Filo-Setup-x64.exe` for a manual install. The macOS app is not notarized, so macOS blocks its first launch from a browser download: open it once, then System Settings → Privacy & Security → Open Anyway. The Windows installer is not signed, so SmartScreen asks once: More info → Run anyway.
 
 ## Features
 
 - **One window per project**, like JetBrains, or several projects in one. Tabs drag between windows; the pi running in a tab keeps going.
 - **Changes know their thread.** The changes panel shows which thread edited each file, flags files two threads both touched, and commits or rolls back the files you check.
 - **Review.** After a turn, a separate read-only pi audits the diff against your requests (not the agent's reasoning) and runs commands for evidence. Issues are marked reproduced, with the command's exit code and output, or suspected. You pick what goes back to the agent.
-- **Search every session** with ⌘⇧F, terminal sessions included; Enter opens the thread at that message.
+- **Search every session** with ⌘⇧F (Ctrl+Shift+F on Linux and Windows), terminal sessions included; Enter opens the thread at that message.
 - **Fork** any earlier prompt into a new tab.
 - **No pop-ups.** Tool approvals, the agent's questions and plan sign-off are answered inline in the conversation.
 - **Terminal pi, in the app.** pi running in a terminal shows up in the project tree (working, waiting for you, idle). With [pi-cc-tui](packages/pi-cc-tui) installed, opening its session joins that pi: its run streams into the app as it happens, and what you send from the app runs there, in one session file. Without it, the app follows the session file and warns that sending from both sides forks the conversation.
