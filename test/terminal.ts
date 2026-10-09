@@ -35,7 +35,8 @@ export async function startTerminalPi(options: { agentDir: string, cwd: string, 
     if (!pi)
         throw new Error('pi not found')
     const extensions = options.extensions.flatMap(e => ['-e', path.join(CC_EXTENSIONS, e)])
-    const command = piCommand(pi, ['--no-extensions', '--no-mcp', ...extensions, ...options.args ?? []])
+    // No --no-mcp: the pi the app ships (1.0.3) has no such option, and the agent dir is a throwaway.
+    const command = piCommand(pi, ['--no-extensions', ...extensions, ...options.args ?? []])
     // The bundled pi runs on Electron as node, as the app starts it (electron/pi-env.ts).
     const vars = { PI_CODING_AGENT_DIR: options.agentDir, ...pi.bundled ? { ELECTRON_RUN_AS_NODE: '1' } : {}, ...options.env }
     const line = ['env', ...Object.entries(vars).map(([k, v]) => `${k}=${quote(v)}`), quote(command.file), ...command.args.map(quote)].join(' ')

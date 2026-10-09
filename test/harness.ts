@@ -4,7 +4,7 @@ import type { ApprovalMode, CapabilityId } from '@shared/capabilities'
 import type { PiEnv } from '@shared/ipc'
 import type { PiEvent, RpcResponse } from '@shared/pi'
 import type { AddressInfo } from 'node:net'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises'
 import http from 'node:http'
 import { createRequire } from 'node:module'
 import os from 'node:os'
@@ -151,7 +151,8 @@ export interface PiSession {
  * and credentials are never read.
  */
 export async function startPi(env: PiEnv, llm: MockLlm, capabilities: CapabilityId[], options: { approvalMode?: ApprovalMode, settings?: Record<string, unknown>, hostEnv?: Record<string, string> } = {}): Promise<PiSession> {
-    const root = await mkdtemp(path.join(os.tmpdir(), 'pi-gui-test-'))
+    // Resolved: Windows' temp folder can be an 8.3 name (C:\Users\RUNNER~1), git prints the long one.
+    const root = await realpath(await mkdtemp(path.join(os.tmpdir(), 'pi-gui-test-')))
     const agentDir = path.join(root, 'agent')
     const cwd = path.join(root, 'project')
     await mkdir(agentDir, { recursive: true })

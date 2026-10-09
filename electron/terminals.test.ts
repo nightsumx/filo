@@ -34,7 +34,8 @@ const sh = ps
         }
 
 const ptyDir = path.resolve('node_modules/node-pty')
-const dir = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'filo-term-')))
+// .native: on Windows the long name, as the shell prints it, for an 8.3 temp folder (RUNNER~1).
+const dir = realpathSync.native(mkdtempSync(path.join(os.tmpdir(), 'filo-term-')))
 let lists: TerminalInfo[][] = []
 let terminals = new Terminals({ ptyDir, onChange: list => lists.push(list) })
 

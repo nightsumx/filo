@@ -43,7 +43,9 @@ describe('agent installs', () => {
         await writeFile(path.join(src, cmd), win ? `@echo off\r\necho ${body}\r\n` : `#!/bin/sh\necho ${body}\n`)
         await chmod(path.join(src, cmd), 0o755)
         const file = path.join(dir, `a-${Math.random()}.tar.gz`)
-        execFileSync('tar', ['-czf', file, '-C', src, 'pkg'])
+        // Windows' own tar: Git's GNU tar on PATH reads C: as a remote host.
+        const tar = win ? path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe') : 'tar'
+        execFileSync(tar, ['-czf', file, '-C', src, 'pkg'])
         const data = await readFile(file)
         return { data, sha256: createHash('sha256').update(data).digest('hex') }
     }

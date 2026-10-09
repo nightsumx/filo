@@ -35,6 +35,9 @@ describe('gitDiscard / gitCommit', () => {
         run('init', '-q')
         // Git for Windows turns LF into CRLF on checkout by default; these tests compare bytes.
         run('config', 'core.autocrlf', 'false')
+        // gitCommit runs plain git: the repository needs an author where git has none (CI).
+        run('config', 'user.email', 'a@b')
+        run('config', 'user.name', 't')
         await writeFile(path.join(repo, 'a.ts'), 'a\n')
         await writeFile(path.join(repo, 'b.ts'), 'b\n')
         await writeFile(path.join(repo, 'old.ts'), 'o\n')
