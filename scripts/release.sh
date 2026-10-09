@@ -1,6 +1,8 @@
 #!/bin/bash
 # Builds the macOS app from the committed HEAD and publishes it as a GitHub release, tagged
 # v<package.json version>, with fixed asset names so releases/latest/download/... always points at it.
+# The tag also starts .github/workflows/release.yml, which builds Linux and Windows and adds them to
+# the draft; the release goes public once that has passed, so every OS ships the same version.
 #
 # The build runs on a copy of HEAD, not the working tree: uncommitted edits (other agents share this
 # folder) must not ship.
@@ -38,24 +40,50 @@ rm -rf "$out"
 mkdir -p "$out"
 cp "$snap/release/Filo-$version-arm64-mac.zip" "$out/Filo-arm64-mac.zip"
 cp "$snap/release/Filo-$version-arm64.dmg" "$out/Filo-arm64.dmg"
-cp scripts/install.sh "$out/install.sh"
+cp scripts/install.sh scripts/install.ps1 "$out/"
 
 # Pushing the tag publishes HEAD's commits under it without moving any branch.
 git tag "$tag"
 git push origin "$tag"
 
 notes="$(cat <<EOF
-Install or update (Apple Silicon):
+Install or update.
+
+macOS (Apple Silicon) and Linux (x64, arm64):
 
 \`\`\`
 curl -fsSL https://filoapp.dev/install.sh | bash
 \`\`\`
 
+Windows (x64), in PowerShell:
+
+\`\`\`
+irm https://filoapp.dev/install.ps1 | iex
+\`\`\`
+
 More at https://filoapp.dev.
 
-The app is not notarized. Opening the .dmg or .zip downloaded with a browser needs one extra step: open it once, then System Settings → Privacy & Security → Open Anyway.
+The macOS app is not notarized. Opening the .dmg or .zip downloaded with a browser needs one extra step: open it once, then System Settings → Privacy & Security → Open Anyway. The Windows installer is not signed: downloaded with a browser, SmartScreen asks once (More info → Run anyway).
 EOF
 )"
-gh release create "$tag" -R "$repo" --verify-tag --latest --title "Filo $version" --notes "$notes" \
-    "$out/Filo-arm64-mac.zip" "$out/Filo-arm64.dmg" "$out/install.sh"
+gh release create "$tag" -R "$repo" --verify-tag --draft --title "Filo $version" --notes "$notes" \
+    "$out/Filo-arm64-mac.zip" "$out/Filo-arm64.dmg" "$out/install.sh" "$out/install.ps1"
+
+# The workflow run the tag started; it adds the Linux and Windows installers to the draft.
+echo "Waiting for the Linux and Windows builds…"
+run=""
+for _ in $(seq 1 30); do
+    run="$(gh run list -R "$repo" --workflow release.yml --event push --branch "$tag" --json databaseId --jq '.[0].databaseId // empty')"
+    [ -n "$run" ] && break
+    sleep 10
+done
+if [ -z "$run" ]; then
+    echo "No release.yml run for $tag; the draft stays unpublished." >&2
+    exit 1
+fi
+if ! gh run watch "$run" -R "$repo" --exit-status --interval 30 >/dev/null; then
+    echo "The Linux/Windows build failed (gh run view $run -R $repo --log-failed); the draft stays unpublished." >&2
+    exit 1
+fi
+gh release edit "$tag" -R "$repo" --draft=false --latest
 echo "Published $tag"

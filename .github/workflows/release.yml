@@ -1,0 +1,105 @@
+# Linux and Windows builds of a release. scripts/release.sh builds the macOS app on the Mac, pushes
+# the tag and opens a draft release; this workflow runs on that tag, tests and packages on each OS,
+# and adds the installers (with .sha256 files the install scripts check) to the draft. release.sh
+# publishes it once every job here has passed.
+#
+# Pushed to a ci/* branch, or run by hand (Actions → release → Run workflow), it builds and tests
+# without uploading; the installers are kept as workflow artifacts.
+name: release
+
+on:
+  push:
+    tags: ['v*']
+    branches: ['ci/**']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-x64
+            runner: ubuntu-24.04
+            target: --linux AppImage --x64
+            files: release/Filo-x64.AppImage
+          - name: linux-arm64
+            runner: ubuntu-24.04-arm
+            target: --linux AppImage --arm64
+            files: release/Filo-arm64.AppImage
+          - name: windows-x64
+            runner: windows-2025
+            target: --win nsis --x64
+            files: release/Filo-Setup-x64.exe
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.2
+
+      # npm for scripts/bundle-pi.sh (npm ci of the shipped pi); node for vitest.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+
+      - name: Install
+        run: bun install --frozen-lockfile
+
+      - name: Type check and unit tests
+        run: |
+          bun run typecheck
+          node node_modules/vitest/vitest.mjs run
+
+      - name: Build
+        run: |
+          bun run build
+          # vite runs on after a tsc error; the app needs both outputs.
+          test -f dist/index.html
+          test -f dist-electron/main.js
+          scripts/bundle-pi.sh
+
+      - name: Package
+        run: npx electron-builder ${{ matrix.target }} --publish never
+
+      - name: Checksums
+        run: |
+          for f in ${{ matrix.files }}; do
+            (cd "$(dirname "$f")" && sha256sum "$(basename "$f")" > "$(basename "$f").sha256")
+            cat "$f.sha256"
+          done
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ matrix.name }}
+          path: release/Filo-*
+          if-no-files-found: error
+          retention-days: 7
+
+      # release.sh opens the draft right after pushing the tag; give it a moment if this got here first.
+      - name: Add to the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          for i in $(seq 1 60); do
+            gh release view "$TAG" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 && break
+            sleep 10
+          done
+          files=""
+          for f in ${{ matrix.files }}; do files="$files $f $f.sha256"; done
+          gh release upload "$TAG" -R "$GITHUB_REPOSITORY" --clobber $files
