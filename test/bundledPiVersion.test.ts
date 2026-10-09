@@ -12,7 +12,7 @@ it('the app ships the pi version it is built and tested against', () => {
     expect(json('bundled-pi/package-lock.json').packages[`node_modules/${PI}`].version).toBe(built)
 })
 
-it('install.sh needs no Node or pi CLI', () => {
-    const script = readFileSync(path.join(root, 'scripts/install.sh'), 'utf8')
-    expect(script).not.toMatch(/npm install/)
+it('the install scripts need no Node or pi CLI', () => {
+    for (const name of ['install.sh', 'install.ps1'])
+        expect(readFileSync(path.join(root, 'scripts', name), 'utf8')).not.toMatch(/npm install/)
 })
