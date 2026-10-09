@@ -122,6 +122,8 @@ const outline = (agent: CodexAgent) => agent.snapshot().map(({ message: m }) => 
 
 const exec = (cmd: string, extra: Record<string, unknown> = {}): Step => ({ call: { name: 'exec_command', args: { cmd, ...extra } } })
 const patch = (body: string): Step => exec(`apply_patch <<'EOF'\n*** Begin Patch\n${body}\n*** End Patch\nEOF\n`)
+/** Each model request's `originator` header (Codex sends the client's name). */
+const originators: string[] = []
 const lastInput = (n: number) => JSON.stringify(requests[n]?.input?.slice(-1) ?? [])
 const latestInput = () => JSON.stringify(requests.at(-1)?.input?.slice(-1) ?? [])
 
@@ -135,6 +137,7 @@ describe.skipIf(!codex)('Codex native adapter against codex app-server', () => {
             req.on('end', () => {
                 const n = requests.length
                 requests.push(JSON.parse(body || '{}'))
+                originators.push(String(req.headers.originator ?? ''))
                 // A step with `when` answers only a request whose input has that text (a subagent's).
                 const input = JSON.stringify((requests[n].input ?? []).filter((i: any) => i.role === 'user'))
                 let at = script.findIndex(st => st.when && input.includes(st.when))
@@ -531,6 +534,14 @@ describe.skipIf(!codex)('Codex native adapter against codex app-server', () => {
         await settled(from)
         const denied = JSON.parse(requests.at(-1).input.filter((i: any) => i.type === 'function_call_output').at(-1).output)
         expect(denied.permissions).toEqual({ network: null, file_system: null })
+    }, 30_000)
+
+    it('names itself as a Codex client (originator codex_…): relays turn other names away', async () => {
+        const { agent, settled } = await start()
+        script = [{ text: 'hi' }]
+        await ok(agent, { type: 'prompt', message: 'hello' })
+        await settled()
+        expect(originators.at(-1)).toMatch(/^codex_/)
     }, 30_000)
 
     it('offers /compact as a command', async () => {

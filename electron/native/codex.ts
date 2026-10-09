@@ -46,7 +46,12 @@ export const CODEX_CAPS: AcpAgentCaps = {
     plan: true,
 }
 
-const CLIENT_INFO = { name: 'filo', title: 'Filo', version: '1' }
+/**
+ * Codex sends the client's name as the `originator` header of model requests. Relays in front of
+ * the API can pass only Codex clients' names (codex_cli_rs, codex_vscode, codex_exec, …): with any
+ * other name every turn failed with "high demand" after the retries. So the name starts with `codex_`.
+ */
+const CLIENT_INFO = { name: 'codex_filo', title: 'Filo', version: '1' }
 
 /** What Codex TUI sends when the user accepts a proposed plan. */
 const IMPLEMENT_PLAN = 'Implement the plan.'
@@ -1112,10 +1117,11 @@ export class CodexAgent implements AgentAdapter {
     }
 
     /**
-     * The subagent's nickname (thread/read). Its thread file can still be empty right after the spawn,
-     * which fails the read: it is tried again a few times.
+     * The subagent's nickname (thread/read). Its thread file is written as its turn starts, a few ms
+     * after the spawn; until then the read fails, so it is tried again soon, then backing off (a
+     * wait_agent shown before the name is in keeps "subagent").
      */
-    private async nameSubagent(sub: Subagent, tries = 6): Promise<void> {
+    private async nameSubagent(sub: Subagent, tries = 8): Promise<void> {
         for (let i = 0; i < tries && !this.exited; i++) {
             try {
                 const read: any = await this.rpc('thread/read', { threadId: sub.threadId })
@@ -1133,7 +1139,7 @@ export class CodexAgent implements AgentAdapter {
                 return
             }
             catch {
-                await new Promise(resolve => setTimeout(resolve, 150 * (i + 1)))
+                await new Promise(resolve => setTimeout(resolve, 25 * 2 ** i))
             }
         }
     }
