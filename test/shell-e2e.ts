@@ -84,6 +84,22 @@ async function main() {
         check((await screen(id)).includes(`in=${project}`), 'the shell runs in the project folder and its output reaches the screen')
         await shot(page, 'terminal-dark.png')
 
+        // Moved to a display of another scale: the cells change size, so the grid is fitted again
+        // (else a strip stays blank or the last row is cut off).
+        const grid = () => page.evaluate<{ cols: number, rows: number, cell: number, fit?: { cols: number, rows: number } }>(`(() => { const v = window.__terminalView(${JSON.stringify(id)}); return { cols: v.term.cols, rows: v.term.rows, fit: v.fitter.proposeDimensions(), cell: v.term._core._renderService.dimensions.css.cell.width } })()`)
+        const scale = await page.evaluate<number>('devicePixelRatio')
+        for (const dpr of [1, 1.5, scale]) {
+            await page.call('Emulation.setDeviceMetricsOverride', { width: 0, height: 0, deviceScaleFactor: dpr, mobile: false })
+            // xterm measures the cells again on its own time.
+            await new Promise(r => setTimeout(r, 800))
+            const fitted = await until(`refit at ${dpr}x`, async () => {
+                const g = await grid()
+                return g.fit && g.cols === g.fit.cols && g.rows === g.fit.rows ? g : undefined
+            }, 3000).catch(async () => grid())
+            check(!!fitted.fit && fitted.cols === fitted.fit.cols && fitted.rows === fitted.fit.rows, `at ${dpr}x the grid fits the panel again (${fitted.cols}x${fitted.rows}, fits ${fitted.fit?.cols}x${fitted.fit?.rows}, cell ${fitted.cell}px)`)
+        }
+        await page.call('Emulation.clearDeviceMetricsOverride')
+
         // A reload: the view comes back with the screen as it was.
         await page.call('Page.reload')
         page.close()

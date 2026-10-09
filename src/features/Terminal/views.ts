@@ -77,7 +77,7 @@ function xtermTheme(): ITheme {
 export class TermView {
     readonly term: Terminal
     readonly element = document.createElement('div')
-    private fitter = new FitAddon()
+    readonly fitter = new FitAddon()
     private webgl: WebglAddon | null = null
     private opened = false
     /** Seq of the snapshot; null until it arrived (chunks wait in `queued` meanwhile). */

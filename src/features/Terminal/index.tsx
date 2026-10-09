@@ -83,17 +83,32 @@ const TerminalBody = observer(({ info }: { info: TerminalInfo }) => {
         const view = viewOf(info.id)
         view.mount(el)
         let frame = 0
-        const observer = new ResizeObserver(() => {
+        const refit = () => {
             cancelAnimationFrame(frame)
             frame = requestAnimationFrame(() => {
                 view.fit()
                 terminalStore.lastSize = view.size
             })
-        })
+        }
+        const observer = new ResizeObserver(refit)
         observer.observe(el)
+        // Another display scale (the window moved between a Retina and a regular screen) changes the
+        // cell size but not the host's, so the resize observer misses it.
+        let scale: MediaQueryList | null = null
+        const watchScale = () => {
+            scale?.removeEventListener('change', onScale)
+            scale = matchMedia(`(resolution: ${devicePixelRatio}dppx)`)
+            scale.addEventListener('change', onScale)
+        }
+        const onScale = () => {
+            watchScale()
+            refit()
+        }
+        watchScale()
         return () => {
             cancelAnimationFrame(frame)
             observer.disconnect()
+            scale?.removeEventListener('change', onScale)
             view.unmount()
         }
     }, [info.id])
