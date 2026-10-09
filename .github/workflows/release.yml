@@ -69,7 +69,7 @@ jobs:
           bun run build
           # vite runs on after a tsc error; the app needs both outputs.
           test -f dist/index.html
-          test -f dist-electron/main.js
+          test -f dist-electron/main/main.js
           scripts/bundle-pi.sh
 
       - name: Package
