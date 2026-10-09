@@ -36,7 +36,7 @@ function Install-Filo {
     # The installer replaces files a running app has open.
     $running = Get-Process -Name Filo -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $exe }
     if ($running) {
-        throw 'Filo is running. Quit it (File > Quit), then run this again.'
+        throw 'Filo is running. Close its windows, then run this again.'
     }
 
     $tmp = Join-Path ([IO.Path]::GetTempPath()) ("filo-" + [Guid]::NewGuid().ToString('N'))

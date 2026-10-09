@@ -33,7 +33,10 @@ export const desktopWindow: WindowPlatform = {
                 { role: 'toggleDevTools', accelerator: 'Ctrl+Shift+I' },
                 { type: 'separator' },
                 { role: 'resetZoom' },
-                { role: 'zoomIn' },
+                // Electron binds zoom in to Ctrl+Plus, which is Ctrl+Shift+= on most layouts; Ctrl+= as
+                // in browsers too. The menu is never shown, so the second item only adds its key.
+                { role: 'zoomIn', accelerator: 'Ctrl+=' },
+                { role: 'zoomIn', accelerator: 'Ctrl+Plus' },
                 { role: 'zoomOut' },
                 { type: 'separator' },
                 { role: 'togglefullscreen', accelerator: 'F11' },
