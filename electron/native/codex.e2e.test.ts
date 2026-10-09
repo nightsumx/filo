@@ -28,7 +28,7 @@ function findCodex(): string | undefined {
 const codex = findCodex()
 
 /** What the fake model answers one request with: text, or one function call. */
-type Step = { text: string } | { call: { name: string, args: Record<string, unknown> } }
+type Step = ({ text: string } | { call: { name: string, namespace?: string, args: Record<string, unknown> } }) & { when?: string }
 
 let script: Step[] = []
 let requests: any[] = []
@@ -36,12 +36,15 @@ let server: http.Server
 let home: string
 let work: string
 
-function respond(res: http.ServerResponse, step: Step | undefined, n: number) {
+function respond(res: http.ServerResponse, step: Step | undefined, n: number, input: unknown) {
     res.writeHead(200, { 'content-type': 'text/event-stream' })
     const ev = (type: string, data: Record<string, unknown>) => res.write(`event: ${type}\ndata: ${JSON.stringify({ type, ...data })}\n\n`)
     ev('response.created', { response: { id: `r${n}` } })
     if (step && 'call' in step) {
-        const item = { type: 'function_call', id: `fc${n}`, call_id: `call_${n}`, name: step.call.name, arguments: JSON.stringify(step.call.args) }
+        // `$AGENT`: the id spawn_agent returned, as the model would pass it on.
+        const agentId = /\\"agent_id\\":\\"([^\\"]+)/.exec(JSON.stringify(input))?.[1] ?? ''
+        const args = JSON.stringify(step.call.args).replaceAll('$AGENT', agentId)
+        const item = { type: 'function_call', id: `fc${n}`, call_id: `call_${n}`, name: step.call.name, ...(step.call.namespace ? { namespace: step.call.namespace } : {}), arguments: args }
         ev('response.output_item.added', { output_index: 0, item })
         ev('response.output_item.done', { output_index: 0, item })
     }
@@ -120,6 +123,7 @@ const outline = (agent: CodexAgent) => agent.snapshot().map(({ message: m }) => 
 const exec = (cmd: string, extra: Record<string, unknown> = {}): Step => ({ call: { name: 'exec_command', args: { cmd, ...extra } } })
 const patch = (body: string): Step => exec(`apply_patch <<'EOF'\n*** Begin Patch\n${body}\n*** End Patch\nEOF\n`)
 const lastInput = (n: number) => JSON.stringify(requests[n]?.input?.slice(-1) ?? [])
+const latestInput = () => JSON.stringify(requests.at(-1)?.input?.slice(-1) ?? [])
 
 describe.skipIf(!codex)('Codex native adapter against codex app-server', () => {
     beforeAll(async () => {
@@ -131,7 +135,12 @@ describe.skipIf(!codex)('Codex native adapter against codex app-server', () => {
             req.on('end', () => {
                 const n = requests.length
                 requests.push(JSON.parse(body || '{}'))
-                respond(res, script.shift(), n)
+                // A step with `when` answers only a request whose input has that text (a subagent's).
+                const input = JSON.stringify((requests[n].input ?? []).filter((i: any) => i.role === 'user'))
+                let at = script.findIndex(st => st.when && input.includes(st.when))
+                if (at === -1)
+                    at = script.findIndex(st => !st.when)
+                respond(res, at === -1 ? undefined : script.splice(at, 1)[0], n, requests[n].input)
             })
         })
         await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
@@ -144,6 +153,12 @@ describe.skipIf(!codex)('Codex native adapter against codex app-server', () => {
             'name = "mock"',
             `base_url = "http://127.0.0.1:${port}/v1"`,
             'wire_api = "responses"',
+            // An MCP server whose tool Codex asks about before calling (mcpServer/elicitation/request).
+            '[features]',
+            'request_permissions_tool = true',
+            '[mcp_servers.demo]',
+            'command = "node"',
+            `args = [${JSON.stringify(path.resolve('test/fakeMcp.mjs'))}]`,
             '',
         ].join('\n'))
     })
@@ -293,6 +308,38 @@ describe.skipIf(!codex)('Codex native adapter against codex app-server', () => {
         expect(outline((await start(source, true)).agent)).toEqual(['user: one', 'assistant: first', 'user: three', 'assistant: third'])
     }, 60_000)
 
+    it('a second tab forks a thread another has open (the GUI\'s Fork from here), and writes once it is free', async () => {
+        const { agent, settled, events } = await start()
+        for (const [message, answer] of [['one', 'first'], ['two', 'second']]) {
+            const from = events.length
+            script = [{ text: answer }]
+            await ok(agent, { type: 'prompt', message })
+            await settled(from)
+        }
+        // Codex lets one process write a thread: the second opens it without taking it over.
+        const other = await start(agent.sessionId)
+        expect(outline(other.agent)).toEqual(outline(agent))
+        expect((await ok(other.agent, { type: 'get_state' })).model.id).toBe('mock-model')
+        const fork = await ok(other.agent, { type: 'fork', entryId: '2' })
+        expect(fork.text).toBe('two')
+        expect(other.agent.sessionId).not.toBe(agent.sessionId)
+        script = [{ text: 'branch' }]
+        await ok(other.agent, { type: 'prompt', message: 'other way' })
+        await other.settled()
+        expect(outline(other.agent)).toEqual(['user: one', 'assistant: first', 'user: other way', 'assistant: branch'])
+
+        // A prompt while the first still holds it says so; once it is closed, the prompt goes.
+        const third = await start(agent.sessionId)
+        const held = await third.agent.request({ type: 'prompt', message: 'too' })
+        expect(held.success).toBe(false)
+        expect(held.error).toMatch(/open elsewhere|别处打开/)
+        await agent.stop()
+        script = [{ text: 'took over' }]
+        await ok(third.agent, { type: 'prompt', message: 'now' })
+        await third.settled()
+        expect(outline(third.agent).slice(-2)).toEqual(['user: now', 'assistant: took over'])
+    }, 40_000)
+
     it('plan mode: answers Codex\'s question, then the approved plan leaves plan mode and starts on it', async () => {
         const { agent, next, settled } = await start()
         await ok(agent, { type: 'set_config_option', configId: 'mode', value: 'auto' })
@@ -357,6 +404,146 @@ describe.skipIf(!codex)('Codex native adapter against codex app-server', () => {
         await settled(from)
         expect(outline(agent)).toEqual(['user: hi', 'assistant: answer', 'compactionSummary'])
         expect(outline((await start(agent.sessionId, true)).agent)).toEqual(['user: hi', 'assistant: answer', 'compactionSummary'])
+    }, 30_000)
+
+    it('a subagent (spawn_agent) shows as a subagent call: the child\'s transcript live and replayed, its approvals asked', async () => {
+        const { agent, events, next, settled } = await start()
+        script = [
+            { call: { name: 'spawn_agent', namespace: 'multi_agent_v1', args: { message: 'CHILD TASK: count files' } } },
+            { when: 'CHILD TASK', ...exec('touch child.txt && ls', { sandbox_permissions: 'require_escalated', justification: 'child writes' }) },
+            { when: 'CHILD TASK', text: 'child says 3 files' },
+            { call: { name: 'wait_agent', namespace: 'multi_agent_v1', args: { targets: ['$AGENT'], timeout_ms: 30000 } } },
+            { text: 'parent done' },
+        ]
+        await ok(agent, { type: 'prompt', message: 'delegate' })
+        const started = await next(e => e.type === 'tool_execution_start' && e.toolName === 'subagent')
+        // The child's command asks first: the prompt names the child's call.
+        const asked = await next(e => e.type === 'extension_ui_request')
+        const approval = JSON.parse(asked.title.slice(APPROVAL_TITLE_PREFIX.length))
+        expect(approval.summary).toContain('touch child.txt')
+        const waiting = events.filter((e: any) => e.type === 'tool_execution_update' && e.toolCallId === started.toolCallId).at(-1) as any
+        const live = waiting.partialResult.details
+        expect(live).toMatchObject({ kind: 'subagent', status: 'running', task: 'CHILD TASK: count files' })
+        expect(live.title).not.toBe('')
+        // The subagent view finds the waiting call among the child's (subagentWaiting).
+        expect(JSON.stringify([live.messages, live.streaming])).toContain(approval.toolCallId)
+        agent.write({ type: 'extension_ui_response', id: asked.id, value: 'allow' })
+        await settled()
+        expect(existsSync(path.join(work, 'child.txt'))).toBe(true)
+
+        const end = events.find((e: any) => e.type === 'tool_execution_end' && e.toolCallId === started.toolCallId) as any
+        expect(end.isError).toBe(false)
+        const done = end.result.details
+        expect(done).toMatchObject({ kind: 'subagent', status: 'done', task: 'CHILD TASK: count files' })
+        // Codex's nickname for it.
+        expect(done.title).not.toMatch(/^(Subagent|子 Agent)$/)
+        const childOutline = (details: any) => details.messages.map((m: any) => m.role === 'assistant' ? m.content.map((c: any) => c.type === 'text' ? c.text : `<${c.name}>`).join('') : m.role)
+        expect(childOutline(done)).toEqual(['user', '<bash>', 'toolResult', 'child says 3 files'])
+        expect(done.usage.output).toBeGreaterThan(0)
+        expect(outline(agent).at(-1)).toBe('assistant: parent done')
+        const wait = agent.snapshot().flatMap(i => (i.message.role === 'assistant' ? i.message.content : [])).find((c: any) => c.type === 'toolCall' && c.name === 'agent') as any
+        expect(wait.arguments.description).toMatch(new RegExp(`^(Wait for|等待) ${done.title}$`))
+
+        // Replayed: the call reads the child's thread back.
+        const replayed = (await start(agent.sessionId, true)).agent.snapshot()
+        const result = replayed.find(i => i.message.role === 'toolResult' && i.message.toolName === 'subagent')!.message as any
+        expect(result.details).toMatchObject({ kind: 'subagent', status: 'done', title: done.title })
+        expect(childOutline(result.details)).toEqual(['user', '<bash>', 'toolResult', 'child says 3 files'])
+    }, 40_000)
+
+    it('asks before an MCP tool runs: allow calls it, allow for the session stops asking, deny rejects it', async () => {
+        const { agent, events, next, settled } = await start()
+        script = [{ call: { name: 'echo', namespace: 'mcp__demo', args: { text: 'hello' } } }, { text: 'echoed' }]
+        await ok(agent, { type: 'prompt', message: 'echo it' })
+        const ask = await next(e => e.type === 'extension_ui_request')
+        const approval = JSON.parse(ask.title.slice(APPROVAL_TITLE_PREFIX.length))
+        expect(approval).toMatchObject({ tool: 'demo.echo', summary: 'demo.echo\ntext: hello' })
+        expect(ask.options).toEqual(['allow', 'always', 'deny'])
+        // On the call shown for it.
+        const running = events.find((e: any) => e.type === 'tool_execution_start' && e.toolName === 'demo.echo') as any
+        expect(approval.toolCallId).toBe(running.toolCallId)
+        agent.write({ type: 'extension_ui_response', id: ask.id, value: 'always' })
+        await settled()
+        expect(latestInput()).toContain('echo: hello')
+
+        let from = events.length
+        script = [{ call: { name: 'echo', namespace: 'mcp__demo', args: { text: 'again' } } }, { text: 'echoed again' }]
+        await ok(agent, { type: 'prompt', message: 'once more' })
+        await settled(from)
+        expect(events.slice(from).some(e => e.type === 'extension_ui_request')).toBe(false)
+        expect(latestInput()).toContain('echo: again')
+
+        from = events.length
+        script = [{ call: { name: 'pick_color', namespace: 'mcp__demo', args: {} } }, { text: 'not run' }]
+        await ok(agent, { type: 'prompt', message: 'pick' })
+        const second = await next(e => e.type === 'extension_ui_request' && e.id !== ask.id)
+        agent.write({ type: 'extension_ui_response', id: second.id, value: 'deny' })
+        await settled(from)
+        expect(latestInput()).toContain('rejected')
+        expect(outline(agent).slice(-3)).toEqual(['assistant: <demo.pick_color>', 'result demo.pick_color (error)', 'assistant: not run'])
+    }, 30_000)
+
+    it('an MCP server\'s form (elicitation) is the ask form, its answers typed as the schema says', async () => {
+        const { agent, events, next, settled } = await start()
+        script = [{ call: { name: 'pick_color', namespace: 'mcp__demo', args: {} } }, { text: 'picked' }]
+        await ok(agent, { type: 'prompt', message: 'pick a color' })
+        const approve = await next(e => e.type === 'extension_ui_request')
+        agent.write({ type: 'extension_ui_response', id: approve.id, value: 'allow' })
+        const ask = await next(e => e.type === 'tool_execution_update' && e.partialResult?.details?.kind === 'ask')
+        expect(ask.partialResult.details.questions).toEqual([
+            // Required first, with the server's message.
+            { id: 'color', question: 'Pick a color for the theme · Color', options: ['red', 'green', 'blue'] },
+            { id: 'bright', question: expect.stringMatching(/^Bright/), options: [expect.any(String), expect.any(String)] },
+            { id: 'count', question: expect.stringMatching(/^How many/), options: [] },
+            { id: 'shade', question: expect.stringMatching(/^Shade \(Any word\)/), options: [] },
+        ])
+        const [yes] = ask.partialResult.details.questions[1].options
+        // Not a number: said so, the form keeps waiting.
+        const bad = await agent.request({ type: 'prompt', message: `/gui-ask-answer ${ask.toolCallId} ${JSON.stringify({ answers: { color: { selected: ['blue'] }, count: { selected: [], text: 'lots' } } })}` })
+        expect(bad.success).toBe(false)
+        await ok(agent, { type: 'prompt', message: `/gui-ask-answer ${ask.toolCallId} ${JSON.stringify({ answers: { color: { selected: ['blue'] }, shade: { selected: [], text: 'navy' }, bright: { selected: [yes] }, count: { selected: [], text: '3' } } })}` })
+        await settled()
+        // What the server got back, as its tool's output.
+        const output = JSON.parse(requests.at(-1).input.at(-1).output.at(-1).text.replace(/^answer: /, ''))
+        expect(output).toEqual({ action: 'accept', content: { color: 'blue', shade: 'navy', bright: true, count: 3 } })
+        const done = events.filter((e: any) => e.type === 'tool_execution_end' && e.toolName === 'ask').at(-1) as any
+        expect(done.result.details).toMatchObject({ status: 'answered', answers: { color: { selected: ['blue'] } } })
+    }, 30_000)
+
+    it('request_permissions asks for the access: allow grants it for the turn, deny grants none', async () => {
+        const { agent, next, settled, events } = await start()
+        const permissions = { network: { enabled: true }, file_system: { write: ['/tmp/pi-gui-perm'] } }
+        script = [{ call: { name: 'request_permissions', args: { permissions, reason: 'to fetch the schema' } } }, { text: 'granted' }]
+        await ok(agent, { type: 'prompt', message: 'need access' })
+        const ask = await next(e => e.type === 'extension_ui_request')
+        const approval = JSON.parse(ask.title.slice(APPROVAL_TITLE_PREFIX.length))
+        expect(approval.summary.split('\n')).toEqual([expect.stringMatching(/Network access|联网/), expect.stringMatching(/(Write|写) \/tmp\/pi-gui-perm/), 'to fetch the schema'])
+        agent.write({ type: 'extension_ui_response', id: ask.id, value: 'allow' })
+        await settled()
+        const granted = JSON.parse(requests.at(-1).input.find((i: any) => i.type === 'function_call_output').output)
+        expect(granted).toMatchObject({ scope: 'turn', permissions: { network: { enabled: true }, file_system: { write: ['/tmp/pi-gui-perm'] } } })
+
+        const from = events.length
+        script = [{ call: { name: 'request_permissions', args: { permissions } } }, { text: 'none' }]
+        await ok(agent, { type: 'prompt', message: 'again' })
+        const second = await next(e => e.type === 'extension_ui_request' && e.id !== ask.id)
+        agent.write({ type: 'extension_ui_response', id: second.id, value: 'deny' })
+        await settled(from)
+        const denied = JSON.parse(requests.at(-1).input.filter((i: any) => i.type === 'function_call_output').at(-1).output)
+        expect(denied.permissions).toEqual({ network: null, file_system: null })
+    }, 30_000)
+
+    it('offers /compact as a command', async () => {
+        const { agent, events, settled } = await start()
+        expect((await ok(agent, { type: 'get_commands' })).commands.map((c: any) => c.name)).toContain('compact')
+        script = [{ text: 'answer' }]
+        await ok(agent, { type: 'prompt', message: 'hi' })
+        await settled()
+        const from = events.length
+        script = [{ text: 'Summary.' }]
+        expect((await ok(agent, { type: 'prompt', message: '/compact' })).disposition).not.toBe('handled')
+        await settled(from)
+        expect(outline(agent)).toEqual(['user: hi', 'assistant: answer', 'compactionSummary'])
     }, 30_000)
 
     it('sends images as data URLs', async () => {

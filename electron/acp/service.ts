@@ -264,7 +264,9 @@ export class AcpService {
                     if (other === a && key !== a.key)
                         this.live.delete(key)
                 }
-                this.live.set(a.key, a)
+                // A second tab on a session (one forking it) does not stand for the one already running it.
+                if (!this.live.has(a.key))
+                    this.live.set(a.key, a)
                 this.replays.delete(a.key)
                 this.note(a, change)
                 this.mirrorSoon(a.key, () => a.snapshot())

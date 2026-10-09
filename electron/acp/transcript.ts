@@ -412,6 +412,11 @@ export class AcpTranscript {
         return !!this.open || [...this.tools.values()].some(t => !t.done)
     }
 
+    /** The assistant message still streaming, if any (a subagent's view shows it as it grows). */
+    get streaming(): AssistantMessage | null {
+        return this.open
+    }
+
     snapshot(): SessionItem[] {
         return this.messages.map((m, i) => ({ entryId: `${this.prefix}${i}`, message: m.message, endedAt: m.endedAt }))
     }

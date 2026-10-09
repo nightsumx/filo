@@ -10,8 +10,8 @@
 
 import type { AcpAgentCaps, AcpAgentSpec, AcpConfigOption } from '@shared/agents'
 import type { SessionItem } from '@shared/ipc'
-import type { ImageContent, PiEvent, PiModel, RpcResponse, ToolCall } from '@shared/pi'
-import type { ApprovalChoice, ApprovalRequest, AskAnswer, AskQuestion, AskResponse, PlanDecision } from '@shared/capabilities'
+import type { AgentMessage, ImageContent, PiEvent, PiModel, RpcResponse, ToolCall } from '@shared/pi'
+import type { ApprovalChoice, ApprovalRequest, AskAnswer, AskQuestion, AskResponse, PlanDecision, SubagentDetails } from '@shared/capabilities'
 import type { AgentAdapter, AgentAdapterCallbacks, AgentAdapterOptions } from '../acp/adapter'
 import type { PromptUsage } from '../acp/transcript'
 import type { ChildProcessWithoutNullStreams } from 'node:child_process'
@@ -81,6 +81,9 @@ const modeOption = (current: ModeId): AcpConfigOption => ({
 })
 
 /** The mode a thread opens in, from the sandbox Codex reports (the user's own config). */
+/** Codex lets one process write a thread at a time. */
+const ACTIVE_WRITER = /active writer/i
+
 function modeOf(sandbox: any, collaboration: any): ModeId {
     if (collaboration?.mode === 'plan')
         return 'plan'
@@ -174,7 +177,34 @@ function fileChangeCalls(item: any): { calls: ToolCall[], details: Record<string
 const STATUS: Record<string, string> = { inProgress: 'in_progress', completed: 'completed', failed: 'failed', declined: 'failed' }
 
 /** A thread item that is a tool call, as an ACP tool_call update; undefined for the rest. */
-function itemUpdate(item: any): Record<string, any> | undefined {
+/** Subagents' names by thread id, for the calls that address them. */
+type AgentNames = ReadonlyMap<string, string>
+
+/** What a collab call (other than spawning) does, in a line: "Wait for Kant", "Message Kant". */
+function collabLine(item: any, names?: AgentNames): string {
+    const ids: string[] = Array.isArray(item.receiverThreadIds) ? item.receiverThreadIds : []
+    const who = ids.map(id => names?.get(id) ?? tr('子 Agent', 'subagent')).join(', ') || tr('子 Agent', 'subagents')
+    switch (item.tool) {
+        case 'wait':
+            return tr(`等待 ${who}`, `Wait for ${who}`)
+        case 'sendInput':
+        case 'sendMessage':
+        case 'followupTask':
+            return tr(`发给 ${who}`, `Message ${who}`)
+        case 'resumeAgent':
+            return tr(`恢复 ${who}`, `Resume ${who}`)
+        case 'closeAgent':
+            return tr(`关闭 ${who}`, `Close ${who}`)
+        case 'interruptAgent':
+            return tr(`打断 ${who}`, `Interrupt ${who}`)
+        case 'listAgents':
+            return tr('列出子 Agent', 'List subagents')
+        default:
+            return String(item.tool ?? '')
+    }
+}
+
+function itemUpdate(item: any, names?: AgentNames): Record<string, any> | undefined {
     const id = String(item?.id ?? '')
     const status = STATUS[item?.status] ?? (item?.status === undefined ? undefined : 'failed')
     switch (item?.type) {
@@ -230,6 +260,9 @@ function itemUpdate(item: any): Record<string, any> | undefined {
         case 'imageView':
             return { toolCallId: id, status: 'completed', _meta: { piCalls: [call(id, 'read', { path: String(item.path ?? '') })] } }
         case 'collabAgentToolCall': {
+            // A spawned subagent is a subagent call; the adapter fills in its thread (see Subagent).
+            if (item.tool === 'spawnAgent')
+                return { toolCallId: id, status, _meta: { piCalls: [call(id, 'subagent', { task: String(item.prompt ?? '') })] } }
             const states = Object.values(item.agentsStates ?? {}) as any[]
             const text = states.map(s => s?.message).filter(Boolean).join('\n\n')
             const failed = states.some(s => s?.status === 'errored')
@@ -237,7 +270,7 @@ function itemUpdate(item: any): Record<string, any> | undefined {
                 toolCallId: id,
                 status: failed ? 'failed' : status,
                 ...(text ? { content: textBlock(text) } : {}),
-                _meta: { piCalls: [call(id, 'agent', { action: String(item.tool ?? ''), ...(item.prompt ? { task: item.prompt } : {}), ...(item.model ? { model: item.model } : {}) })] },
+                _meta: { piCalls: [call(id, 'agent', { description: collabLine(item, names), ...(item.prompt ? { task: item.prompt } : {}) })] },
             }
         }
         default:
@@ -295,11 +328,108 @@ interface ModelInfo {
     images: boolean
 }
 
+/** The answer to send back for each choice; cancel when the prompt goes away unanswered. */
+type ApprovalReply = (choice: ApprovalChoice | 'cancel') => unknown
+
 interface ApprovalWait {
     resolve: (result: unknown) => void
-    /** The decision "always" sends; undefined when Codex offers none. */
-    always?: unknown
-    itemId: string
+    reply: ApprovalReply
+}
+
+/** An MCP elicitation form's field, kept to turn the typed answer back into its JSON type. */
+interface ElicitField {
+    key: string
+    type: 'string' | 'number' | 'integer' | 'boolean' | 'array'
+    /** Shown label → the value sent, for choices. */
+    values?: Map<string, string>
+}
+
+interface ElicitWait {
+    resolve: (result: unknown) => void
+    questions: AskQuestion[]
+    fields: ElicitField[]
+    /** The thread's or a subagent's: where the form is shown. */
+    transcript: AcpTranscript
+}
+
+/**
+ * An MCP form (requestedSchema: flat properties of string, number, boolean, enum, multi-select) →
+ * questions for the ask form. Choices become options, the rest is typed.
+ */
+export function elicitForm(message: string, schema: any): { questions: AskQuestion[], fields: ElicitField[] } {
+    const required = new Set<string>(Array.isArray(schema?.required) ? schema.required : [])
+    // Required fields first (Codex passes the properties on sorted by name).
+    const properties = (schema?.properties && typeof schema.properties === 'object' ? Object.entries<any>(schema.properties) : [])
+        .sort(([a], [b]) => Number(required.has(b)) - Number(required.has(a)))
+    const questions: AskQuestion[] = []
+    const fields: ElicitField[] = []
+    properties.forEach(([key, p], i) => {
+        const multiple = p?.type === 'array'
+        const enumOf = multiple ? p.items : p
+        const titled = enumOf?.oneOf ?? enumOf?.anyOf
+        const options: [string, string][] = Array.isArray(titled)
+            ? titled.map((o: any) => [String(o?.title ?? o?.const), String(o?.const)])
+            : Array.isArray(enumOf?.enum)
+                ? enumOf.enum.map((v: any, j: number) => [String(p.enumNames?.[j] ?? v), String(v)])
+                : p?.type === 'boolean' ? [[tr('是', 'Yes'), 'true'], [tr('否', 'No'), 'false']] : []
+        const label = String(p?.title ?? key) + (p?.description ? ` (${p.description})` : '') + (required.has(key) ? '' : tr('（可选）', ' (optional)'))
+        questions.push({ id: key, question: i === 0 && message ? `${message} · ${label}` : label, options: options.map(o => o[0]), ...(multiple ? { multiple: true } : {}) })
+        fields.push({ key, type: ['number', 'integer', 'boolean', 'array'].includes(p?.type) ? p.type : 'string', ...(options.length ? { values: new Map(options) } : {}) })
+    })
+    return { questions, fields }
+}
+
+/** The ask form's answers → the form's content, typed as the schema says; undefined if a number is not one. */
+export function elicitContent(fields: ElicitField[], answers: Record<string, AskAnswer>): Record<string, unknown> | undefined {
+    const content: Record<string, unknown> = {}
+    for (const field of fields) {
+        const answer = answers[field.key]
+        if (!answer)
+            continue
+        const picked = answer.selected.map(label => field.values?.get(label) ?? label)
+        const typed = answer.text?.trim()
+        const values = [...picked, ...(typed ? [typed] : [])]
+        if (!values.length)
+            continue
+        if (field.type === 'array') {
+            content[field.key] = values
+        }
+        else if (field.type === 'boolean') {
+            content[field.key] = /^(true|yes|y|是|1)$/i.test(values[0])
+        }
+        else if (field.type === 'number' || field.type === 'integer') {
+            const n = Number(values[0])
+            if (!Number.isFinite(n) || (field.type === 'integer' && !Number.isInteger(n)))
+                return undefined
+            content[field.key] = n
+        }
+        else {
+            content[field.key] = values[0]
+        }
+    }
+    return content
+}
+
+/** A permission profile Codex asks for, in lines: "Network access", "Write /tmp/x". */
+function permissionLines(permissions: any): string[] {
+    const lines: string[] = []
+    if (permissions?.network?.enabled)
+        lines.push(tr('联网', 'Network access'))
+    const fs = permissions?.fileSystem
+    const entries: any[] = Array.isArray(fs?.entries) ? fs.entries : []
+    const where = (p: any) => (p?.type === 'path' ? String(p.path) : p?.type === 'glob_pattern' ? String(p.pattern) : p?.type === 'special' ? String(p.value?.kind ?? '') : '')
+    const verb = (access: string) => (access === 'write' ? tr('写', 'Write') : access === 'deny' ? tr('禁止', 'Deny') : tr('读', 'Read'))
+    if (entries.length) {
+        for (const e of entries)
+            lines.push(`${verb(e.access)} ${where(e.path)}`)
+    }
+    else {
+        for (const path of fs?.read ?? [])
+            lines.push(`${verb('read')} ${path}`)
+        for (const path of fs?.write ?? [])
+            lines.push(`${verb('write')} ${path}`)
+    }
+    return lines
 }
 
 interface AskWait {
@@ -313,6 +443,113 @@ interface PlanWait {
     plan: string
     usage?: PromptUsage
 }
+
+/**
+ * A subagent Codex spawned (multi_agent spawn_agent): a thread of its own on this connection. The
+ * parent's spawn call stays open while it works and shows its transcript (the subagent capability's
+ * view), until its turn ends or the parent's does.
+ */
+interface Subagent {
+    threadId: string
+    /** The parent's spawnAgent item: the subagent call. */
+    callId: string
+    title: string
+    task: string
+    model?: string
+    transcript: AcpTranscript
+    streamed: Set<string>
+    tools: SubagentDetails['tools']
+    status: SubagentDetails['status']
+    turnId: string | null
+    tokens: Tokens | null
+    startedAt: number
+    endedAt?: number
+    error?: string
+    /** The parent's call has its result: later events are not shown live. */
+    closed: boolean
+    /** Settles once its nickname was asked for. */
+    named: Promise<void>
+    flush?: ReturnType<typeof setTimeout>
+}
+
+const SUBAGENT_STATUS: Record<string, SubagentDetails['status']> = { completed: 'done', failed: 'failed', interrupted: 'cancelled' }
+
+function subagentUsage(tokens: Tokens | null): SubagentDetails['usage'] {
+    const input = tokens?.inputTokens ?? 0
+    const cached = tokens?.cachedInputTokens ?? 0
+    return { input: Math.max(0, input - cached), output: tokens?.outputTokens ?? 0, cacheRead: cached, cacheWrite: tokens?.cacheWriteInputTokens ?? 0, cost: 0 }
+}
+
+/** What the subagent said last: the call's result text for the parent's transcript. */
+function lastText(messages: readonly AgentMessage[]): string {
+    for (let i = messages.length - 1; i >= 0; i--) {
+        const m = messages[i]
+        if (m.role === 'assistant') {
+            const text = m.content.filter(c => c.type === 'text').map(c => (c as any).text).join('')
+            if (text)
+                return text
+        }
+    }
+    return ''
+}
+
+/** A streaming item's deltas, the same for a thread and its subagents. */
+function streamDelta(transcript: AcpTranscript, streamed: Set<string>, method: string, params: any) {
+    switch (method) {
+        case 'item/agentMessage/delta':
+            streamed.add(params?.itemId)
+            transcript.update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: String(params?.delta ?? '') } })
+            break
+        case 'item/reasoning/textDelta':
+        case 'item/reasoning/summaryTextDelta':
+            streamed.add(params?.itemId)
+            transcript.update({ sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: String(params?.delta ?? '') } })
+            break
+        case 'item/reasoning/summaryPartAdded':
+            if (streamed.has(params?.itemId))
+                transcript.update({ sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: '\n\n' } })
+            break
+        case 'item/commandExecution/outputDelta':
+        case 'item/fileChange/outputDelta':
+            transcript.update({ sessionUpdate: 'tool_call_update', toolCallId: params?.itemId, _meta: { terminal_output_delta: { data: String(params?.delta ?? '') } } })
+            break
+        default:
+            break
+    }
+}
+
+function startItem(transcript: AcpTranscript, item: any, names?: AgentNames, sessionUpdate = 'tool_call') {
+    const update = itemUpdate(item, names)
+    if (update)
+        transcript.update({ sessionUpdate, ...update, status: 'in_progress' })
+}
+
+/** item/completed: text that did not stream comes whole; a call gets its result. */
+function completeItem(transcript: AcpTranscript, streamed: Set<string>, item: any, names?: AgentNames) {
+    switch (item.type) {
+        case 'userMessage':
+            return
+        case 'agentMessage':
+            if (!streamed.has(item.id) && item.text)
+                transcript.update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: item.text } })
+            return
+        case 'reasoning':
+            if (!streamed.has(item.id)) {
+                for (const part of (item.content?.length ? item.content : item.summary ?? []) as string[])
+                    transcript.update({ sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: part } })
+            }
+            return
+        case 'contextCompaction':
+            transcript.compaction('', 0)
+            return
+    }
+    const update = itemUpdate(item, names)
+    if (update)
+        transcript.update({ sessionUpdate: 'tool_call_update', ...update })
+}
+
+/** Other threads' events kept until a spawn call names their thread (they can come first). */
+const STRAYS_KEPT = 200
 
 // ---------------------------------------------------------------- adapter
 
@@ -329,6 +566,10 @@ export class CodexAgent implements AgentAdapter {
     private threadId = ''
     /** Replaying the thread's history: no events, the session's own time on messages. */
     private loading = true
+    /** Opened while another process writes the thread: read, not resumed (see takeOver). */
+    private detached = false
+    /** The user picked a mode here: it wins over the one the thread resumes with. */
+    private modeChosen = false
 
     private models: ModelInfo[] = []
     private model = ''
@@ -354,8 +595,16 @@ export class CodexAgent implements AgentAdapter {
     /** The transcript position of each turn's prompt → the turn's id, for asking again and forking. */
     private turnAt = new Map<number, string>()
 
+    /** Subagents by their thread id. */
+    private subagents = new Map<string, Subagent>()
+    private strays: [string, any][] = []
+    private agentNames = new Map<string, string>()
+    /** Running collab calls (wait_agent, send_input, …), renamed once their subagent's name is known. */
+    private collabOpen = new Map<string, any>()
+
     private approvals = new Map<string, ApprovalWait>()
     private asks = new Map<string, AskWait>()
+    private elicits = new Map<string, ElicitWait>()
     private planWait: PlanWait | null = null
 
     constructor(readonly spec: AcpAgentSpec, launch: CodexLaunch, private options: AgentAdapterOptions, private callbacks: AgentAdapterCallbacks) {
@@ -426,7 +675,7 @@ export class CodexAgent implements AgentAdapter {
     /** Sign-in failures read as what to do about them. */
     private explain(error: any): string {
         const message = String(error?.message ?? error)
-        if (/active writer/i.test(message))
+        if (ACTIVE_WRITER.test(message))
             return tr(`这个线程正在别处打开着（Codex 终端、VS Code 或另一个标签页），关掉那边再试。（${message}）`, `This thread is open elsewhere (the Codex TUI, VS Code or another tab); close it there and try again. (${message})`)
         if (/\b401\b|unauthori[sz]ed|not (signed|logged) in|login|api key/i.test(message))
             return tr(`${this.spec.label} 还没有登录：${this.spec.signIn.zh}。（${message}）`, `${this.spec.label} is not signed in: ${this.spec.signIn.en}. (${message})`)
@@ -444,9 +693,15 @@ export class CodexAgent implements AgentAdapter {
             await this.loadHistory()
         }
         else if (this.options.sessionId) {
-            // The turns come from thread/turns/list, page by page.
-            info = await this.rpc('thread/resume', { threadId: this.options.sessionId, excludeTurns: true }).catch((error) => {
-                throw new Error(this.explain(error))
+            // The turns come from thread/turns/list, page by page. Another process writing the thread
+            // (the tab forked from, the Codex TUI) leaves this one reading it until it is free:
+            // forking works meanwhile, a prompt takes the thread over then (takeOver).
+            info = await this.rpc('thread/resume', { threadId: this.options.sessionId, excludeTurns: true }).catch(async (error) => {
+                if (!ACTIVE_WRITER.test(String(error?.message ?? error)))
+                    throw new Error(this.explain(error))
+                this.detached = true
+                const read: any = await this.rpc('thread/read', { threadId: this.options.sessionId })
+                return { ...read, model: read?.thread?.model, reasoningEffort: read?.thread?.reasoningEffort }
             })
             await this.loadHistory()
         }
@@ -468,6 +723,22 @@ export class CodexAgent implements AgentAdapter {
         await this.loadModels().catch(error => console.warn(`[codex] model/list failed:`, error?.message ?? error))
         this.transcript.setEmitter(event => this.emit(event))
         this.callbacks.onSession?.(this, info?.thread?.name ? { title: info.thread.name } : {})
+    }
+
+    /** Before writing: a thread opened while another process wrote it is resumed now. */
+    private async takeOver() {
+        if (!this.detached)
+            return
+        const info: any = await this.rpc('thread/resume', { threadId: this.threadId, excludeTurns: true }).catch((error) => {
+            throw new Error(this.explain(error))
+        })
+        this.detached = false
+        if (!this.modeChosen) {
+            this.mode = modeOf(info?.sandbox, info?.collaborationMode)
+            if (this.mode !== 'plan')
+                this.workMode = this.mode
+            this.configChanged()
+        }
     }
 
     private async loadModels() {
@@ -534,6 +805,7 @@ export class CodexAgent implements AgentAdapter {
             if (!(value in MODES))
                 throw new Error(tr(`没有这个模式：${value}`, `No such mode: ${value}`))
             this.mode = value as ModeId
+            this.modeChosen = true
             if (this.mode !== 'plan')
                 this.workMode = this.mode
         }
@@ -560,24 +832,28 @@ export class CodexAgent implements AgentAdapter {
 
     // ---------------------------------------------------------------- history
 
-    /**
-     * The thread's turns, oldest first, page by page (codex 0.160: `asc`, `data`, `nextCursor`),
-     * with every item. A failure throws: an empty thread would look like a session with no history.
-     */
-    private async loadHistory() {
+    /** A thread's turns, oldest first, every item. A failure throws: an empty thread would look like a session with no history. */
+    private async turnsOf(threadId: string): Promise<any[]> {
         const turns: any[] = []
         let cursor: string | null | undefined
         do {
-            const page: any = await this.rpc('thread/turns/list', { threadId: this.threadId, sortDirection: 'asc', itemsView: 'full', cursor })
+            const page: any = await this.rpc('thread/turns/list', { threadId, sortDirection: 'asc', itemsView: 'full', cursor })
             turns.push(...(page?.data ?? []))
             cursor = page?.nextCursor
         } while (cursor)
+        return turns
+    }
+
+    /** The thread's history, page by page (codex 0.160: `asc`, `data`, `nextCursor`), its subagents' with it. */
+    private async loadHistory() {
+        const turns = await this.turnsOf(this.threadId)
+        const subagents = await this.historySubagents(turns)
         turns.forEach((turn, i) => {
             let prompted = false
             for (const item of turn.items ?? []) {
                 if (item?.type === 'userMessage' && !prompted) {
                     prompted = true
-                    this.historyItem(item)
+                    this.historyItem(item, this.transcript)
                     if (turn.id)
                         this.turnAt.set(this.transcript.messages.length - 1, turn.id)
                     continue
@@ -585,42 +861,92 @@ export class CodexAgent implements AgentAdapter {
                 if (item?.type === 'plan')
                     this.historyPlan(item, turns[i + 1])
                 else
-                    this.historyItem(item)
+                    this.historyItem(item, this.transcript, subagents)
             }
             this.transcript.finish(turn.status === 'interrupted' ? 'cancelled' : 'end_turn', undefined, turn.status === 'failed' ? String(turn.error?.message ?? 'Failed') : undefined)
         })
     }
 
-    private historyItem(item: any) {
+    /** Each spawned subagent's thread read back, as its call's details (by the spawn item's id). */
+    private async historySubagents(turns: any[]): Promise<Map<string, SubagentDetails>> {
+        const spawns = turns.flatMap(t => t.items ?? []).filter((i: any) => i?.type === 'collabAgentToolCall' && i.tool === 'spawnAgent' && i.receiverThreadIds?.[0])
+        const found = new Map<string, SubagentDetails>()
+        await Promise.all(spawns.map(async (item: any) => {
+            const threadId = String(item.receiverThreadIds[0])
+            try {
+                const [childTurns, read] = await Promise.all([this.turnsOf(threadId), this.rpc('thread/read', { threadId }).catch(() => null)])
+                const transcript = this.subagentTranscript(String(item.model ?? ''), String(item.reasoningEffort ?? ''))
+                for (const turn of childTurns) {
+                    for (const child of turn.items ?? [])
+                        this.historyItem(child, transcript)
+                    transcript.finish(turn.status === 'interrupted' ? 'cancelled' : 'end_turn', undefined, turn.status === 'failed' ? String(turn.error?.message ?? 'Failed') : undefined)
+                }
+                const last = childTurns[childTurns.length - 1]
+                if (read?.thread?.agentNickname)
+                    this.agentNames.set(threadId, String(read.thread.agentNickname))
+                const seconds = (t: unknown) => (typeof t === 'number' ? t * 1000 : undefined)
+                found.set(String(item.id), {
+                    kind: 'subagent',
+                    status: last?.status === 'inProgress' ? 'running' : SUBAGENT_STATUS[last?.status] ?? 'done',
+                    title: String(read?.thread?.agentNickname ?? '') || tr('子 Agent', 'Subagent'),
+                    task: String(item.prompt ?? ''),
+                    model: item.model || undefined,
+                    messages: transcript.messages.map(m => m.message),
+                    tools: {},
+                    steering: [],
+                    usage: subagentUsage(null),
+                    startedAt: seconds(childTurns[0]?.startedAt) ?? this.options.replayTime ?? 0,
+                    endedAt: seconds(last?.completedAt),
+                    ...(last?.status === 'failed' ? { error: String(last.error?.message ?? 'Failed') } : {}),
+                })
+            }
+            catch (error: any) {
+                console.warn(`[codex] subagent ${threadId} unreadable:`, error?.message ?? error)
+            }
+        }))
+        return found
+    }
+
+    private historyItem(item: any, transcript: AcpTranscript, subagents?: Map<string, SubagentDetails>) {
         switch (item?.type) {
             case 'userMessage':
                 for (const input of item.content ?? []) {
                     if (input?.type === 'text' && typeof input.text === 'string')
-                        this.transcript.update({ sessionUpdate: 'user_message_chunk', content: { type: 'text', text: input.text } })
+                        transcript.update({ sessionUpdate: 'user_message_chunk', content: { type: 'text', text: input.text } })
                     else if (input?.type === 'image' && typeof input.url === 'string') {
                         const m = /^data:([^;]+);base64,(.*)$/s.exec(input.url)
                         if (m)
-                            this.transcript.update({ sessionUpdate: 'user_message_chunk', content: { type: 'image', mimeType: m[1], data: m[2] } })
+                            transcript.update({ sessionUpdate: 'user_message_chunk', content: { type: 'image', mimeType: m[1], data: m[2] } })
                     }
                 }
                 break
             case 'agentMessage':
-                this.transcript.update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: item.text ?? '' } })
+                transcript.update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: item.text ?? '' } })
                 break
             case 'reasoning': {
                 // The raw reasoning when Codex kept it, else its summary.
                 const parts: string[] = item.content?.length ? item.content : item.summary ?? []
                 for (const part of parts)
-                    this.transcript.update({ sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: part } })
+                    transcript.update({ sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: part } })
                 break
             }
             case 'contextCompaction':
-                this.transcript.compaction('', 0)
+                transcript.compaction('', 0)
                 break
             default: {
-                const update = itemUpdate(item)
-                if (update)
-                    this.transcript.update({ sessionUpdate: 'tool_call', ...update, status: update.status === 'in_progress' ? 'failed' : update.status })
+                const update = itemUpdate(item, this.agentNames)
+                if (!update)
+                    break
+                const details = subagents?.get(String(item.id))
+                if (details) {
+                    const text = lastText(details.messages)
+                    update._meta = { ...update._meta, piDetails: { [item.id]: details } }
+                    if (text)
+                        update.content = textBlock(text)
+                    if (details.status === 'failed')
+                        update.status = 'failed'
+                }
+                transcript.update({ sessionUpdate: 'tool_call', ...update, status: update.status === 'in_progress' ? 'failed' : update.status })
             }
         }
     }
@@ -639,9 +965,20 @@ export class CodexAgent implements AgentAdapter {
     // ---------------------------------------------------------------- server → client
 
     private notification(method: string, params: any) {
-        // Subagents run as threads of their own; their events are not this thread's.
-        if (params?.threadId && this.threadId && params.threadId !== this.threadId)
+        // Subagents run as threads of their own on this connection; other threads' events are not this one's.
+        if (params?.threadId && this.threadId && params.threadId !== this.threadId) {
+            if (this.loading)
+                return
+            const sub = this.subagents.get(params.threadId)
+            if (sub) {
+                this.subagentNotification(sub, method, params)
+            }
+            else {
+                this.strays.push([method, params])
+                this.strays.splice(0, this.strays.length - STRAYS_KEPT)
+            }
             return
+        }
         if (this.loading)
             return
         switch (method) {
@@ -680,30 +1017,14 @@ export class CodexAgent implements AgentAdapter {
             case 'item/completed':
                 this.itemCompleted(params?.item)
                 break
-            case 'item/agentMessage/delta':
-                this.streamed.add(params?.itemId)
-                this.transcript.update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: String(params?.delta ?? '') } })
-                break
-            case 'item/reasoning/textDelta':
-            case 'item/reasoning/summaryTextDelta':
-                this.streamed.add(params?.itemId)
-                this.transcript.update({ sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: String(params?.delta ?? '') } })
-                break
-            case 'item/reasoning/summaryPartAdded':
-                if (this.streamed.has(params?.itemId))
-                    this.transcript.update({ sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: '\n\n' } })
-                break
             case 'item/plan/delta':
                 if (this.planItem && this.planItem.id === params?.itemId) {
                     this.planItem.text += String(params?.delta ?? '')
                     this.showPlan()
                 }
                 break
-            case 'item/commandExecution/outputDelta':
-            case 'item/fileChange/outputDelta':
-                this.transcript.update({ sessionUpdate: 'tool_call_update', toolCallId: params?.itemId, _meta: { terminal_output_delta: { data: String(params?.delta ?? '') } } })
-                break
             default:
+                streamDelta(this.transcript, this.streamed, method, params)
                 break
         }
     }
@@ -716,9 +1037,9 @@ export class CodexAgent implements AgentAdapter {
             this.transcript.update({ sessionUpdate: 'tool_call', toolCallId: item.id, status: 'in_progress', _meta: { piCalls: [call(item.id, 'propose_plan', { plan: this.planItem.text })] } })
             return
         }
-        const update = itemUpdate(item)
-        if (update)
-            this.transcript.update({ sessionUpdate: 'tool_call', ...update, status: 'in_progress' })
+        if (item.type === 'collabAgentToolCall' && item.tool !== 'spawnAgent')
+            this.collabOpen.set(item.id, item)
+        startItem(this.transcript, item, this.agentNames)
     }
 
     private itemCompleted(item: any) {
@@ -728,16 +1049,6 @@ export class CodexAgent implements AgentAdapter {
             case 'userMessage':
                 // Shown when it was sent (prompt, steer).
                 return
-            case 'agentMessage':
-                if (!this.streamed.has(item.id) && item.text)
-                    this.transcript.update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: item.text } })
-                return
-            case 'reasoning':
-                if (!this.streamed.has(item.id)) {
-                    for (const part of (item.content?.length ? item.content : item.summary ?? []) as string[])
-                        this.transcript.update({ sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: part } })
-                }
-                return
             case 'plan':
                 // Stays open: the user reviews it once the turn ends.
                 if (this.planItem && this.planItem.id === item.id) {
@@ -745,13 +1056,196 @@ export class CodexAgent implements AgentAdapter {
                     this.showPlan()
                 }
                 return
-            case 'contextCompaction':
-                this.transcript.compaction('', 0)
-                return
+            case 'collabAgentToolCall':
+                this.collabOpen.delete(item.id)
+                // Spawned: the call stays open while the subagent works.
+                if (item.tool === 'spawnAgent' && item.status === 'completed' && item.receiverThreadIds?.[0]) {
+                    this.adoptSubagent(item)
+                    return
+                }
+                break
         }
-        const update = itemUpdate(item)
-        if (update)
-            this.transcript.update({ sessionUpdate: 'tool_call_update', ...update })
+        completeItem(this.transcript, this.streamed, item, this.agentNames)
+    }
+
+    // ---------------------------------------------------------------- subagents
+
+    private subagentTranscript(model: string, effort: string): AcpTranscript {
+        return new AcpTranscript('sub:', {
+            model: () => ({ provider: this.spec.label, model: model || this.model || undefined, thinkingLevel: effort || undefined }),
+            inputIncludesCache: true,
+            now: () => (this.loading ? this.options.replayTime ?? Date.now() : Date.now()),
+        })
+    }
+
+    /** spawn_agent made a thread: its events fill the spawn call from now on. */
+    private adoptSubagent(item: any) {
+        const threadId = String(item.receiverThreadIds[0])
+        if (this.subagents.has(threadId))
+            return
+        const sub: Subagent = {
+            threadId,
+            callId: String(item.id),
+            title: tr('子 Agent', 'Subagent'),
+            task: String(item.prompt ?? ''),
+            model: item.model || undefined,
+            transcript: this.subagentTranscript(String(item.model ?? ''), String(item.reasoningEffort ?? '')),
+            streamed: new Set(),
+            tools: {},
+            status: 'running',
+            turnId: null,
+            tokens: null,
+            startedAt: Date.now(),
+            closed: false,
+            named: Promise.resolve(),
+        }
+        sub.transcript.setEmitter(event => this.subagentEvent(sub, event))
+        this.subagents.set(threadId, sub)
+        // Its events from before the spawn call returned.
+        const early = this.strays.filter(([, params]) => params?.threadId === threadId)
+        this.strays = this.strays.filter(([, params]) => params?.threadId !== threadId)
+        for (const [method, params] of early)
+            this.subagentNotification(sub, method, params)
+        this.flushSubagent(sub)
+        // Codex names its subagents (Kant, …): the title the views show.
+        sub.named = this.nameSubagent(sub)
+    }
+
+    /**
+     * The subagent's nickname (thread/read). Its thread file can still be empty right after the spawn,
+     * which fails the read: it is tried again a few times.
+     */
+    private async nameSubagent(sub: Subagent, tries = 6): Promise<void> {
+        for (let i = 0; i < tries && !this.exited; i++) {
+            try {
+                const read: any = await this.rpc('thread/read', { threadId: sub.threadId })
+                const name = String(read?.thread?.agentNickname ?? '')
+                if (name) {
+                    sub.title = name
+                    this.agentNames.set(sub.threadId, name)
+                    // Calls already shown for it (wait_agent, …) get the name too.
+                    for (const item of this.collabOpen.values()) {
+                        if ((item.receiverThreadIds ?? []).includes(sub.threadId))
+                            startItem(this.transcript, item, this.agentNames, 'tool_call_update')
+                    }
+                    this.flushSubagentSoon(sub)
+                }
+                return
+            }
+            catch {
+                await new Promise(resolve => setTimeout(resolve, 150 * (i + 1)))
+            }
+        }
+    }
+
+    private subagentNotification(sub: Subagent, method: string, params: any) {
+        switch (method) {
+            case 'turn/started':
+                sub.turnId = String(params?.turn?.id ?? '') || null
+                sub.status = 'running'
+                break
+            case 'turn/completed': {
+                const turn = params?.turn
+                const status = String(turn?.status ?? '')
+                const error = status === 'failed' ? String(turn?.error?.message || tr('子 Agent 失败了', 'The subagent failed')) : undefined
+                sub.turnId = null
+                sub.transcript.finish(status === 'interrupted' ? 'cancelled' : 'end_turn', undefined, error)
+                // Its outcome now (the parent's turn may end first), its name when known.
+                sub.status = SUBAGENT_STATUS[status] ?? 'done'
+                sub.error = error
+                if (!this.agentNames.has(sub.threadId))
+                    sub.named = sub.named.then(() => (this.agentNames.has(sub.threadId) ? undefined : this.nameSubagent(sub, 1)))
+                void sub.named.then(() => this.closeSubagent(sub, sub.status, sub.error))
+                return
+            }
+            case 'thread/tokenUsage/updated':
+                if (params?.tokenUsage?.total)
+                    sub.tokens = params.tokenUsage.total
+                break
+            case 'item/started':
+                if (params?.item?.id && params.item.type !== 'userMessage')
+                    startItem(sub.transcript, params.item)
+                break
+            case 'item/completed':
+                // Its task, and what the parent sends it later.
+                if (params?.item?.type === 'userMessage')
+                    this.historyItem(params.item, sub.transcript)
+                else if (params?.item?.id)
+                    completeItem(sub.transcript, sub.streamed, params.item)
+                break
+            default:
+                streamDelta(sub.transcript, sub.streamed, method, params)
+                break
+        }
+        this.flushSubagentSoon(sub)
+    }
+
+    /** The subagent transcript's own events: which of its calls run, for the views. */
+    private subagentEvent(sub: Subagent, event: PiEvent) {
+        if (event.type === 'tool_execution_start')
+            sub.tools[event.toolCallId] = { startedAt: Date.now() }
+        else if (event.type === 'tool_execution_update' && sub.tools[event.toolCallId])
+            sub.tools[event.toolCallId].partial = event.partialResult
+        else if (event.type === 'tool_execution_end')
+            delete sub.tools[event.toolCallId]
+    }
+
+    private subagentDetails(sub: Subagent): SubagentDetails {
+        return {
+            kind: 'subagent',
+            status: sub.status,
+            title: sub.title,
+            task: sub.task,
+            model: sub.model,
+            messages: sub.transcript.messages.map(m => m.message),
+            streaming: sub.transcript.streaming ?? undefined,
+            tools: { ...sub.tools },
+            steering: [],
+            usage: subagentUsage(sub.tokens),
+            startedAt: sub.startedAt,
+            endedAt: sub.endedAt,
+            ...(sub.error ? { error: sub.error } : {}),
+        }
+    }
+
+    private flushSubagent(sub: Subagent) {
+        clearTimeout(sub.flush)
+        sub.flush = undefined
+        if (!sub.closed)
+            this.transcript.setDetails(sub.callId, this.subagentDetails(sub))
+    }
+
+    /** Streaming deltas come fast: the view is sent at most every 50ms. */
+    private flushSubagentSoon(sub: Subagent) {
+        if (!sub.closed && !sub.flush)
+            sub.flush = setTimeout(() => this.flushSubagent(sub), 50)
+    }
+
+    /** The spawn call gets its result: the subagent's transcript, its last words as the text. */
+    private closeSubagent(sub: Subagent, status: SubagentDetails['status'], error?: string) {
+        if (sub.closed)
+            return
+        clearTimeout(sub.flush)
+        sub.flush = undefined
+        sub.status = status
+        sub.error = error
+        sub.endedAt = Date.now()
+        sub.closed = true
+        const text = lastText(sub.transcript.messages.map(m => m.message))
+        this.transcript.update({
+            sessionUpdate: 'tool_call_update',
+            toolCallId: sub.callId,
+            status: status === 'failed' ? 'failed' : 'completed',
+            ...(text || error ? { content: textBlock(text || error!) } : {}),
+            _meta: { piDetails: { [sub.callId]: this.subagentDetails(sub) } },
+        })
+    }
+
+    private subagentOf(callId: string): Subagent {
+        const sub = [...this.subagents.values()].find(s => s.callId === callId)
+        if (!sub || sub.closed || !sub.turnId)
+            throw new Error(tr('这个子 Agent 已经不在运行', 'This subagent is no longer running'))
+        return sub
     }
 
     private showPlan() {
@@ -760,8 +1254,26 @@ export class CodexAgent implements AgentAdapter {
     }
 
     private serverRequest(method: string, params: any): Promise<unknown> {
-        if (params?.threadId && this.threadId && params.threadId !== this.threadId)
-            return Promise.reject(new RpcError(`Not this thread: ${params.threadId}`, -32602))
+        if (params?.threadId && this.threadId && params.threadId !== this.threadId) {
+            // A subagent's command or edit: asked like the thread's own, against the subagent's call.
+            const sub = this.subagents.get(params.threadId)
+            if (!sub || sub.closed)
+                return Promise.reject(new RpcError(`Not this thread: ${params.threadId}`, -32602))
+            if (method === 'item/commandExecution/requestApproval' || method === 'item/fileChange/requestApproval') {
+                this.flushSubagent(sub)
+                return this.approval(params, method.includes('command') ? 'command' : 'file', sub.transcript)
+            }
+            if (method === 'item/permissions/requestApproval') {
+                this.flushSubagent(sub)
+                return this.permissions(params, sub.transcript)
+            }
+            if (method === 'mcpServer/elicitation/request') {
+                this.flushSubagent(sub)
+                return this.elicitation(params, sub.transcript)
+            }
+            if (method === 'item/tool/requestUserInput')
+                return Promise.resolve({ answers: {} })
+        }
         switch (method) {
             case 'item/commandExecution/requestApproval':
                 return this.approval(params, 'command')
@@ -769,20 +1281,22 @@ export class CodexAgent implements AgentAdapter {
                 return this.approval(params, 'file')
             case 'item/tool/requestUserInput':
                 return this.ask(params)
+            case 'item/permissions/requestApproval':
+                return this.permissions(params)
             case 'mcpServer/elicitation/request':
-                return Promise.resolve({ action: 'decline', content: null })
+                return this.elicitation(params)
             default:
-                // Permission profiles, client-side tools, auth refresh: not something this app provides.
+                // Client-side tools, auth refresh: not something this app provides.
                 return Promise.reject(new RpcError(`Method not found: ${method}`, -32601))
         }
     }
 
     /** A command or file change waiting on the user → the approval prompt. */
-    private approval(params: any, kind: 'command' | 'file'): Promise<unknown> {
+    private approval(params: any, kind: 'command' | 'file', transcript = this.transcript): Promise<unknown> {
         if (this.options.readOnly)
             return Promise.resolve({ decision: 'cancel' })
         const itemId = String(params?.itemId ?? '')
-        const shown = this.transcript.callsOf(itemId)
+        const shown = transcript.callsOf(itemId)
         let always: unknown
         let alwaysLabel: string | undefined
         if (kind === 'command') {
@@ -813,12 +1327,116 @@ export class CodexAgent implements AgentAdapter {
             scope: always ? 'codex' : '',
             alwaysLabel,
         }
+        return this.approvalPrompt(approval, (choice) => {
+            const decision = choice === 'allow' ? 'accept' : choice === 'always' ? always ?? 'accept' : choice === 'deny' ? 'decline' : 'cancel'
+            return { decision }
+        })
+    }
+
+    /** Shows an approval prompt: allow, always (when it has a scope) and deny; `reply` turns the choice into the answer. */
+    private approvalPrompt(approval: ApprovalRequest, reply: ApprovalReply): Promise<unknown> {
         const requestId = `codex-approval-${randomUUID()}`
-        const choices: ApprovalChoice[] = always ? ['allow', 'always', 'deny'] : ['allow', 'deny']
+        const choices: ApprovalChoice[] = approval.scope ? ['allow', 'always', 'deny'] : ['allow', 'deny']
         return new Promise((resolve) => {
-            this.approvals.set(requestId, { resolve, always, itemId })
+            this.approvals.set(requestId, { resolve, reply })
             this.emit({ type: 'extension_ui_request', id: requestId, method: 'select', title: `${APPROVAL_TITLE_PREFIX}${JSON.stringify(approval)}`, options: choices })
         })
+    }
+
+    /** request_permissions: more filesystem or network access, for this turn or (always) the session. */
+    private permissions(params: any, transcript = this.transcript): Promise<unknown> {
+        const none = { permissions: {}, scope: 'turn' }
+        if (this.options.readOnly)
+            return Promise.resolve(none)
+        const itemId = String(params?.itemId ?? '')
+        const shown = transcript.callsOf(itemId)
+        const lines = permissionLines(params?.permissions)
+        const approval: ApprovalRequest = {
+            toolCallId: shown[0]?.id ?? itemId,
+            tool: shown[0]?.name ?? 'request_permissions',
+            summary: [...lines, ...(params?.reason ? [String(params.reason)] : [])].join('\n') || tr('更多权限', 'More permissions'),
+            scope: 'codex',
+            alwaysLabel: tr('本会话都允许', 'Allow for this session'),
+        }
+        // Granted as asked: Codex takes a subset too, the prompt offers all or nothing.
+        const asked = params?.permissions ?? {}
+        const granted = { ...(asked.network ? { network: asked.network } : {}), ...(asked.fileSystem ? { fileSystem: asked.fileSystem } : {}) }
+        return this.approvalPrompt(approval, choice => (choice === 'allow' ? { permissions: granted, scope: 'turn' } : choice === 'always' ? { permissions: granted, scope: 'session' } : none))
+    }
+
+    /** The MCP call running on the turn that an elicitation is about (it carries no item id). */
+    private mcpCallOf(name: string, transcript: AcpTranscript): ToolCall | undefined {
+        return (transcript.streaming?.content ?? [])
+            .filter((c): c is ToolCall => c.type === 'toolCall' && c.name === name)
+            .at(-1)
+    }
+
+    /**
+     * An MCP server asking the user (elicitation): Codex's own approval of an MCP tool call, a form, or
+     * a page to visit. Device verification can't be answered here and is declined.
+     */
+    private elicitation(params: any, transcript = this.transcript): Promise<unknown> {
+        const decline = { action: 'decline', content: null }
+        const cancel = { action: 'cancel', content: null }
+        if (this.options.readOnly)
+            return Promise.resolve(cancel)
+        const server = String(params?.serverName ?? '')
+        const meta = params?._meta ?? {}
+        const message = String(params?.message ?? '')
+        if (meta.codex_approval_kind === 'mcp_tool_call') {
+            const tool = /"([^"]+)"/.exec(message)?.[1] ?? ''
+            const name = `${server}.${tool}`
+            const shown = this.mcpCallOf(name, transcript)
+            const persist: string[] = Array.isArray(meta.persist) ? meta.persist : []
+            const args = (Array.isArray(meta.tool_params_display) ? meta.tool_params_display : [])
+                .map((p: any) => `${p.display_name ?? p.name}: ${typeof p.value === 'string' ? p.value : JSON.stringify(p.value)}`)
+            const approval: ApprovalRequest = {
+                toolCallId: shown?.id ?? `mcp-${name}`,
+                tool: name,
+                summary: [name, ...args].join('\n'),
+                scope: persist.includes('session') ? 'codex' : '',
+                alwaysLabel: tr(`本会话都允许 ${name}`, `Allow ${name} for this session`),
+            }
+            return this.approvalPrompt(approval, choice => (choice === 'allow'
+                ? { action: 'accept', content: {} }
+                : choice === 'always' ? { action: 'accept', content: {}, _meta: { persist: 'session' } } : choice === 'deny' ? decline : cancel))
+        }
+        if (params?.mode === 'url') {
+            // The page is the user's to open; allow says it was done.
+            const approval: ApprovalRequest = { toolCallId: `mcp-url-${randomUUID()}`, tool: server || 'mcp', summary: `${message}\n${String(params.url ?? '')}`, scope: '' }
+            return this.approvalPrompt(approval, choice => (choice === 'allow' ? { action: 'accept', content: null } : choice === 'deny' ? decline : cancel))
+        }
+        if (params?.mode !== 'form' && params?.mode !== 'openai/form' && params?.mode !== 'openaiForm')
+            return Promise.resolve(decline)
+        const { questions, fields } = elicitForm(message, params.requestedSchema)
+        if (!questions.length) {
+            // Nothing to fill in: a yes or no.
+            const approval: ApprovalRequest = { toolCallId: `mcp-ask-${randomUUID()}`, tool: server || 'mcp', summary: message, scope: '' }
+            return this.approvalPrompt(approval, choice => (choice === 'allow' ? { action: 'accept', content: {} } : choice === 'deny' ? decline : cancel))
+        }
+        const id = `codex-elicit-${randomUUID()}`
+        transcript.update({ sessionUpdate: 'tool_call', toolCallId: id, status: 'in_progress', _meta: { piCalls: [call(id, 'ask', { questions })] } })
+        return new Promise((resolve) => {
+            this.elicits.set(id, { resolve, questions, fields, transcript })
+            if (!transcript.setDetails(id, { kind: 'ask', status: 'pending', questions })) {
+                this.elicits.delete(id)
+                resolve(cancel)
+            }
+        })
+    }
+
+    /** The ask form filled in for an MCP server; nothing filled in cancels. */
+    private answerElicit(id: string, response: AskResponse) {
+        const wait = this.elicits.get(id)!
+        const content = 'answers' in response ? elicitContent(wait.fields, response.answers) : {}
+        if (!content)
+            throw new Error(tr('这里要填数字', 'That answer has to be a number'))
+        this.elicits.delete(id)
+        const answered = Object.keys(content).length > 0
+        const shown = 'answers' in response ? codexAnswers(wait.questions, response).shown : {}
+        wait.transcript.setDetails(id, answered ? { kind: 'ask', status: 'answered', questions: wait.questions, answers: shown } : { kind: 'ask', status: 'cancelled', questions: wait.questions })
+        wait.transcript.update({ sessionUpdate: 'tool_call_update', toolCallId: id, status: 'completed' })
+        wait.resolve(answered ? { action: 'accept', content } : { action: 'cancel', content: null })
     }
 
     private answerApproval(requestId: string, payload: Record<string, unknown>) {
@@ -827,8 +1445,7 @@ export class CodexAgent implements AgentAdapter {
             return
         this.approvals.delete(requestId)
         const value = payload.cancelled ? undefined : payload.value
-        const decision = value === 'allow' ? 'accept' : value === 'always' ? wait.always ?? 'accept' : value === 'deny' ? 'decline' : 'cancel'
-        wait.resolve({ decision })
+        wait.resolve(wait.reply(value === 'allow' || value === 'always' || value === 'deny' ? value : 'cancel'))
     }
 
     /** request_user_input (plan mode) → the ask capability's form, as a call of its own on the turn. */
@@ -848,6 +1465,8 @@ export class CodexAgent implements AgentAdapter {
     }
 
     private answerAsk(id: string, response: AskResponse) {
+        if (this.elicits.has(id))
+            return this.answerElicit(id, response)
         const wait = this.asks.get(id)
         if (!wait)
             throw new Error(tr('这个问题已经不在等回答了', 'This question is no longer waiting for an answer'))
@@ -889,7 +1508,7 @@ export class CodexAgent implements AgentAdapter {
     private cancelWaits() {
         for (const [id] of this.approvals)
             this.answerApproval(id, { cancelled: true })
-        for (const [id] of this.asks)
+        for (const id of [...this.asks.keys(), ...this.elicits.keys()])
             this.answerAsk(id, { cancelled: true })
         if (this.planWait && !this.exited)
             this.decidePlan(this.planWait.id, { cancelled: true })
@@ -898,11 +1517,20 @@ export class CodexAgent implements AgentAdapter {
 
     /** The capability forms' hidden commands (`/gui-ask-answer <id> <json>`, …); false if not one. */
     private async guiCommand(message: string): Promise<boolean> {
-        const m = /^\/(gui-ask-answer|gui-plan-decide|gui-rewind) (\S+)(?: ([\s\S]+))?$/.exec(message)
+        const m = /^\/(gui-ask-answer|gui-plan-decide|gui-rewind|gui-subagent-steer|gui-subagent-cancel) (\S+)(?: ([\s\S]+))?$/.exec(message)
         if (!m)
             return false
-        if (m[1] === 'gui-rewind')
+        if (m[1] === 'gui-rewind') {
             await this.rewind(m[2])
+        }
+        else if (m[1] === 'gui-subagent-steer') {
+            const sub = this.subagentOf(m[2])
+            await this.rpc('turn/steer', { threadId: sub.threadId, expectedTurnId: sub.turnId, input: inputOf(m[3] ?? '', []) })
+        }
+        else if (m[1] === 'gui-subagent-cancel') {
+            const sub = this.subagentOf(m[2])
+            await this.rpc('turn/interrupt', { threadId: sub.threadId, turnId: sub.turnId })
+        }
         else if (m[1] === 'gui-ask-answer')
             this.answerAsk(m[2], JSON.parse(m[3] ?? '{}') as AskResponse)
         else
@@ -941,6 +1569,7 @@ export class CodexAgent implements AgentAdapter {
                 return {}
             }
         }
+        await this.takeOver()
         this.running = true
         this.emit({ type: 'agent_start' })
         this.run(message, images)
@@ -988,8 +1617,11 @@ export class CodexAgent implements AgentAdapter {
             this.answerApproval(id, { cancelled: true })
             this.emit({ type: 'extension_ui_cancel', id })
         }
-        for (const [id] of this.asks)
+        for (const id of [...this.asks.keys(), ...this.elicits.keys()])
             this.answerAsk(id, { cancelled: true })
+        // A subagent still working when its parent's turn ends: the call shows it as it stands.
+        for (const sub of this.subagents.values())
+            this.closeSubagent(sub, sub.status)
         const plan = this.planItem
         this.planItem = null
         if (status === 'completed' && plan && plan.text.trim()) {
@@ -1030,6 +1662,7 @@ export class CodexAgent implements AgentAdapter {
         const turnId = this.turnAt.get(at)
         if (!turnId)
             throw new Error(tr('这条消息不是一轮的开头，不能从这里重问', 'This message does not start a turn; cannot ask again from here'))
+        await this.takeOver()
         await this.rpc('thread/revert', { threadId: this.threadId, beforeTurnId: turnId })
         this.cut(at)
         this.callbacks.onSession?.(this, {})
@@ -1063,9 +1696,11 @@ export class CodexAgent implements AgentAdapter {
         if (!forked)
             throw new Error(tr('分叉没有返回线程', 'The fork returned no thread'))
         this.cut(at)
-        // Listed under its own key, with the transcript before the prompt; then this process is it.
+        // Listed under its own key, with the transcript before the prompt; then this process is it
+        // (thread/fork loads the fork here, so it writes it).
         this.callbacks.onFork?.(this, forked)
         this.threadId = forked
+        this.detached = false
         this.callbacks.onSession?.(this, {})
         return { text }
     }
@@ -1101,7 +1736,7 @@ export class CodexAgent implements AgentAdapter {
                 case 'get_available_thinking_levels':
                     return ok({ levels: (this.currentModel()?.efforts ?? []).map(e => e.value) })
                 case 'get_commands':
-                    return ok({ commands: [] })
+                    return ok({ commands: [{ name: 'compact', description: tr('压缩上下文，腾出空间', 'Summarize the conversation to free up context'), source: 'prompt' }] })
                 case 'get_session_stats': {
                     const tokens = this.transcript.totals()
                     const context = this.context
@@ -1115,10 +1750,16 @@ export class CodexAgent implements AgentAdapter {
                     const message = String(command.message ?? '')
                     if (await this.guiCommand(message))
                         return ok({ disposition: 'handled' })
+                    if (message.trim() === '/compact' && !this.running)
+                        return ok(await this.compact())
                     return ok(await this.prompt(message, Array.isArray(command.images) ? command.images as ImageContent[] : [], command.streamingBehavior === 'steer'))
                 }
                 case 'abort':
                     this.cancelWaits()
+                    for (const sub of this.subagents.values()) {
+                        if (!sub.closed && sub.turnId)
+                            void this.rpc('turn/interrupt', { threadId: sub.threadId, turnId: sub.turnId }).catch(() => {})
+                    }
                     if (this.turnId)
                         await this.interrupt()
                     else if (this.turnStarting)
@@ -1180,6 +1821,7 @@ export class CodexAgent implements AgentAdapter {
     private async compact() {
         if (this.running)
             throw new Error(tr('运行中不能压缩，等它结束或先停止', 'Cannot compact while running; wait or stop it first'))
+        await this.takeOver()
         this.running = true
         this.turnBase = this.tokens
         this.emit({ type: 'agent_start' })
