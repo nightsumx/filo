@@ -31,17 +31,8 @@ describe('agent availability', () => {
 
     const service = () => new AcpService(() => path.join(dir, 'acp.json'), undefined, () => path.join(dir, 'agents'))
 
-    it('reports the CLI when only the ACP adapter is missing', async () => {
-        const claude = await fakeBin('claude')
-        const list = await service().availability()
-        const entry = list.find(a => a.id === 'claude')!
-        expect(entry).toMatchObject({ available: false, installable: true, cli: claude })
-        expect(list.find(a => a.id === 'gemini')?.cli).toBeUndefined()
-    })
-
-    it('runs the adapter on PATH once it is there', async () => {
+    it('runs Claude Code\'s own CLI from PATH, no adapter', async () => {
         await fakeBin('claude')
-        await fakeBin('claude-agent-acp')
         const entry = (await service().availability()).find(a => a.id === 'claude')!
         expect(entry).toMatchObject({ available: true, via: 'path' })
         expect(entry.cli).toBeUndefined()

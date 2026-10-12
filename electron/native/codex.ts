@@ -22,6 +22,8 @@ import { randomUUID } from 'node:crypto'
 import { tr } from '../i18n'
 import { AcpConnection, RpcError } from '../acp/connection'
 import { AcpTranscript } from '../acp/transcript'
+import { costOf, pricedModel } from 'pi-capabilities/lib/prices.ts'
+import { priceList } from '../prices'
 
 const STDERR_LIMIT = 64 * 1024
 
@@ -320,10 +322,8 @@ interface Tokens {
     totalTokens: number
 }
 
-const usageBetween = (from: Tokens | null, to: Tokens): PromptUsage => {
-    const d = (k: keyof Tokens) => (to[k] ?? 0) - (from?.[k] ?? 0)
-    return { inputTokens: d('inputTokens'), cachedReadTokens: d('cachedInputTokens'), cachedWriteTokens: d('cacheWriteInputTokens'), outputTokens: d('outputTokens'), thoughtTokens: d('reasoningOutputTokens'), totalTokens: d('totalTokens') }
-}
+/** One request's tokens (tokenUsage.last) as the transcript takes them; input includes the cache. */
+const requestUsage = (t: Tokens): PromptUsage => ({ inputTokens: t.inputTokens, cachedReadTokens: t.cachedInputTokens, cachedWriteTokens: t.cacheWriteInputTokens, outputTokens: t.outputTokens, thoughtTokens: t.reasoningOutputTokens, totalTokens: t.totalTokens })
 
 interface ModelInfo {
     id: string
@@ -446,7 +446,6 @@ interface AskWait {
 interface PlanWait {
     id: string
     plan: string
-    usage?: PromptUsage
 }
 
 /**
@@ -479,10 +478,10 @@ interface Subagent {
 
 const SUBAGENT_STATUS: Record<string, SubagentDetails['status']> = { completed: 'done', failed: 'failed', interrupted: 'cancelled' }
 
-function subagentUsage(tokens: Tokens | null): SubagentDetails['usage'] {
-    const input = tokens?.inputTokens ?? 0
-    const cached = tokens?.cachedInputTokens ?? 0
-    return { input: Math.max(0, input - cached), output: tokens?.outputTokens ?? 0, cacheRead: cached, cacheWrite: tokens?.cacheWriteInputTokens ?? 0, cost: 0 }
+function subagentUsage(tokens: Tokens | null, model: string): SubagentDetails['usage'] {
+    const cacheRead = tokens?.cachedInputTokens ?? 0
+    const usage = { input: Math.max(0, (tokens?.inputTokens ?? 0) - cacheRead), output: tokens?.outputTokens ?? 0, cacheRead, cacheWrite: tokens?.cacheWriteInputTokens ?? 0 }
+    return { ...usage, cost: costOf(pricedModel(priceList(), 'codex', model)?.cost, usage).total }
 }
 
 /** What the subagent said last: the call's result text for the parent's transcript. */
@@ -584,7 +583,6 @@ export class CodexAgent implements AgentAdapter {
     private workMode: ModeId = 'auto'
     private context: { used: number, size: number } | null = null
     private tokens: Tokens | null = null
-    private turnBase: Tokens | null = null
 
     /** A run: from the prompt until no turn, follow-up or plan review is left (agent_start … agent_end). */
     private running = false
@@ -616,6 +614,7 @@ export class CodexAgent implements AgentAdapter {
         this.threadId = options.sessionId ?? ''
         this.transcript = new AcpTranscript('', {
             model: () => ({ provider: spec.label, model: this.model || undefined, thinkingLevel: this.effort || undefined }),
+            price: () => pricedModel(priceList(), 'codex', this.model)?.cost,
             inputIncludesCache: true,
             now: () => (this.loading ? options.replayTime ?? Date.now() : Date.now()),
         })
@@ -899,7 +898,7 @@ export class CodexAgent implements AgentAdapter {
                     messages: transcript.messages.map(m => m.message),
                     tools: {},
                     steering: [],
-                    usage: subagentUsage(null),
+                    usage: subagentUsage(null, ''),
                     startedAt: seconds(childTurns[0]?.startedAt) ?? this.options.replayTime ?? 0,
                     endedAt: seconds(last?.completedAt),
                     ...(last?.status === 'failed' ? { error: String(last.error?.message ?? 'Failed') } : {}),
@@ -999,6 +998,9 @@ export class CodexAgent implements AgentAdapter {
                 break
             case 'thread/tokenUsage/updated': {
                 const usage = params?.tokenUsage
+                // The running total tells one request from the next.
+                if (usage?.total && usage.last && usage.total.totalTokens !== this.tokens?.totalTokens)
+                    this.transcript.requestUsage(String(usage.total.totalTokens), requestUsage(usage.last))
                 if (usage?.total)
                     this.tokens = usage.total
                 const size = usage?.modelContextWindow
@@ -1078,6 +1080,7 @@ export class CodexAgent implements AgentAdapter {
     private subagentTranscript(model: string, effort: string): AcpTranscript {
         return new AcpTranscript('sub:', {
             model: () => ({ provider: this.spec.label, model: model || this.model || undefined, thinkingLevel: effort || undefined }),
+            price: () => pricedModel(priceList(), 'codex', model || this.model)?.cost,
             inputIncludesCache: true,
             now: () => (this.loading ? this.options.replayTime ?? Date.now() : Date.now()),
         })
@@ -1164,10 +1167,14 @@ export class CodexAgent implements AgentAdapter {
                 void sub.named.then(() => this.closeSubagent(sub, sub.status, sub.error))
                 return
             }
-            case 'thread/tokenUsage/updated':
-                if (params?.tokenUsage?.total)
-                    sub.tokens = params.tokenUsage.total
+            case 'thread/tokenUsage/updated': {
+                const usage = params?.tokenUsage
+                if (usage?.total && usage.last && usage.total.totalTokens !== sub.tokens?.totalTokens)
+                    sub.transcript.requestUsage(String(usage.total.totalTokens), requestUsage(usage.last))
+                if (usage?.total)
+                    sub.tokens = usage.total
                 break
+            }
             case 'item/started':
                 if (params?.item?.id && params.item.type !== 'userMessage')
                     startItem(sub.transcript, params.item)
@@ -1207,7 +1214,7 @@ export class CodexAgent implements AgentAdapter {
             streaming: sub.transcript.streaming ?? undefined,
             tools: { ...sub.tools },
             steering: [],
-            usage: subagentUsage(sub.tokens),
+            usage: subagentUsage(sub.tokens, sub.model || this.model),
             startedAt: sub.startedAt,
             endedAt: sub.endedAt,
             ...(sub.error ? { error: sub.error } : {}),
@@ -1496,7 +1503,7 @@ export class CodexAgent implements AgentAdapter {
             : feedback ? { kind: 'plan' as const, status: 'revised' as const, plan: wait.plan, feedback } : { kind: 'plan' as const, status: 'cancelled' as const, plan: wait.plan }
         this.transcript.setDetails(id, details)
         this.transcript.update({ sessionUpdate: 'tool_call_update', toolCallId: id, status: 'completed' })
-        this.transcript.finish('end_turn', wait.usage)
+        this.transcript.finish('end_turn')
         if (details.status === 'approved') {
             this.mode = this.workMode
             this.configChanged()
@@ -1591,7 +1598,6 @@ export class CodexAgent implements AgentAdapter {
         this.turnStarting = true
         this.turnError = ''
         this.planItem = null
-        this.turnBase = this.tokens
         this.rpc('turn/start', { threadId: this.threadId, input: inputOf(message, images), ...this.turnSettings() }).then(
             (result: any) => {
                 this.turnStarting = false
@@ -1615,7 +1621,6 @@ export class CodexAgent implements AgentAdapter {
         if (!this.running)
             return
         const status = String(turn?.status ?? '')
-        const usage = this.tokens ? usageBetween(this.turnBase, this.tokens) : undefined
         this.turnId = null
         this.abortWanted = false
         // Approvals and questions belong to the turn; Codex has dropped any still open.
@@ -1631,12 +1636,12 @@ export class CodexAgent implements AgentAdapter {
         const plan = this.planItem
         this.planItem = null
         if (status === 'completed' && plan && plan.text.trim()) {
-            this.planWait = { id: plan.id, plan: plan.text, usage }
+            this.planWait = { id: plan.id, plan: plan.text }
             this.transcript.setDetails(plan.id, { kind: 'plan', status: 'pending', plan: plan.text })
             return
         }
         const error = status === 'failed' ? this.explain(turn?.error?.message || this.turnError || tr('这一轮失败了', 'The turn failed')) : undefined
-        this.transcript.finish(status === 'interrupted' ? 'cancelled' : 'end_turn', usage, error)
+        this.transcript.finish(status === 'interrupted' ? 'cancelled' : 'end_turn', undefined, error)
         this.afterTurn(status === 'interrupted')
     }
 
@@ -1820,7 +1825,7 @@ export class CodexAgent implements AgentAdapter {
     private piModel(): PiModel | undefined {
         if (!this.model)
             return undefined
-        return { id: this.model, name: this.currentModel()?.name ?? this.model, provider: this.spec.label, reasoning: !!this.currentModel()?.efforts.length } as PiModel
+        return { id: this.model, name: this.currentModel()?.name ?? this.model, provider: this.spec.label, reasoning: !!this.currentModel()?.efforts.length, promptCache: pricedModel(priceList(), 'codex', this.model)?.promptCache } as PiModel
     }
 
     /** Codex compacts as a turn of its own (a contextCompaction item); it streams in and settles like one. */
@@ -1829,7 +1834,6 @@ export class CodexAgent implements AgentAdapter {
             throw new Error(tr('运行中不能压缩，等它结束或先停止', 'Cannot compact while running; wait or stop it first'))
         await this.takeOver()
         this.running = true
-        this.turnBase = this.tokens
         this.emit({ type: 'agent_start' })
         try {
             await this.rpc('thread/compact/start', { threadId: this.threadId })

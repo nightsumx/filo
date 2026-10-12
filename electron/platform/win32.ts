@@ -153,6 +153,7 @@ export const win32: Platform = {
     shellArgs,
     findIn: async (name, dirs) => findSync(name, dirs),
     command,
+    nodeRuntime: electron => electron,
     launcher: batchLauncher,
     // Windows environment names are case-insensitive: one key, or the child sees two PATHs.
     withPath: (env, value) => {

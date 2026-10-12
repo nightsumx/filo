@@ -1,10 +1,15 @@
-import type { ApprovalMode, CapabilityId, Presence } from '@shared/capabilities'
+import type { AgentKind } from '@shared/agents'
+import type { ApprovalMode, CapabilityChoice, CapabilityId, Presence } from '@shared/capabilities'
 import type { LangPref } from '@shared/i18n'
-import type { AppState, GlobalCompactionPatch, GlobalPrefs, OpenProject, PiEnvResult, ProjectActivity, ProjectTransfer, RepoEdits, ReviewView, SearchResult, SessionSummary, StateSave, ThemePref, ThreadTransfer, TranscriptLang, WindowReport } from '@shared/ipc'
-import { APPROVAL_MODES, normalizeCapabilities, presetOf, resolveCapabilities } from '@shared/capabilities'
+import type { AppState, CacheWarming, GlobalCompactionPatch, GlobalPrefs, OpenProject, PiEnvResult, PiPackageState, PiSettingsState, ProjectActivity, ProjectTransfer, RepoEdits, ReviewView, SearchResult, SessionSummary, StateSave, ThemePref, ThreadTransfer, TranscriptLang, WindowReport } from '@shared/ipc'
+import { acpAgent } from '@shared/agents'
+import { DEFAULT_BUDGET, normalizeCapabilities, presetOf, resolveCapabilities } from '@shared/capabilities'
 import { LANG_PREFS } from '@shared/i18n'
+import { SETUP_VERSION } from '@shared/setup'
 import { DEFAULT_THEME, GLOBAL_PREF_KEYS, REVIEW_VIEWS, THEME_PREFS, TRANSCRIPT_LANGS } from '@shared/ipc'
 import type { PiEvent, PiModel } from '@shared/pi'
+import type { RouteGroup, RoutedAgent, RoutesConfig, RoutesState } from '@shared/routes'
+import { pickableGroups } from '@shared/routes'
 import type { ThreadHost } from './thread'
 import type { ModelWindow } from '@/lib/compactAt'
 import type { Conflict } from '@/lib/edits'
@@ -12,9 +17,10 @@ import { conflictsOf } from '@/lib/edits'
 import { autoReserve, inferCompactAt, syncReserves } from '@/lib/compactAt'
 import { applyLangPref, tr } from '@/lib/i18n'
 import { waitingLabel } from '@/lib/threadActivity'
-import { basename, uid } from '@/lib/utils'
+import { basename, ipcMessage, uid } from '@/lib/utils'
 import { makeAutoObservable, observable, reaction, runInAction } from 'mobx'
 import { toast } from 'sonner'
+import { FileTab, fileKey, isFileKey, pathOfFileKey } from './fileTab'
 import { Thread } from './thread'
 
 const api = () => window.pi
@@ -43,7 +49,7 @@ const IDLE_SWEEP_MS = 60_000
 export const MIN_PANE_WIDTH = 520
 export const MAX_PANES = 3
 
-export type SettingsPageId = 'appearance' | 'providers' | 'agents' | 'capabilities' | 'compaction'
+export type SettingsPageId = 'appearance' | 'providers' | 'routes' | 'agents' | 'capabilities' | 'compaction'
 
 export interface Project {
     cwd: string
@@ -55,6 +61,15 @@ export interface Project {
 export type { ProjectActivity }
 
 const NO_ACTIVITY: ProjectActivity = { open: 0, running: 0, unread: 0, waiting: 0 }
+
+/** What a tab shows: a conversation, or a file in the editor. */
+export type Tab = Thread | FileTab
+
+export const isFileTab = (tab: Tab | null | undefined): tab is FileTab => tab instanceof FileTab
+
+/** Left tool window: the projects' threads, or their files. Per machine, like panel sizes. */
+export type SidebarView = 'threads' | 'files'
+const SIDEBAR_VIEW_KEY = 'filo.sidebarView'
 
 /** What a dragged tab carries (application/x-pi-tab), readable by every window of the app. */
 export interface TabDrag {
@@ -81,9 +96,16 @@ class AppStore implements ThreadHost {
     openProjects: OpenProject[] = []
 
     threads = observable.map<string, Thread>()
-    /** Tab order per project (thread keys). New threads use "new:<uuid>" until pi writes a file. */
+    /** Editor tabs, by key ("file:<absolute path>"). */
+    files = observable.map<string, FileTab>()
+    /**
+     * Tab order per project: thread keys and file keys. New threads use "new:<uuid>" until pi writes
+     * a file; files use "file:<path>".
+     */
     tabsByProject: Record<string, string[]> = {}
     activeTabByProject: Record<string, string> = {}
+    /** The thread tab last focused per project: what thread panels follow while a file tab is focused. */
+    lastThreadByProject: Record<string, string> = {}
     activeProject: string | null = null
     layout: 'split' | 'single' = 'split'
     /** Appearance preference; the resolved scheme lives in lib/theme. */
@@ -101,15 +123,34 @@ class AppStore implements ThreadHost {
     /** Mode new threads start in, the same for all projects; undefined until one is chosen. */
     /** Mode new threads start in; 全自动 until the user picks another. */
     approvalMode: ApprovalMode = 'auto'
+    /** The budget capability's limit per prompt, in US dollars. */
+    budget = DEFAULT_BUDGET
+    /** See ThreadHost.lastModels. */
+    lastModels: NonNullable<GlobalPrefs['models']> = {}
+    /** The agent a new thread starts with (the setup assistant, Settings → Agents). */
+    defaultAgent: AgentKind = 'pi'
+    /** The setup assistant's version the user went through; undefined: never. */
+    setupDone: number | undefined = undefined
+    /** The assistant was opened again from Settings (this window only). */
+    setupRequested = false
     settingsOpen = false
     /** Page shown in Settings; kept while the app runs so reopening returns to it. */
     settingsPage: SettingsPageId = 'appearance'
     /** See ThreadHost.piSettingsEpoch. */
     piSettingsEpoch = 0
+    /** See ThreadHost.piSettingsFingerprint. */
+    piSettingsFingerprint = ''
+    /** compaction.modelOverrides as last seen, to tell which models a change touches. */
+    private modelOverrides: Record<string, unknown> = {}
+    /** pi-web-access in settings.json; `installing` while `pi install` runs. */
+    webAccess: PiPackageState & { installing?: boolean } = { installed: false, enabled: false }
+    cacheWarming: CacheWarming = 'streaming'
     /** Bumps on every compaction write, including ones no running thread needs a restart for. */
     compactionRevision = 0
-    /** Bumps when credentials or endpoints change in any window (Settings → 模型供应商 reloads). */
+    /** Bumps when credentials or endpoints change in any window (Settings → 供应商 reloads). */
     providersRevision = 0
+    /** Settings → 路由 and the gateway's live status; null until main answers. */
+    routes: RoutesState | null = null
     /** Tokens at which every model compacts (lib/compactAt); null: none, undefined: not decided yet. */
     compactAt: number | null | undefined = undefined
     private reconciling = false
@@ -120,6 +161,7 @@ class AppStore implements ThreadHost {
 
     reviewOpen = false
     sidebarOpen = true
+    sidebarView: SidebarView = globalThis.window?.localStorage?.getItem(SIDEBAR_VIEW_KEY) === 'files' ? 'files' : 'threads'
     searchOpen = false
     /** A message to scroll a thread's transcript to (search result); `n` bumps per request. */
     reveal: { key: string, entryId: string, n: number } | null = null
@@ -153,6 +195,7 @@ class AppStore implements ThreadHost {
             sentPrefs: false,
             sentTabs: false,
             ready: false,
+            routes: observable.ref,
         }, { autoBind: true })
     }
 
@@ -207,28 +250,63 @@ class AppStore implements ThreadHost {
         return this.windowProjects.includes(cwd) || this.openProjects.some(p => p.cwd === cwd)
     }
 
+    /** A project's thread tabs, in tab order. */
     tabsOf(cwd: string): Thread[] {
         return (this.tabsByProject[cwd] ?? []).map(k => this.threads.get(k)).filter((t): t is Thread => !!t)
     }
 
-    /** Tabs of the active project, in order. */
+    /** A project's tabs of every kind, in tab order. */
+    tabItemsOf(cwd: string): Tab[] {
+        return (this.tabsByProject[cwd] ?? []).map(k => this.tabByKey(k)).filter((t): t is Tab => !!t)
+    }
+
+    tabByKey(key: string): Tab | undefined {
+        return isFileKey(key) ? this.files.get(key) : this.threads.get(key)
+    }
+
+    /** Thread tabs of the active project, in order. */
     get tabs(): Thread[] {
         return this.activeProject ? this.tabsOf(this.activeProject) : []
     }
 
+    /** Every tab of the active project, in order. */
+    get tabItems(): Tab[] {
+        return this.activeProject ? this.tabItemsOf(this.activeProject) : []
+    }
+
     get activeKey(): string | null {
-        const tabs = this.tabs
+        const tabs = this.tabItems
         const key = this.activeProject ? this.activeTabByProject[this.activeProject] : undefined
         return tabs.some(t => t.key === key) ? key! : tabs[0]?.key ?? null
     }
 
+    /** The focused tab. */
+    get activeTab(): Tab | null {
+        return this.activeKey ? this.tabByKey(this.activeKey) ?? null : null
+    }
+
+    /**
+     * The thread that thread panels (changes, status, terminal's "send to thread") follow: the focused
+     * tab, or with a file focused, the thread tab focused last.
+     */
     get active(): Thread | null {
-        return this.activeKey ? this.threads.get(this.activeKey) ?? null : null
+        const tab = this.activeTab
+        if (tab instanceof Thread)
+            return tab
+        const threads = this.tabs
+        const last = this.activeProject ? this.lastThreadByProject[this.activeProject] : undefined
+        return threads.find(t => t.key === last) ?? threads[0] ?? null
+    }
+
+    /** The focused tab when it is a file. */
+    get activeFile(): FileTab | null {
+        const tab = this.activeTab
+        return isFileTab(tab) ? tab : null
     }
 
     /** Tabs on screen: as many as fit, in tab order, always including the focused one. */
-    get visibleTabs(): Thread[] {
-        const tabs = this.tabs
+    get visibleTabs(): Tab[] {
+        const tabs = this.tabItems
         const capacity = this.layout === 'single' ? 1 : Math.max(1, Math.min(MAX_PANES, this.paneCapacity))
         if (tabs.length <= capacity)
             return tabs
@@ -261,8 +339,8 @@ class AppStore implements ThreadHost {
         return conflictsOf(this.edits.get(cwd), session)
     }
 
-    isVisible(thread: Thread): boolean {
-        return this.visibleTabs.includes(thread)
+    isVisible(tab: Tab): boolean {
+        return this.visibleTabs.includes(tab)
     }
 
     /** Live counts for this window's projects; other windows report theirs through main. */
@@ -305,8 +383,10 @@ class AppStore implements ThreadHost {
             runInAction(() => this.focus(key, true))
         })
         api().onPrefsChanged(prefs => runInAction(() => this.applyPrefs(prefs, true)))
-        api().onPiSettingsChanged(patch => runInAction(() => this.piSettingsChanged(patch)))
+        api().onPiSettingsChanged(state => runInAction(() => this.applyPiSettings(state)))
         api().onProvidersChanged(() => runInAction(() => this.providersChanged()))
+        api().onRoutesChanged(state => runInAction(() => this.routesChanged(state)))
+        void api().routes().then(state => runInAction(() => this.routesChanged(state)), () => {})
         api().onWindowProjects(projects => runInAction(() => this.setWindowProjects(projects)))
         api().onOpenProjects(projects => runInAction(() => (this.openProjects = projects)))
         api().onSelectProject(cwd => runInAction(() => this.windowProjects.includes(cwd) && this.showProject(cwd)))
@@ -354,14 +434,16 @@ class AppStore implements ThreadHost {
                 this.windowProjects.forEach(cwd => this.refreshEdits(cwd))
         }, EDITS_POLL_MS)
         setInterval(this.stopIdleAgents, IDLE_SWEEP_MS)
+        setInterval(() => this.threads.forEach(thread => thread.checkStall(Date.now())), 10_000)
 
-        const [env, state, win] = await Promise.all([api().resolveEnv(), api().loadState(), api().windowInit()])
+        const [env, state, win, piSettings] = await Promise.all([api().resolveEnv(), api().loadState(), api().windowInit(), api().piSettings()])
         await this.refreshSessions()
         runInAction(() => {
             this.env = env
             this.windowId = win.id
             this.windowProjects = win.projects
             this.restoreState(state)
+            this.applyPiSettings(piSettings)
             this.activeProject = win.active && win.projects.includes(win.active) ? win.active : win.projects[0] ?? null
             this.ready = true
             this.projectOrder = this.projects.map(p => p.cwd)
@@ -385,6 +467,40 @@ class AppStore implements ThreadHost {
         this.env = null
         const env = await api().resolveEnv()
         runInAction(() => (this.env = env))
+    }
+
+    /** The pi env again, without the loading screen in between (after the setup assistant installed pi). */
+    async refreshEnv() {
+        const env = await api().resolveEnv()
+        runInAction(() => (this.env = env))
+    }
+
+    /** The setup assistant shows: never gone through (this version), or opened again from Settings. */
+    get setupOpen(): boolean {
+        return this.setupRequested || (this.setupDone ?? 0) < SETUP_VERSION
+    }
+
+    openSetup() {
+        this.settingsOpen = false
+        this.setupRequested = true
+    }
+
+    /** The assistant's last step: new threads start with `agent` from now on. */
+    finishSetup(agent: AgentKind) {
+        this.defaultAgent = agent
+        this.setupDone = SETUP_VERSION
+        this.setupRequested = false
+        this.persist()
+        // Threads not started yet (an empty tab) take the new default.
+        for (const thread of this.threads.values()) {
+            if (thread.isEmpty && !thread.persisted && thread.agent !== agent && thread.agentSwitchable)
+                void thread.setAgent(agent)
+        }
+    }
+
+    setDefaultAgent(agent: AgentKind) {
+        this.defaultAgent = agent
+        this.persist()
     }
 
     private flushEvents() {
@@ -475,10 +591,6 @@ class AppStore implements ThreadHost {
 
     private restoreState(state: AppState) {
         this.applyPrefs(state, false)
-        const capabilities = restoreCapabilities(state)
-        this.capabilities = capabilities.ids
-        this.capabilityPreset = capabilities.preset
-        this.approvalMode = restoreApprovalMode(state)
         // Thread objects are created lazily per project (restoreTabs); keep the saved order for now.
         this.tabsByProject = { ...state.tabs }
         this.activeTabByProject = { ...state.activeTabs }
@@ -508,15 +620,12 @@ class AppStore implements ThreadHost {
             this.reviewView = REVIEW_VIEWS.includes(prefs.reviewView as ReviewView) ? prefs.reviewView! : 'tree'
         if (has('compactAt'))
             this.compactAt = prefs.compactAt === null || (typeof prefs.compactAt === 'number' && prefs.compactAt > 0) ? prefs.compactAt : undefined
-        if (live && Object.hasOwn(prefs, 'capabilities') && (Array.isArray(prefs.capabilities) || typeof prefs.capabilities === 'string')) {
-            const capabilities = resolveCapabilities(prefs.capabilities)
-            this.capabilities = capabilities.ids
-            this.capabilityPreset = capabilities.preset
-            for (const thread of this.threads.values())
-                void thread.applyConfig()
-        }
-        if (live && APPROVAL_MODES.includes(prefs.approvalMode as ApprovalMode))
-            this.approvalMode = prefs.approvalMode!
+        if (has('models'))
+            this.lastModels = prefs.models && typeof prefs.models === 'object' ? prefs.models : {}
+        if (has('defaultAgent'))
+            this.defaultAgent = prefs.defaultAgent && (prefs.defaultAgent === 'pi' || acpAgent(prefs.defaultAgent)) ? prefs.defaultAgent : 'pi'
+        if (has('setupDone'))
+            this.setupDone = typeof prefs.setupDone === 'number' ? prefs.setupDone : undefined
         // Main has these values now; only later changes need sending.
         for (const key of GLOBAL_PREF_KEYS) {
             if (!live || Object.hasOwn(prefs, key))
@@ -524,17 +633,63 @@ class AppStore implements ThreadHost {
         }
     }
 
-    /** Another window wrote pi's settings.json; processes it affects restart once idle. */
-    private piSettingsChanged(patch: GlobalCompactionPatch) {
-        this.compactionRevision++
-        const models = Object.keys(patch?.modelReserves ?? {})
-        const global = Object.keys(patch ?? {}).some(k => k !== 'modelReserves')
-        const affected = global || [...this.threads.values()].some(t => t.state?.model && models.includes(`${t.state.model.provider}/${t.state.model.id}`))
-        if (!affected)
+    /**
+     * pi's settings.json as it now is, after a write here, in another window or by pi in a terminal.
+     * Processes it affects restart once idle: all of them for what every pi reads at startup or for
+     * other capabilities, the ones on a model whose compaction changed.
+     */
+    private applyPiSettings(state: PiSettingsState) {
+        const { ids, preset, approvalMode, budget } = state.capabilities
+        const models = new Set([...Object.keys(this.modelOverrides), ...Object.keys(state.modelOverrides)]
+            .filter(model => JSON.stringify(this.modelOverrides[model]) !== JSON.stringify(state.modelOverrides[model])))
+        // The first read (at startup) finds no process to restart.
+        const startup = !!this.piSettingsFingerprint && state.fingerprint !== this.piSettingsFingerprint
+        const capabilities = ids.join(',') !== this.capabilities.join(',')
+        const affected = startup || models.size > 0 && [...this.threads.values()].some(t => t.state?.model && models.has(`${t.state.model.provider}/${t.state.model.id}`))
+        if (startup || models.size)
+            this.compactionRevision++
+        if (affected)
+            this.piSettingsEpoch++
+        this.piSettingsFingerprint = state.fingerprint
+        this.modelOverrides = state.modelOverrides
+        this.capabilities = ids
+        this.capabilityPreset = preset
+        this.approvalMode = approvalMode
+        this.budget = budget
+        this.webAccess = { ...state.webAccess, installing: this.webAccess.installing }
+        this.cacheWarming = state.cacheWarming
+        if (capabilities || affected) {
+            for (const thread of this.threads.values())
+                void thread.applyConfig()
+        }
+    }
+
+    /** See ThreadHost.routeLaunchKeys. */
+    get routeLaunchKeys(): RoutesState['launchKeys'] {
+        return this.routes?.launchKeys ?? {}
+    }
+
+    /** See ThreadHost.routeGroups. */
+    routeGroups(agent: RoutedAgent): RouteGroup[] | undefined {
+        return this.routes ? pickableGroups(this.routes.config, agent) : undefined
+    }
+
+    /**
+     * Routing changed: threads whose launch it changes restart once idle (pi's and Grok's lists of
+     * groups; a thread on a group that went away goes back to its agent's own model).
+     */
+    routesChanged(state: RoutesState) {
+        const shape = (s: RoutesState | null) => JSON.stringify(s && [s.launchKeys, s.config.groups.map(g => [g.id, g.api, g.members.length > 0])])
+        const before = shape(this.routes)
+        this.routes = state
+        if (shape(state) === before)
             return
-        this.piSettingsEpoch++
         for (const thread of this.threads.values())
-            void thread.applyConfig()
+            void thread.routesChanged()
+    }
+
+    async saveRoutes(config: RoutesConfig) {
+        await api().routesSave(config)
     }
 
     /**
@@ -548,6 +703,7 @@ class AppStore implements ThreadHost {
             void thread.applyConfig()
     }
 
+
     /** The shared settings as saved. */
     private prefsSnapshot(): GlobalPrefs {
         return {
@@ -558,17 +714,20 @@ class AppStore implements ThreadHost {
             lang: this.langPref,
             transcriptLang: this.transcriptLang,
             reviewView: this.reviewView,
-            capabilities: this.capabilityPreset ?? this.capabilities,
-            approvalMode: this.approvalMode,
             compactAt: this.compactAt,
+            models: this.lastModels,
+            defaultAgent: this.defaultAgent === 'pi' ? undefined : this.defaultAgent,
+            setupDone: this.setupDone,
         }
     }
 
     private persist() {
         if (!this.ready)
             return
-        // Only tabs backed by a session file survive a restart.
+        // Only tabs backed by a session file (or a file on disk) survive a restart.
         const keep = (key: string) => {
+            if (isFileKey(key))
+                return true
             const thread = this.threads.get(key)
             return thread ? thread.persisted && thread.key === thread.sessionPath : !key.startsWith('new:')
         }
@@ -605,7 +764,12 @@ class AppStore implements ThreadHost {
         const keys = this.tabsByProject[cwd] ?? []
         const restored: string[] = []
         for (const key of keys) {
-            if (this.threads.has(key)) {
+            if (this.threads.has(key) || this.files.has(key)) {
+                restored.push(key)
+                continue
+            }
+            if (isFileKey(key)) {
+                this.createFileTab(pathOfFileKey(key), cwd)
                 restored.push(key)
                 continue
             }
@@ -616,6 +780,22 @@ class AppStore implements ThreadHost {
             restored.push(key)
         }
         this.tabsByProject[cwd] = restored
+    }
+
+    /** An editor tab object; a file that turns out to be gone on its first read closes again. */
+    private createFileTab(path: string, cwd: string): FileTab {
+        const tab = new FileTab(path, cwd)
+        this.files.set(tab.key, tab)
+        void tab.load().then((exists) => {
+            if (!exists && this.files.get(tab.key) === tab)
+                void this.closeTab(tab.key)
+        })
+        return tab
+    }
+
+    /** Files open in this window's tabs (watched for changes). */
+    get openFiles(): FileTab[] {
+        return [...this.files.values()]
     }
 
     private createSessionThread(session: SessionSummary): Thread {
@@ -638,8 +818,18 @@ class AppStore implements ThreadHost {
         return [...this.capabilities]
     }
 
+    /** Also pi-cc-tui's: kept in settings.json with the capabilities. */
     setApprovalMode(mode: ApprovalMode) {
+        if (mode === this.approvalMode)
+            return
         this.approvalMode = mode
+        void this.writeCapabilities({ approvalMode: mode })
+    }
+
+    rememberModel(agent: AgentKind, key: string) {
+        if (this.lastModels[agent] === key)
+            return
+        this.lastModels = { ...this.lastModels, [agent]: key }
         this.persist()
     }
 
@@ -656,6 +846,8 @@ class AppStore implements ThreadHost {
             this.tabsByProject[thread.cwd] = tabs.map(k => (k === oldKey ? thread.key : k))
         if (this.activeTabByProject[thread.cwd] === oldKey)
             this.activeTabByProject[thread.cwd] = thread.key
+        if (this.lastThreadByProject[thread.cwd] === oldKey)
+            this.lastThreadByProject[thread.cwd] = thread.key
         if (this.composerFocus.key === oldKey)
             this.composerFocus = { key: thread.key, n: this.composerFocus.n }
         this.persist()
@@ -736,22 +928,28 @@ class AppStore implements ThreadHost {
     showProject(cwd: string) {
         this.activeProject = cwd
         this.restoreTabs(cwd)
-        if (!this.tabsOf(cwd).length)
+        if (!this.tabItemsOf(cwd).length)
             this.newThread(cwd)
         else
             this.requestComposerFocus(this.activeKey)
         this.persist()
     }
 
-    /** Make a tab the focused one (switching project if needed). */
+    /**
+     * Make a tab the focused one (switching project if needed). `focusComposer`: keyboard focus goes
+     * into it too (a thread's composer, a file's editor).
+     */
     focus(key: string, focusComposer = false) {
-        const thread = this.threads.get(key)
-        if (!thread)
+        const tab = this.tabByKey(key)
+        if (!tab)
             return
-        this.activeProject = thread.cwd
-        this.activeTabByProject[thread.cwd] = key
-        thread.unread = false
-        thread.lastUsed = Date.now()
+        this.activeProject = tab.cwd
+        this.activeTabByProject[tab.cwd] = key
+        if (tab instanceof Thread) {
+            this.lastThreadByProject[tab.cwd] = key
+            tab.unread = false
+            tab.lastUsed = Date.now()
+        }
         if (focusComposer)
             this.requestComposerFocus(key)
         this.persist()
@@ -762,13 +960,24 @@ class AppStore implements ThreadHost {
             this.composerFocus = { key, n: this.composerFocus.n + 1 }
     }
 
-    private insertTab(thread: Thread) {
-        const tabs = [...(this.tabsByProject[thread.cwd] ?? [])]
-        if (!tabs.includes(thread.key)) {
-            const after = tabs.indexOf(this.activeTabByProject[thread.cwd] ?? '')
-            tabs.splice(after === -1 ? tabs.length : after + 1, 0, thread.key)
-            this.tabsByProject[thread.cwd] = tabs
+    private insertTab(tab: Tab) {
+        const tabs = [...(this.tabsByProject[tab.cwd] ?? [])]
+        if (!tabs.includes(tab.key)) {
+            const after = tabs.indexOf(this.activeTabByProject[tab.cwd] ?? '')
+            tabs.splice(after === -1 ? tabs.length : after + 1, 0, tab.key)
+            this.tabsByProject[tab.cwd] = tabs
         }
+    }
+
+    /** Opens a file of one of this window's projects in an editor tab (or focuses the tab showing it). */
+    openFile(path: string, cwd: string, options: { focus?: boolean } = {}) {
+        if (!this.windowProjects.includes(cwd))
+            return
+        this.activeProject = cwd
+        this.restoreTabs(cwd)
+        const tab = this.files.get(fileKey(path)) ?? this.createFileTab(path, cwd)
+        this.insertTab(tab)
+        this.focus(tab.key, options.focus ?? true)
     }
 
     /** Open a session in a tab of its project, or focus the tab already showing it. */
@@ -797,7 +1006,7 @@ class AppStore implements ThreadHost {
             this.focus(blank.key, true)
             return
         }
-        const thread = new Thread(this, { key: `new:${uid()}`, cwd })
+        const thread = new Thread(this, { key: `new:${uid()}`, cwd, agent: this.defaultAgent })
         thread.loaded = true
         this.threads.set(thread.key, thread)
         this.insertTab(thread)
@@ -834,15 +1043,23 @@ class AppStore implements ThreadHost {
     }
 
     async closeTab(key: string) {
-        const thread = this.threads.get(key)
-        if (!thread)
+        const tab = this.tabByKey(key)
+        if (!tab)
             return
-        const tabs = this.tabsByProject[thread.cwd] ?? []
+        const tabs = this.tabsByProject[tab.cwd] ?? []
         const index = tabs.indexOf(key)
         const remaining = tabs.filter(k => k !== key)
-        this.tabsByProject[thread.cwd] = remaining
-        if (this.activeTabByProject[thread.cwd] === key && remaining.length)
-            this.activeTabByProject[thread.cwd] = remaining[Math.min(index, remaining.length - 1)]
+        this.tabsByProject[tab.cwd] = remaining
+        if (this.activeTabByProject[tab.cwd] === key && remaining.length)
+            this.activeTabByProject[tab.cwd] = remaining[Math.min(index, remaining.length - 1)]
+        if (isFileTab(tab)) {
+            this.files.delete(key)
+            this.persist()
+            await tab.flush()
+            tab.dispose()
+            return
+        }
+        const thread = tab
         this.threads.delete(key)
         this.persist()
         if (thread.agentId) {
@@ -853,7 +1070,7 @@ class AppStore implements ThreadHost {
     }
 
     cycleTab(step: number) {
-        const tabs = this.tabs
+        const tabs = this.tabItems
         if (tabs.length < 2)
             return
         const index = tabs.findIndex(t => t.key === this.activeKey)
@@ -861,18 +1078,19 @@ class AppStore implements ThreadHost {
     }
 
     focusTabAt(index: number) {
-        const tab = index < 0 ? this.tabs[this.tabs.length - 1] : this.tabs[index]
+        const items = this.tabItems
+        const tab = index < 0 ? items[items.length - 1] : items[index]
         if (tab)
             this.focus(tab.key, true)
     }
 
     moveTab(key: string, toIndex: number) {
-        const thread = this.threads.get(key)
-        if (!thread)
+        const tab = this.tabByKey(key)
+        if (!tab)
             return
-        const tabs = (this.tabsByProject[thread.cwd] ?? []).filter(k => k !== key)
+        const tabs = (this.tabsByProject[tab.cwd] ?? []).filter(k => k !== key)
         tabs.splice(Math.max(0, Math.min(toIndex, tabs.length)), 0, key)
-        this.tabsByProject[thread.cwd] = tabs
+        this.tabsByProject[tab.cwd] = tabs
         this.persist()
     }
 
@@ -905,13 +1123,67 @@ class AppStore implements ThreadHost {
         this.persist()
     }
 
-    /** Live threads restart with the new set once idle, resuming their session. */
+    /**
+     * Saved in pi's settings.json, so pi in a terminal (pi-cc-tui) loads the same set. Live threads
+     * restart with it once idle, resuming their session.
+     */
     setCapabilities(ids: CapabilityId[]) {
         this.capabilities = normalizeCapabilities(ids)
         this.capabilityPreset = presetOf(this.capabilities)?.id
-        this.persist()
         for (const thread of this.threads.values())
             void thread.applyConfig()
+        void this.writeCapabilities({ enabled: this.capabilityPreset ?? this.capabilities })
+    }
+
+    /** Read by the budget capability at every check, so running threads need no restart. */
+    setBudget(budget: number) {
+        this.budget = budget
+        void this.writeCapabilities({ budget })
+    }
+
+    /** Runs only when the user asks (Settings → 能力); pi in a terminal gets it too. */
+    async installWebAccess() {
+        if (this.webAccess.installing)
+            return
+        this.webAccess.installing = true
+        try {
+            const state = await api().installWebAccess()
+            runInAction(() => this.applyPiSettings(state))
+        }
+        catch (error: any) {
+            toast.error(tr('联网搜索没有装上', 'Web access not installed'), { description: ipcMessage(error) })
+        }
+        finally {
+            runInAction(() => this.webAccess.installing = false)
+        }
+    }
+
+    setCacheWarming(mode: CacheWarming) {
+        this.cacheWarming = mode
+        return this.writePiSettings(() => api().setCacheWarming(mode), tr('缓存保温设置没有保存', 'Cache warming setting not saved'))
+    }
+
+    setWebAccess(enabled: boolean) {
+        this.webAccess.enabled = enabled
+        return this.writePiSettings(() => api().setWebAccess(enabled), tr('联网搜索设置没有保存', 'Web access setting not saved'))
+    }
+
+    private writeCapabilities(patch: CapabilityChoice) {
+        return this.writePiSettings(() => api().setCapabilities(patch), tr('能力设置没有保存', 'Capabilities not saved'))
+    }
+
+    /** The settings file wins over what was shown: a failed write puts the saved values back. */
+    private async writePiSettings(write: () => Promise<PiSettingsState>, failed: string) {
+        try {
+            const state = await write()
+            runInAction(() => this.applyPiSettings(state))
+        }
+        catch (error: any) {
+            toast.error(failed, { description: ipcMessage(error) })
+            const state = await api().piSettings().catch(() => undefined)
+            if (state)
+                runInAction(() => this.applyPiSettings(state))
+        }
     }
 
     /**
@@ -919,13 +1191,8 @@ class AppStore implements ThreadHost {
      * so live threads restart once idle (resuming their session), like a capability change.
      */
     async setGlobalCompaction(patch: GlobalCompactionPatch) {
-        await api().setGlobalCompaction(patch)
-        runInAction(() => {
-            this.compactionRevision++
-            this.piSettingsEpoch++
-        })
-        for (const thread of this.threads.values())
-            void thread.applyConfig()
+        const state = await api().setGlobalCompaction(patch)
+        runInAction(() => this.applyPiSettings(state))
     }
 
     /** Moves every model that follows the global point to `at` (null: back to pi's reserve). */
@@ -979,26 +1246,21 @@ class AppStore implements ThreadHost {
         const keys = Object.keys(patch)
         if (!keys.length)
             return
-        await api().setGlobalCompaction({ modelReserves: patch })
-        const affected = [...this.threads.values()].some(t => t.state?.model && keys.includes(`${t.state.model.provider}/${t.state.model.id}`))
-        runInAction(() => {
-            this.compactionRevision++
-            if (affected)
-                this.piSettingsEpoch++
-        })
-        if (affected) {
-            for (const thread of this.threads.values())
-                void thread.applyConfig()
-        }
+        const state = await api().setGlobalCompaction({ modelReserves: patch })
+        runInAction(() => this.applyPiSettings(state))
     }
 
     setSettingsOpen(open: boolean) {
         this.settingsOpen = open
     }
 
-    /** Settings → 模型供应商, from places that find no usable model. */
+    /** Settings → 供应商, from places that find no usable model. */
     openProviders() {
-        this.settingsPage = 'providers'
+        this.openSettings('providers')
+    }
+
+    openSettings(page: SettingsPageId) {
+        this.settingsPage = page
         this.settingsOpen = true
     }
 
@@ -1090,9 +1352,15 @@ class AppStore implements ThreadHost {
             return
         this.persist()
         const threads = this.tabsOf(cwd)
+        const files = this.filesOf(cwd)
+        await Promise.all(files.map(f => f.flush()))
         runInAction(() => {
             for (const thread of threads)
                 this.threads.delete(thread.key)
+            for (const file of files) {
+                this.files.delete(file.key)
+                file.dispose()
+            }
             this.windowProjects = this.windowProjects.filter(p => p !== cwd)
             if (this.activeProject === cwd) {
                 this.activeProject = null
@@ -1130,6 +1398,8 @@ class AppStore implements ThreadHost {
      */
     async exportProjects(cwds: string[]): Promise<ProjectTransfer[]> {
         this.flushEvents()
+        // Editor tabs go along as keys; the other window reads the files again.
+        await Promise.all(cwds.flatMap(cwd => this.filesOf(cwd)).map(f => f.flush()))
         await Promise.all(cwds.flatMap(cwd => this.tabsOf(cwd)).map(t => t.quiesce()))
         this.flushEvents()
         const projects = cwds.map(cwd => ({
@@ -1144,6 +1414,10 @@ class AppStore implements ThreadHost {
                     this.threads.delete(thread.key)
                     if (thread.agentId)
                         this.agentThreads.delete(thread.agentId)
+                }
+                for (const file of this.filesOf(cwd)) {
+                    this.files.delete(file.key)
+                    file.dispose()
                 }
                 delete this.tabsByProject[cwd]
                 delete this.activeTabByProject[cwd]
@@ -1172,6 +1446,7 @@ class AppStore implements ThreadHost {
                 if (project.merge) {
                     const here = this.tabsByProject[project.cwd] ?? []
                     this.tabsByProject[project.cwd] = [...here, ...project.tabs.filter(k => !here.includes(k))]
+                    this.restoreFileTabs(project.cwd)
                     continue
                 }
                 // Main listed the project here just before this, and showing it opened a blank tab.
@@ -1183,6 +1458,7 @@ class AppStore implements ThreadHost {
                     }
                 }
                 this.tabsByProject[project.cwd] = project.tabs
+                this.restoreFileTabs(project.cwd)
                 if (project.activeTab)
                     this.activeTabByProject[project.cwd] = project.activeTab
                 else
@@ -1264,7 +1540,7 @@ class AppStore implements ThreadHost {
             const tabs = (this.tabsByProject[cwd] ?? []).filter(k => !moved.has(k))
             const index = (this.tabsByProject[cwd] ?? []).indexOf(this.activeTabByProject[cwd] ?? '')
             this.tabsByProject[cwd] = tabs
-            transfer.remaining = tabs.some(k => this.threads.has(k))
+            transfer.remaining = tabs.some(k => this.threads.has(k) || this.files.has(k))
             if (moved.has(this.activeTabByProject[cwd] ?? '') && tabs.length)
                 this.activeTabByProject[cwd] = tabs[Math.min(Math.max(index, 0), tabs.length - 1)]
             // Its last tab gone, the project leaves this window too (main drops it there as well).
@@ -1343,28 +1619,40 @@ class AppStore implements ThreadHost {
     toggleSidebar() {
         this.sidebarOpen = !this.sidebarOpen
     }
+
+    /** Shows the left tool window with this view; the view already shown hides it, as in WebStorm. */
+    showSidebarView(view: SidebarView) {
+        if (this.sidebarOpen && this.sidebarView === view) {
+            this.sidebarOpen = false
+            return
+        }
+        this.setSidebarView(view)
+        this.sidebarOpen = true
+    }
+
+    setSidebarView(view: SidebarView) {
+        this.sidebarView = view
+        globalThis.window?.localStorage?.setItem(SIDEBAR_VIEW_KEY, view)
+    }
+
+    /** Editor tabs of a project. */
+    filesOf(cwd: string): FileTab[] {
+        return (this.tabsByProject[cwd] ?? []).map(k => this.files.get(k)).filter((f): f is FileTab => !!f)
+    }
+
+    /** Editor tab objects for a project's file keys that have none yet (tabs that came from another window). */
+    private restoreFileTabs(cwd: string) {
+        for (const key of this.tabsByProject[cwd] ?? []) {
+            if (isFileKey(key) && !this.files.has(key))
+                this.createFileTab(pathOfFileKey(key), cwd)
+        }
+    }
+
+    /** Pending editor saves go out now (the window lost focus, or is going away). */
+    flushFiles(): Promise<void> {
+        return Promise.all([...this.files.values()].map(f => f.flush())).then(() => {})
+    }
 }
 
 export const appStore = new AppStore()
 
-/**
- * Older state kept a set per project. Keep the active project's set (the one the user last saw in
- * Settings), else the most recently saved one.
- */
-function restoreCapabilities(state: AppState): { ids: CapabilityId[], preset?: string } {
-    const saved = state.capabilities
-    if (!saved || typeof saved !== 'object' || Array.isArray(saved))
-        return resolveCapabilities(saved)
-    const ids = (state.activeProject && saved[state.activeProject]) || Object.values(saved).at(-1)
-    return resolveCapabilities(ids)
-}
-
-/** Older state kept the mode per project; same choice as restoreCapabilities. */
-function restoreApprovalMode(state: AppState): ApprovalMode {
-    const valid = (mode: unknown): mode is ApprovalMode => APPROVAL_MODES.includes(mode as ApprovalMode)
-    if (valid(state.approvalMode))
-        return state.approvalMode
-    const old = state.approvalModes ?? {}
-    const mode = (state.activeProject && old[state.activeProject]) || Object.values(old).at(-1)
-    return valid(mode) ? mode : 'auto'
-}

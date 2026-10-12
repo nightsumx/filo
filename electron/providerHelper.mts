@@ -1,11 +1,13 @@
-// Provider setup for Settings → 模型供应商, run as its own process by the user's node with the user's
+// Provider setup for Settings → 供应商, run as its own process by the user's node with the user's
 // pi (main passes pi's entry file): the provider list, auth.json format and login flows are then
 // exactly those of the pi the threads run, whatever its version. Node ≥22.18 runs this file directly
 // (type stripping), and pi needs ≥22.19, so only erasable TypeScript belongs here.
 //
 // Protocol, one JSON object per line:
-//   in   { id, op: 'list' | 'login' | 'logout' | 'setKey' | 'apiKey', ... }   → out { id, result } | { id, error, cancelled? }
-//   in   { op: 'answer', login, promptId, value } | { op: 'cancel', login }
+//   in   { id, op: 'list' | 'login' | 'logout' | 'setKey' | 'apiKey' | 'routeCatalog' | 'routeTarget' | 'nativeApis', ... }   → out { id, result } | { id, error, cancelled? }
+//   in   { id, op: 'probeModels' | 'probe', ... }   channel test: a provider's models, one request
+//   in   { id, op: 'prices' }   every model's price and cache lifetime (pi-capabilities/lib/prices PriceList)
+//   in   { op: 'answer', login, promptId, value } | { op: 'cancel', login } | { op: 'probeCancel', probe }
 //   out  { update: LoginUpdate }   while a login runs (prompts and notices)
 import type * as Pi from '@earendil-works/pi-coding-agent'
 import type { AuthMethod, LoginNotice, LoginPrompt, LoginUpdate, ProviderInfo, ProviderList } from '../shared/providers.ts'
@@ -42,6 +44,9 @@ async function list(): Promise<ProviderList> {
     const stored = new Map((await runtime.listCredentials()).map(c => [c.providerId, c.type]))
     const providers: ProviderInfo[] = []
     for (const provider of runtime.getProviders()) {
+        // Routing's own entry (terminal sync), managed in Settings → 路由.
+        if (provider.id === 'filo')
+            continue
         const status = runtime.getProviderAuthStatus(provider.id)
         const { apiKey, oauth } = provider.auth
         providers.push({
@@ -55,6 +60,7 @@ async function list(): Promise<ProviderList> {
             sourceLabel: status.label,
             stored: stored.get(provider.id),
             models: runtime.getModels(provider.id).length,
+            apis: [...new Set(runtime.getModels(provider.id).map(m => m.api))],
             // Availability can run a models.json `!command`, so only for providers that claim a key.
             available: status.configured ? (await runtime.getAvailable(provider.id).catch(() => [])).length : 0,
         })
@@ -154,6 +160,154 @@ async function setKey(providerId: string, key: string) {
     await (await pi.ModelRuntime.create()).login(providerId, 'api_key', interaction)
 }
 
+// ---------------------------------------------------------------- routing
+
+const ROUTE_APIS = new Set(['anthropic-messages', 'openai-responses', 'openai-completions', 'google-generative-ai'])
+
+const stringHeaders = (headers: unknown): Record<string, string> => {
+    const out: Record<string, string> = {}
+    if (headers && typeof headers === 'object') {
+        for (const [name, value] of Object.entries(headers)) {
+            if (typeof value === 'string')
+                out[name] = value
+        }
+    }
+    return out
+}
+
+/**
+ * The API each model id speaks at its maker, from pi's own catalog (Anthropic's and OpenAI's): what
+ * a relay listing both kinds most likely serves it over. Ids pi does not know are left out.
+ */
+async function nativeApis(ids: string[]) {
+    const runtime = await pi.ModelRuntime.create({ modelsPath: null })
+    const out: Record<string, string> = {}
+    for (const id of ids) {
+        const model = runtime.getModel('anthropic', id) ?? runtime.getModel('openai', id)
+        if (model)
+            out[id] = model.api
+    }
+    return out
+}
+
+/**
+ * Models the gateway can route to (shared/routes RouteCatalog): those of providers signed in with a
+ * key, on an API the gateway relays. Subscription sign-ins are left out: their tokens are for the
+ * vendor's own clients.
+ */
+async function routeCatalog() {
+    const runtime = await pi.ModelRuntime.create()
+    const models: Record<string, unknown>[] = []
+    const skipped: { provider: string, name: string, reason: 'subscription' | 'api' }[] = []
+    for (const provider of runtime.getProviders()) {
+        // The app's own groups (terminal sync writes them to models.json): a group in a group loops.
+        if (provider.id === 'filo' || !runtime.getProviderAuthStatus(provider.id).configured)
+            continue
+        if (runtime.isUsingOAuth(provider.id)) {
+            skipped.push({ provider: provider.id, name: provider.name, reason: 'subscription' })
+            continue
+        }
+        const available = await runtime.getAvailable(provider.id).catch(() => [])
+        const usable = available.filter(m => ROUTE_APIS.has(m.api))
+        if (available.length && !usable.length)
+            skipped.push({ provider: provider.id, name: provider.name, reason: 'api' })
+        for (const m of usable) {
+            models.push({
+                provider: provider.id,
+                providerName: provider.name,
+                id: m.id,
+                name: m.name || m.id,
+                api: m.api,
+                contextWindow: m.contextWindow,
+                maxTokens: m.maxTokens,
+                reasoning: m.reasoning,
+                images: Array.isArray(m.input) && m.input.includes('image'),
+                thinkingLevelMap: m.thinkingLevelMap,
+                compat: (m as { compat?: unknown }).compat,
+            })
+        }
+    }
+    return { models, skipped, error: runtime.getError() }
+}
+
+/** Where and with what key a provider serves a model, as pi would send the request. */
+async function routeTarget(providerId: string, modelId: string) {
+    const runtime = await pi.ModelRuntime.create()
+    const model = runtime.getModel(providerId, modelId)
+    if (!model)
+        throw new Error(`model-gone: ${providerId}/${modelId} is not in pi's model list`)
+    if (runtime.isUsingOAuth(providerId))
+        throw new Error(`no-key: ${providerId} is signed in with a subscription`)
+    const result = await runtime.getAuth(model).catch(() => undefined)
+    const auth = result?.auth
+    if (!auth?.apiKey && !auth?.headers)
+        throw new Error(`no-key: no key for ${providerId}`)
+    return {
+        api: model.api,
+        baseUrl: auth.baseUrl || model.baseUrl,
+        apiKey: auth.apiKey,
+        headers: { ...stringHeaders((model as { headers?: unknown }).headers), ...stringHeaders(auth.headers) },
+    }
+}
+
+/** What Claude Code and Codex requests are counted at: pi's whole model list, models.json included. */
+async function prices() {
+    const runtime = await pi.ModelRuntime.create()
+    const out: Record<string, unknown> = {}
+    for (const m of runtime.getModels())
+        out[`${m.provider}/${m.id}`] = { cost: m.cost, promptCache: m.promptCache }
+    return out
+}
+
+// ---------------------------------------------------------------- channel test
+
+/** A provider's models with pi's prices, for the channel test's model choice. */
+async function probeModels(providerId: string) {
+    const runtime = await pi.ModelRuntime.create()
+    const models = await runtime.getAvailable(providerId).catch(() => [])
+    return models.filter(m => m.type === undefined || m.type === 'chat').map(m => ({ id: m.id, name: m.name || m.id, cost: m.cost && { input: m.cost.input, output: m.cost.output, cacheRead: m.cost.cacheRead, cacheWrite: m.cost.cacheWrite } }))
+}
+
+const probes = new Map<string, AbortController>()
+
+/**
+ * One request of a channel test (pi-capabilities/lib/channelTest.ts ProbeRequest → ProbeReply), sent
+ * the way a thread would send it. pi-cc-tui's /channel-test does the same through its model registry.
+ */
+async function probe(id: string, providerId: string, modelId: string, request: Record<string, any>) {
+    const controller = new AbortController()
+    probes.set(id, controller)
+    try {
+        const runtime = await pi.ModelRuntime.create()
+        const model = runtime.getModel(providerId, modelId)
+        if (!model)
+            throw new Error(`${providerId}/${modelId} is not in pi's model list`)
+        const now = Date.now()
+        const messages = (request.turns as any[]).map(t => (t.role === 'user' ? { role: 'user' as const, content: String(t.text), timestamp: now } : t.message))
+        const started = performance.now()
+        let ttftMs: number | null = null
+        const stream = runtime.streamSimple(model, { systemPrompt: String(request.system), messages }, { maxTokens: Number(request.maxTokens), sessionId: String(request.sessionId), signal: controller.signal })
+        for await (const event of stream) {
+            if (ttftMs === null && (event.type === 'text_delta' || event.type === 'thinking_delta' || event.type === 'toolcall_delta'))
+                ttftMs = performance.now() - started
+        }
+        const message = await stream.result()
+        const u = message.usage
+        if (message.stopReason === 'aborted' || controller.signal.aborted)
+            throw Object.assign(new Error('Channel test cancelled'), { name: 'AbortError' })
+        return {
+            message,
+            usage: { input: u.input, output: u.output, cacheRead: u.cacheRead, cacheWrite: u.cacheWrite, cost: u.cost?.total },
+            ttftMs,
+            durationMs: performance.now() - started,
+            error: message.stopReason === 'error' ? message.errorMessage || 'request failed' : undefined,
+        }
+    }
+    finally {
+        probes.delete(id)
+    }
+}
+
 // ---------------------------------------------------------------- loop
 
 async function handle(message: Record<string, any>) {
@@ -169,6 +323,8 @@ async function handle(message: Record<string, any>) {
     }
     if (op === 'cancel')
         return cancel(String(message.login))
+    if (op === 'probeCancel')
+        return probes.get(String(message.probe))?.abort()
     try {
         let result: unknown = null
         if (op === 'list')
@@ -179,6 +335,18 @@ async function handle(message: Record<string, any>) {
             await (await pi.ModelRuntime.create()).logout(String(message.provider))
         else if (op === 'setKey')
             await setKey(String(message.provider), String(message.key))
+        else if (op === 'routeCatalog')
+            result = await routeCatalog()
+        else if (op === 'routeTarget')
+            result = await routeTarget(String(message.provider), String(message.model))
+        else if (op === 'probeModels')
+            result = await probeModels(String(message.provider))
+        else if (op === 'probe')
+            result = await probe(String(id), String(message.provider), String(message.model), message.request ?? {})
+        else if (op === 'prices')
+            result = await prices()
+        else if (op === 'nativeApis')
+            result = await nativeApis(Array.isArray(message.models) ? message.models.map(String) : [])
         else if (op === 'apiKey')
             result = (await (await pi.ModelRuntime.create()).getAuth(String(message.provider)).catch(() => undefined))?.auth.apiKey ?? null
         else

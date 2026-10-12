@@ -45,7 +45,7 @@ class TerminalStore {
     }
 
     of(cwd: string): TerminalInfo[] {
-        return this.list.filter(t => t.cwd === cwd)
+        return this.list.filter(t => t.cwd === cwd && t.by !== 'setup')
     }
 
     get tabs(): TerminalInfo[] {

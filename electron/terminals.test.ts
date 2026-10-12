@@ -163,9 +163,44 @@ describe('terminals', () => {
         expect(terminals.get(a.id)).toBeUndefined()
     })
 
+    it('keeps the setup assistant\'s terminals, which belong to no project, and leaves them out of busy counts', async () => {
+        const setup = terminals.create({ cwd: dir, command: sh.wait }, 'setup')
+        await until(() => terminals.get(setup.id)?.busy === true)
+        expect(terminals.busyIn([dir])).toBe(0)
+        await terminals.closeOutside(new Set())
+        expect(terminals.get(setup.id)).toBeDefined()
+        await terminals.close(setup.id)
+        expect(terminals.get(setup.id)).toBeUndefined()
+    })
+
     it('keeps app-only variables out of the shell', () => {
         const env = terminalEnv({ PATH: '/bin', ELECTRON_RUN_AS_NODE: '1', PI_GUI_USER_DATA: '/x', VITE_DEV_SERVER_URL: 'http://x', HOME: '/h' }, '1.0.0')
         expect(env).toMatchObject({ PATH: '/bin', HOME: '/h', TERM: 'xterm-256color', TERM_PROGRAM: 'Filo', LANG: 'en_US.UTF-8' })
         expect(Object.keys(env).filter(k => k.startsWith('ELECTRON_') || k.startsWith('PI_GUI_') || k.startsWith('VITE_'))).toEqual([])
     })
+})
+
+describe('a program the app drives', () => {
+    // Asks for the device attributes, prints the reply's bytes, then echoes each line typed.
+    const script = `process.stdin.setRawMode(true);process.stdout.write('\\x1b[c');let got='';process.stdin.on('data',d=>{got+=d;if(!got.includes('c'))return;process.stdout.write('reply='+JSON.stringify(got)+'\\n');got='\\n';process.stdin.removeAllListeners('data');process.stdin.on('data',k=>{if(String(k)==='q')process.exit(3);process.stdout.write('key='+JSON.stringify(String(k))+'\\n')})})`
+
+    it('main answers its queries; windows\' replies are dropped, their keys reported; not listed', async () => {
+        const typed: string[] = []
+        let exit: unknown
+        const id = terminals.run({ cwd: dir, cols: 80, rows: 10 }, { file: process.execPath, args: ['-e', script], env: { ...process.env as Record<string, string>, ELECTRON_RUN_AS_NODE: '1' }, onInput: d => typed.push(d), onExit: e => (exit = e) })
+        await until(() => terminals.screen(id).includes('reply='))
+        expect(terminals.screen(id)).toMatch(/reply="\\u001b\[\?[\d;]+c"/)
+        expect(terminals.list().some(t => t.id === id)).toBe(false)
+        terminals.write(id, '\x1B[?62;22c')
+        terminals.write(id, 'a')
+        await until(() => terminals.screen(id).includes('key="a"'))
+        terminals.inject(id, 'b')
+        await until(() => terminals.screen(id).includes('key="b"'))
+        expect(terminals.screen(id)).not.toContain('62;22')
+        expect(typed).toEqual(['a'])
+        terminals.inject(id, 'q')
+        await until(() => exit !== undefined)
+        expect(exit).toMatchObject({ code: 3 })
+        await terminals.close(id)
+    }, 20_000)
 })

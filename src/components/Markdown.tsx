@@ -10,6 +10,40 @@ import { CodeBlock } from './CodeBlock'
 
 const remarkPlugins = [remarkGfm]
 
+interface HastNode {
+    type: string
+    tagName?: string
+    value?: string
+    properties?: Record<string, unknown>
+    children?: HastNode[]
+}
+
+/** Elements the caret goes after rather than inside: void tags, code (CodeBlock reads its text), links. */
+const CARET_AFTER = new Set(['br', 'hr', 'img', 'input', 'code', 'a'])
+
+/**
+ * Streaming caret at the end of the last line of text, inside the deepest last block. Put after the
+ * blocks it took a line of its own, which vanished when the message ended and moved the text.
+ * None after a code block: inside it would be code, after it a line of its own again.
+ */
+function rehypeCaret() {
+    return (tree: HastNode) => {
+        let parent = tree
+        for (;;) {
+            const last = parent.children?.findLast(n => n.type !== 'text' || !!n.value?.trim())
+            if (last?.tagName === 'pre')
+                return
+            if (last?.type !== 'element' || CARET_AFTER.has(last.tagName ?? ''))
+                break
+            parent = last
+        }
+        parent.children ??= []
+        parent.children.push({ type: 'element', tagName: 'span', properties: { className: ['animate-pulse'] }, children: [{ type: 'text', value: '▍' }] })
+    }
+}
+
+const streamingRehypePlugins = [rehypeCaret]
+
 const components: Partial<Components> = {
     code: ({ children, className, node: _node, ...rest }) => {
         const match = /language-([\w+-]+)/.exec(className || '')
@@ -38,9 +72,8 @@ export const Markdown = memo(({ content, className, streaming }: {
             className,
         )}
     >
-        <ReactMarkdown remarkPlugins={remarkPlugins} components={components}>
+        <ReactMarkdown remarkPlugins={remarkPlugins} rehypePlugins={streaming ? streamingRehypePlugins : undefined} components={components}>
             {content}
         </ReactMarkdown>
-        {streaming && <span className="animate-pulse">▍</span>}
     </div>
 ))

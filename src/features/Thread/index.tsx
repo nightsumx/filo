@@ -10,6 +10,7 @@ import { Composer } from '../Composer'
 import { ExtensionRequest } from './ExtensionRequest'
 import { MessageList } from './MessageList'
 import { SubagentComposer, SubagentHeader } from './SubagentPane'
+import { HooksNotice, TuiToggle, TuiView, useTuiViewCleanup } from './TuiView'
 import { newThreadLabel, tr } from '@/lib/i18n'
 import { keys } from '@/platform'
 
@@ -126,6 +127,10 @@ export const ThreadPane = observer(({ thread, focused }: { thread: Thread, focus
 
     // A subagent opened from the tree or its card takes the transcript's place.
     const subagent = thread.openSubagent
+    // An agent run through its own TUI (Claude Code) can show that instead of the transcript.
+    const tui = thread.tuiTerminal
+    useTuiViewCleanup(tui)
+    const tuiShown = !!tui && thread.tuiShown && !subagent
     return (
         <section
             aria-label={subagent ? `${thread.title} / ${subagent.title}` : thread.title}
@@ -140,24 +145,30 @@ export const ThreadPane = observer(({ thread, focused }: { thread: Thread, focus
                     thread.showSubagent(null)
                 }
             }}
-            className="flex h-full min-w-0 flex-1 basis-0 flex-col bg-ide-editor"
+            className="relative flex h-full min-w-0 flex-1 basis-0 flex-col bg-ide-editor"
         >
             {subagent && <SubagentHeader thread={thread} run={subagent} />}
-            {!thread.loaded
+            {/* With the hooks notice the switch sits in its row; otherwise over the corner. */}
+            {tui && !subagent && (thread.state?.tuiHooks
+                ? <HooksNotice thread={thread}><TuiToggle thread={thread} inline /></HooksNotice>
+                : <TuiToggle thread={thread} />)}
+            {tuiShown
+                ? <TuiView id={tui} />
+                : !thread.loaded
                 ? <div className="flex flex-1 items-center justify-center"><Loader2 size={18} className="animate-spin text-gray-300" /></div>
                 : subagent
                     ? <MessageList thread={thread} subagent={subagent} />
                     : thread.isEmpty && !thread.persisted ? <Hero thread={thread} /> : <MessageList thread={thread} />}
             {/* Requests normally render in the transcript's live row; without a running turn there is none. */}
-            {!subagent && !(thread.running && thread.turns.length > 0) && thread.uiRequests.length > 0 && (
+            {!subagent && !tuiShown && !(thread.running && thread.turns.length > 0) && thread.uiRequests.length > 0 && (
                 <div className="mx-auto w-full max-w-5xl px-5 pb-3">
                     <TranscriptTextContext value={TRANSCRIPT_TEXT[appStore.transcriptLang]}>
                         <ExtensionRequest thread={thread} />
                     </TranscriptTextContext>
                 </div>
             )}
-            <TerminalNotice thread={thread} />
-            {subagent ? <SubagentComposer key={subagent.id} thread={thread} run={subagent} /> : <Composer thread={thread} />}
+            {!tuiShown && <TerminalNotice thread={thread} />}
+            {subagent ? <SubagentComposer key={subagent.id} thread={thread} run={subagent} /> : !tuiShown && <Composer thread={thread} />}
         </section>
     )
 })

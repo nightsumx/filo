@@ -6,14 +6,17 @@ import type { Thread } from '@/store/thread'
 import { ImageThumb } from '@/components/ImageView'
 import { cn } from '@/lib/utils'
 import { appStore } from '@/store/app'
-import { ArrowUp, ImagePlus, Square, X } from 'lucide-react'
+import { terminalStore } from '@/store/terminals'
+import { ArrowUp, Copy, ImagePlus, Square, SquareTerminal, Undo2, X } from 'lucide-react'
 import { observer } from 'mobx-react-lite'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { StatusLine } from '../Thread/StatusLine'
+import { CacheNotice } from './CacheNotice'
 import { AgentPicker, AutopilotToggle, ConfigPickers, installingAgentLabel, ModelPicker, ModePicker, NoModelNotice, ThinkingPicker } from './Pickers'
 import { TodoBar } from './TodoBar'
 import { tr } from '@/lib/i18n'
+import { keys, os } from '@/platform'
 import type { Localized } from '@shared/i18n'
 
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024
@@ -51,6 +54,9 @@ async function addImages(thread: Thread, files: File[]) {
 /** ACP agents without steering take mid-run input as the next prompt. */
 const queuesInput = (thread: Thread) => thread.agent !== 'pi' && !thread.state?.agentCaps?.steering
 
+/** pi's key for taking the queue back into the editor (app.message.dequeue). */
+const dequeueKeys = os === 'windows' ? 'Alt+Q' : keys('⌥↑')
+
 const SOURCE_LABEL: Record<SlashCommand['source'], Localized> = {
     extension: { zh: '扩展', en: 'extension' },
     prompt: { zh: '模板', en: 'prompt' },
@@ -86,7 +92,42 @@ const SlashMenu = observer(function SlashMenu({ commands, active, onPick }: { co
     )
 })
 
-export const Composer = observer(({ thread }: { thread: Thread }) => {
+/** Where the composer would be, for a chat its agent continues only in a terminal (Cursor's own CLI chats). */
+const TerminalOnly = observer(({ thread, command }: { thread: Thread, command: string }) => {
+    const agent = thread.agentLabel
+    return (
+        <div className="mx-auto w-full max-w-5xl px-4 pb-3">
+            <div role="status" className="flex flex-col gap-2 rounded-lg bg-ide-block px-3 py-2.5 text-[12.5px] text-gray-700">
+                <span>
+                    {tr(`这个对话是在终端里开的，${agent} 只允许在终端里接着聊，这里只能查看。`, `This chat was started in a terminal. ${agent} continues it only there; here it is read-only.`)}
+                </span>
+                <code className="block truncate font-mono text-[12px] text-gray-500 select-text" title={command}>{command}</code>
+                <div className="flex items-center gap-2">
+                    <button
+                        type="button"
+                        onClick={() => void terminalStore.create(thread.cwd, { command, label: agent })}
+                        className="flex items-center gap-1.5 rounded-md bg-ide-accent px-2.5 py-1 text-[12px] text-always-white outline-none hover:bg-ide-accent-hover focus-visible:ring-2 focus-visible:ring-ide-accent/50"
+                    >
+                        <SquareTerminal size={13} />
+                        {tr('在终端里继续', 'Continue in a terminal')}
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => void navigator.clipboard.writeText(command).then(() => toast.success(tr('已复制命令', 'Command copied')))}
+                        className="flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[12px] text-gray-700 outline-none hover:bg-ide-hover focus-visible:ring-2 focus-visible:ring-ide-accent/50"
+                    >
+                        <Copy size={13} />
+                        {tr('复制命令', 'Copy command')}
+                    </button>
+                </div>
+            </div>
+        </div>
+    )
+})
+
+export const Composer = observer(({ thread }: { thread: Thread }) => thread.terminalOnly ? <TerminalOnly thread={thread} command={thread.terminalOnly} /> : <ComposerEditor thread={thread} />)
+
+const ComposerEditor = observer(({ thread }: { thread: Thread }) => {
     const textareaRef = useRef<HTMLTextAreaElement>(null)
     const fileRef = useRef<HTMLInputElement>(null)
     const [dragOver, setDragOver] = useState(false)
@@ -127,7 +168,10 @@ export const Composer = observer(({ thread }: { thread: Thread }) => {
     const hasInput = !!thread.draft.trim() || thread.images.length > 0
     const canSend = hasInput && !installing
     const agent = thread.agentLabel
-    const queued = [...thread.queue.steering, ...thread.queue.followUp]
+    const queued = [
+        ...thread.queue.steering.map(text => ({ kind: 'steering' as const, text })),
+        ...thread.queue.followUp.map(text => ({ kind: 'followUp' as const, text })),
+    ]
     const widgetsAbove = Object.entries(thread.widgets).filter(([, w]) => w.placement === 'aboveEditor')
     const widgetsBelow = Object.entries(thread.widgets).filter(([, w]) => w.placement === 'belowEditor')
     const statuses = thread.visibleStatuses
@@ -169,6 +213,12 @@ export const Composer = observer(({ thread }: { thread: Thread }) => {
         if (e.key === 'Escape' && thread.running) {
             e.preventDefault()
             void thread.abort()
+            return
+        }
+        // pi's app.message.dequeue: Alt+Up, Alt+Q on Windows.
+        if (e.altKey && (os === 'windows' ? e.code === 'KeyQ' : e.key === 'ArrowUp') && queued.some(q => thread.unqueueable(q.kind))) {
+            e.preventDefault()
+            void thread.dequeueAll()
         }
     }
 
@@ -196,12 +246,24 @@ export const Composer = observer(({ thread }: { thread: Thread }) => {
             ))}
             <TodoBar thread={thread} />
             <NoModelNotice thread={thread} />
+            <CacheNotice thread={thread} />
             {queued.length > 0 && (
                 <div className="mb-2 flex flex-col gap-1">
-                    {queued.map((text, i) => (
-                        <div key={i} className="flex items-center gap-2 rounded-md bg-ide-sel px-2.5 py-1 text-[12px] text-gray-800">
+                    {queued.map(({ kind, text }, i) => (
+                        <div key={i} className="group flex items-center gap-2 rounded-md bg-ide-sel py-1 pr-1 pl-2.5 text-[12px] text-gray-800">
                             <span className="shrink-0 font-medium">{tr('排队中', 'Queued')}</span>
-                            <span className="truncate">{text}</span>
+                            <span className="min-w-0 flex-1 truncate">{text}</span>
+                            {thread.unqueueable(kind) && (
+                                <button
+                                    type="button"
+                                    title={tr(`撤回到输入框（${dequeueKeys} 撤回全部）`, `Back to the editor (${dequeueKeys} takes back all)`)}
+                                    aria-label={tr('撤回这条排队消息', 'Take back this queued message')}
+                                    onClick={() => void thread.dequeue(kind, text)}
+                                    className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-gray-500 opacity-0 hover:bg-ide-hover hover:text-gray-900 focus-visible:opacity-100 group-hover:opacity-100"
+                                >
+                                    <Undo2 size={13} />
+                                </button>
+                            )}
                         </div>
                     ))}
                 </div>

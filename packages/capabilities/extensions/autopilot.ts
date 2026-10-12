@@ -149,7 +149,7 @@ interface ChildResult<T> {
 
 /** The supervisor's or learner's run: a second pi over RPC that ends by calling `submit`. */
 async function runChild<T>(pi: ExtensionAPI, ctx: ExtensionContext, opts: { title: string, task: string, submit: string, env: Record<string, string>, exclude: string, signal: { cancelled: boolean, stop?: () => void }, onTool?: (tools: number, last: string) => void }): Promise<ChildResult<T>> {
-    const launch = childLaunch(pi, ctx, 'auto', ['--exclude-tools', opts.exclude])
+    const launch = childLaunch(pi, ctx, 'auto', ['--no-session', '--exclude-tools', opts.exclude])
     // Without this file among the parent's -e (pi-cc-tui loads it as a package), the child gets it below.
     const args: string[] = []
     for (let i = 0; i < launch.args.length; i++) {

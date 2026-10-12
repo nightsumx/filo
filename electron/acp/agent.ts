@@ -18,6 +18,7 @@ import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { realpath } from 'node:fs/promises'
 import { tr } from '../i18n'
+import { isGeminiPreamble } from './cliSessions'
 import { AcpConnection, methodNotFound } from './connection'
 import { AcpTranscript, askQuestions, piToolCalls, XAI_OTHER, xaiAskAnswer, xaiUsage } from './transcript'
 
@@ -120,6 +121,8 @@ export class AcpAgent implements AgentAdapter {
     private running = false
     /** session/load is replaying history. */
     private loading = true
+    /** When the last session/update came (spec.lateHistory). */
+    private lastUpdateAt = 0
     private permissions = new Map<string, PermissionWait>()
     /** Typed mid-run where the agent cannot take it then: sent as the next prompts, in order. */
     private queued: { message: string, images: ImageContent[] }[] = []
@@ -134,7 +137,10 @@ export class AcpAgent implements AgentAdapter {
     /** Prompt ids we sent, and turns Grok reported done (turn_completed), live or replayed. */
     private sentPrompts = new Set<string>()
     private doneTurns = new Set<string>()
-    /** Turns Grok runs on its own (a stranded interjection's fallback), until prompt_complete. */
+    /**
+     * Turns Grok runs on its own (a stranded interjection's fallback, or `task-completed-…` when a
+     * background task finishes), until turn_completed or prompt_complete; the latter only ends fallbacks.
+     */
     private ownTurns = new Set<string>()
     /** Interjections sent with x.ai/interject, shown queued until Grok takes them in. */
     private steers: string[] = []
@@ -233,6 +239,8 @@ export class AcpAgent implements AgentAdapter {
         catch (error: any) {
             throw new Error(this.explain(error))
         }
+        if (this.options.sessionId && this.spec.lateHistory)
+            await this.historyQuiet()
         this.transcript.finish('end_turn')
         this.loading = false
         this.noteModels(this.initResult?._meta?.modelState?.availableModels)
@@ -241,6 +249,14 @@ export class AcpAgent implements AgentAdapter {
         this.transcript.setEmitter(event => this.emit(event))
         if (!this.options.readOnly)
             this.callbacks.onSession?.(this, {})
+    }
+
+    /** Waits until no session/update came for a while (bounded): the rest of a late-sent history. */
+    private async historyQuiet(quietMs = 200, maxMs = 5000) {
+        const start = Date.now()
+        this.lastUpdateAt = start
+        while (Date.now() - this.lastUpdateAt < quietMs && Date.now() - start < maxMs)
+            await new Promise(resolve => setTimeout(resolve, quietMs / 4))
     }
 
     /**
@@ -342,6 +358,7 @@ export class AcpAgent implements AgentAdapter {
         }
         if (method !== 'session/update' || (this.sessionId && params?.sessionId && params.sessionId !== this.sessionId))
             return
+        this.lastUpdateAt = Date.now()
         this.noteMeta(params?._meta)
         const update = params?.update
         switch (update?.sessionUpdate) {
@@ -375,6 +392,9 @@ export class AcpAgent implements AgentAdapter {
                 break
             default:
                 if (this.caps.xai && !this.xaiContent(update, params))
+                    break
+                // Gemini CLI replays its own context preamble as the session's first user message.
+                if (this.spec.id === 'gemini' && update?.sessionUpdate === 'user_message_chunk' && typeof update.content?.text === 'string' && isGeminiPreamble(update.content.text))
                     break
                 this.transcript.update(update)
                 break
@@ -502,13 +522,15 @@ export class AcpAgent implements AgentAdapter {
 
     /** A turn ended (live or replayed): its messages close, with the turn's usage. */
     private turnCompleted(promptId: string, stopReason: string | undefined, usage: PromptUsage | undefined) {
-        if (promptId && this.doneTurns.has(promptId))
-            return
-        if (promptId)
-            this.doneTurns.add(promptId)
-        this.inModelCall = false
-        this.endRetry()
-        this.transcript.finish(stopReason, usage)
+        if (!promptId || !this.doneTurns.has(promptId)) {
+            if (promptId)
+                this.doneTurns.add(promptId)
+            this.inModelCall = false
+            this.endRetry()
+            this.transcript.finish(stopReason, usage)
+        }
+        if (promptId && this.ownTurns.delete(promptId))
+            this.afterTurn(false)
     }
 
     /** Grok's prompt queue: a running prompt we did not send is a turn of its own (a stranded interjection). */
@@ -540,11 +562,8 @@ export class AcpAgent implements AgentAdapter {
     }
 
     private ownTurnEnded(promptId: string, stopReason: string | undefined) {
-        if (!this.ownTurns.delete(promptId))
-            return
-        if (!this.doneTurns.has(promptId))
+        if (this.ownTurns.has(promptId))
             this.turnCompleted(promptId, stopReason, undefined)
-        this.afterTurn(false)
     }
 
     private setLocal(id: string, value: string) {

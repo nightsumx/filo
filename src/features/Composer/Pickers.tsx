@@ -2,10 +2,11 @@ import type { AgentAvailability, AgentKind } from '@shared/agents'
 import type { PiModel, ThinkingLevel } from '@shared/pi'
 import type { KeyboardEvent } from 'react'
 import type { Thread, ThreadMode } from '@/store/thread'
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-import { cn, formatTokens } from '@/lib/utils'
-import { Bot, Brain, Check, ChevronDown, ClipboardList, Cpu, Download, FilePen, KeyRound, Loader2, Plane, ShieldCheck, SlidersHorizontal, Zap } from 'lucide-react'
+import { cn, formatTokens, ipcMessage } from '@/lib/utils'
+import { AgentIcon } from '@/components/AgentIcon'
+import { Brain, Check, ChevronDown, ClipboardList, Cpu, Download, FilePen, KeyRound, Loader2, Plane, Plus, Route, Settings2, ShieldCheck, SlidersHorizontal, Undo2, Zap } from 'lucide-react'
 import { observable, runInAction } from 'mobx'
 import { observer } from 'mobx-react-lite'
 import { useEffect, useRef, useState } from 'react'
@@ -13,6 +14,11 @@ import { tr } from '@/lib/i18n'
 import { agentsStore } from '@/store/agents'
 import { appStore } from '@/store/app'
 import type { Localized } from '@shared/i18n'
+import type { RouteModel, TerminalAgent } from '@shared/routes'
+import { AGENT_APIS, memberKey, ROUTED_AGENT_LABELS, ROUTES_PROVIDER, TERMINAL_AGENTS } from '@shared/routes'
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
+import { Button } from '@/components/ui/button'
+import { flatFieldClass } from '@/components/ui/form'
 
 const pill = 'flex h-6 items-center gap-1 rounded-md px-1.5 text-[12px] text-gray-600 outline-none transition-colors hover:bg-black/[0.06] hover:text-gray-900 data-[state=open]:bg-black/[0.08] disabled:opacity-50'
 
@@ -45,20 +51,31 @@ export const NoModelNotice = observer(({ thread }: { thread: Thread }) => {
         <div role="status" className="mb-2 flex items-center gap-3 rounded-md bg-ide-block px-3 py-2 text-[12.5px] text-gray-700">
             <KeyRound size={14} className="shrink-0 text-gray-500" />
             <span className="min-w-0 flex-1">
-                {tr('pi 还没有可用的模型。登录一个模型供应商、填写 API key，或者接入本地模型。', 'pi has no model to use yet. Sign in to a model provider, enter an API key, or connect a local model.')}
+                {tr('pi 还没有可用的模型。登录一个供应商、填写 API key，或者接入本地模型。', 'pi has no model to use yet. Sign in to a provider, enter an API key, or connect a local model.')}
             </span>
             <button
                 type="button"
                 onClick={() => appStore.openProviders()}
                 className="shrink-0 rounded-md bg-ide-accent px-2.5 py-1 text-[12px] text-always-white outline-none hover:bg-ide-accent-hover focus-visible:ring-2 focus-visible:ring-ide-accent/50"
             >
-                {tr('配置模型供应商', 'Set up a provider')}
+                {tr('配置供应商', 'Set up a provider')}
             </button>
         </div>
     )
 })
 
+/** Groups go by as models of this provider id (pi) or with this id prefix (Grok's config.toml). */
+const isGroupModel = (model: PiModel) => model.provider === ROUTES_PROVIDER || model.id.startsWith(`${ROUTES_PROVIDER}-`)
+const countModels = (n: number) => tr(`${n} 个模型`, n === 1 ? '1 model' : `${n} models`)
+const memberModel = (key: string) => key.slice(key.indexOf('/') + 1)
+
+/**
+ * The agent's own models, the provider models it can use (Claude Code, Codex: groups of one, by
+ * provider), then the routing groups: every agent picks a group the way it picks a model. On a group,
+ * its members follow, to pin one for this thread.
+ */
 export const ModelPicker = observer(({ thread }: { thread: Thread }) => {
+    const [adding, setAdding] = useState(false)
     if (lacksModels(thread)) {
         return (
             <button type="button" className={cn(pill, 'text-ide-accent hover:text-ide-accent')} onClick={() => appStore.openProviders()}>
@@ -68,34 +85,204 @@ export const ModelPicker = observer(({ thread }: { thread: Thread }) => {
         )
     }
     const current = thread.state?.model
-    const groups = new Map<string, PiModel[]>()
-    for (const model of thread.models) {
-        const list = groups.get(model.provider) ?? []
+    const group = thread.routeGroup
+    const groups = thread.routeGroups
+    const pin = thread.route.pin && group?.members.some(m => !m.off && memberKey(m) === thread.route.pin) ? thread.route.pin : undefined
+    const served = pin ?? (thread.routeInfo?.group?.id === group?.id ? thread.routeInfo?.served : undefined)
+    // Claude Code / Codex: pi's provider models of their API, written into their own config when picked.
+    const channelAgent = TERMINAL_AGENTS.find(a => a === thread.agent)
+    const channel = thread.channel
+    const onChannel = !group && channel?.current
+    const channels = new Map<string, RouteModel[]>()
+    for (const model of channelAgent ? (appStore.routes?.models ?? []).filter(m => AGENT_APIS[channelAgent].includes(m.api)) : []) {
+        const list = channels.get(model.providerName) ?? []
         list.push(model)
-        groups.set(model.provider, list)
+        channels.set(model.providerName, list)
+    }
+    const byProvider = new Map<string, PiModel[]>()
+    // On a channel, the agent's own list is its vendor's, not what the channel serves.
+    for (const model of onChannel ? [] : thread.models.filter(m => !isGroupModel(m))) {
+        const list = byProvider.get(model.provider) ?? []
+        list.push(model)
+        byProvider.set(model.provider, list)
+    }
+    // Other agents than pi restart onto a group or channel (or off it): not mid-run.
+    const restarts = thread.agent !== 'pi'
+    const busy = restarts && thread.running
+    const label = group
+        ? `${group.name}${served ? ` · ${memberModel(served)}` : ''}`
+        : current?.name ?? (onChannel ? channel.current!.model : thread.agentStatus === 'starting' ? tr('加载中…', 'Loading…') : tr('选择模型', 'Choose model'))
+    return (
+        <>
+            <DropdownMenu
+                onOpenChange={(open) => {
+                    if (open && channelAgent) {
+                        void thread.refreshChannel()
+                        void window.pi.routeCatalog()
+                    }
+                }}
+            >
+                <DropdownMenuTrigger className={pill} disabled={!thread.models.length && !groups.length && !channelAgent} title={group ? tr('路由组：按顺序使用组里的模型', 'Routing group: its models in order') : undefined}>
+                    {group ? <Route size={13} /> : <Cpu size={13} />}
+                    <span className="max-w-[200px] truncate">{label}</span>
+                    <ChevronDown size={12} />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="w-72 max-h-[460px]">
+                    {[...byProvider.entries()].map(([provider, models]) => (
+                        <div key={provider}>
+                            <DropdownMenuLabel>{provider}</DropdownMenuLabel>
+                            {models.map(model => (
+                                <DropdownMenuItem key={`${provider}/${model.id}`} disabled={busy && !!group} onSelect={() => void thread.setModel(model)}>
+                                    <span className="flex-1 truncate">{model.name}</span>
+                                    {model.contextWindow ? <span className="text-[11px] text-gray-400">{formatTokens(model.contextWindow)}</span> : null}
+                                    {!group && current?.provider === model.provider && current.id === model.id && <Check size={14} className="text-ide-accent" />}
+                                </DropdownMenuItem>
+                            ))}
+                        </div>
+                    ))}
+                    {!!channelAgent && (
+                        <>
+                            {!!byProvider.size && <DropdownMenuSeparator />}
+                            {channel?.other && !channel.current && (
+                                <div className="truncate px-2 py-1 text-[11.5px] text-gray-500">{tr(`配置里现在是 ${channel.other}`, `Its config points at ${channel.other}`)}</div>
+                            )}
+                            {[...channels.entries()].map(([provider, models]) => (
+                                <div key={provider}>
+                                    <DropdownMenuLabel>{provider}</DropdownMenuLabel>
+                                    {models.map(m => (
+                                        <DropdownMenuItem key={`${m.provider}/${m.id}`} disabled={busy} onSelect={() => void thread.useChannel({ provider: m.provider, model: m.id })}>
+                                            <span className="flex-1 truncate">{m.name}</span>
+                                            {m.contextWindow ? <span className="text-[11px] text-gray-400">{formatTokens(m.contextWindow)}</span> : null}
+                                            {onChannel && channel.current!.provider === m.provider && channel.current!.model === m.id && <Check size={14} className="text-ide-accent" />}
+                                        </DropdownMenuItem>
+                                    ))}
+                                </div>
+                            ))}
+                            {channel?.restore !== undefined && (
+                                <DropdownMenuItem disabled={busy} onSelect={() => void thread.useChannel(null)}>
+                                    <Undo2 size={13} />
+                                    <span className="flex-1 truncate">{channel.restore ? tr(`换回原来的 ${channel.restore}`, `Back to ${channel.restore}`) : tr(`换回 ${ROUTED_AGENT_LABELS[channelAgent]} 自己的登录`, `Back to ${ROUTED_AGENT_LABELS[channelAgent]}'s own sign-in`)}</span>
+                                </DropdownMenuItem>
+                            )}
+                            <DropdownMenuItem disabled={busy} onSelect={() => setAdding(true)}>
+                                <Plus size={13} />
+                                <span className="flex-1">{tr('添加渠道…', 'Add a channel…')}</span>
+                            </DropdownMenuItem>
+                        </>
+                    )}
+                    {!!groups.length && (
+                        <>
+                            {!!(byProvider.size || channelAgent) && <DropdownMenuSeparator />}
+                            <DropdownMenuLabel>{tr('路由组', 'Routing groups')}</DropdownMenuLabel>
+                            {groups.map(g => (
+                                <div key={g.id}>
+                                    <DropdownMenuItem disabled={busy && group?.id !== g.id} onSelect={() => void thread.chooseGroup(g.id)}>
+                                        <Route size={13} />
+                                        <span className="flex-1 truncate">{g.name}</span>
+                                        <span className="text-[11px] text-gray-400">{countModels(g.members.filter(m => !m.off).length)}</span>
+                                        {group?.id === g.id && <Check size={14} className="text-ide-accent" />}
+                                    </DropdownMenuItem>
+                                    {group?.id === g.id && (
+                                        <>
+                                            <DropdownMenuItem inset onSelect={() => void thread.setRoute({})} className="h-6 text-[12px]">
+                                                <span className="flex-1 truncate">{g.mode === 'manual' ? tr('用组里固定的那个', 'The group\'s fixed one') : tr('按顺序，失败换下一个', 'In order, next on failure')}</span>
+                                                {!pin && <Check size={13} className="text-ide-accent" />}
+                                            </DropdownMenuItem>
+                                            {g.members.filter(m => !m.off).map((m) => {
+                                                const key = memberKey(m)
+                                                return (
+                                                    <DropdownMenuItem key={key} inset onSelect={() => void thread.setRoute({ pin: key })} className="h-6 text-[12px]">
+                                                        <span className="flex-1 truncate">{tr(`只用 ${m.model}`, `Only ${m.model}`)}</span>
+                                                        <span className="max-w-[90px] truncate text-[11px] text-gray-400">{m.provider}</span>
+                                                        {pin === key && <Check size={13} className="text-ide-accent" />}
+                                                    </DropdownMenuItem>
+                                                )
+                                            })}
+                                        </>
+                                    )}
+                                </div>
+                            ))}
+                        </>
+                    )}
+                    {busy && <div className="px-2 py-1 text-[11.5px] text-gray-500">{tr('这一轮结束后才能换模型', 'Models switch once this turn is over')}</div>}
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem onSelect={() => appStore.openSettings('routes')}>
+                        <Settings2 size={13} />
+                        <span className="flex-1">{groups.length ? tr('管理路由组…', 'Manage routing groups…') : tr('新建路由组…', 'New routing group…')}</span>
+                    </DropdownMenuItem>
+                </DropdownMenuContent>
+            </DropdownMenu>
+            {channelAgent && <AddChannel thread={thread} agent={channelAgent} open={adding} onOpenChange={setAdding} />}
+        </>
+    )
+})
+
+/**
+ * A channel is an address and a key: the API is the agent's, the name and models come from the
+ * endpoint. Saved as a pi provider (Providers), then written into the agent's own config, so
+ * a terminal run uses it too.
+ */
+const AddChannel = observer(({ thread, agent, open, onOpenChange }: { thread: Thread, agent: TerminalAgent, open: boolean, onOpenChange: (open: boolean) => void }) => {
+    const [baseUrl, setBaseUrl] = useState('')
+    const [apiKey, setApiKey] = useState('')
+    const [model, setModel] = useState('')
+    const [needsModel, setNeedsModel] = useState(false)
+    const [busy, setBusy] = useState(false)
+    const [error, setError] = useState('')
+    const name = ROUTED_AGENT_LABELS[agent]
+    const field = cn(flatFieldClass, 'w-full font-mono')
+    const save = async () => {
+        setBusy(true)
+        setError('')
+        try {
+            const added = await window.pi.addChannel(agent, { baseUrl, apiKey, model: needsModel ? model : undefined })
+            if ('listError' in added) {
+                setError(`${added.listError}\n${tr('没能获取模型列表，填一个模型名再保存。', 'Could not list the models; enter a model name and save again.')}`)
+                setNeedsModel(true)
+                return
+            }
+            onOpenChange(false)
+            setBaseUrl('')
+            setApiKey('')
+            setModel('')
+            setNeedsModel(false)
+            await thread.channelChosen(added)
+        }
+        catch (e) {
+            setError(ipcMessage(e))
+        }
+        finally {
+            setBusy(false)
+        }
     }
     return (
-        <DropdownMenu>
-            <DropdownMenuTrigger className={pill} disabled={!thread.models.length}>
-                <Cpu size={13} />
-                <span className="max-w-[180px] truncate">{current?.name ?? (thread.agentStatus === 'starting' ? tr('加载中…', 'Loading…') : tr('选择模型', 'Choose model'))}</span>
-                <ChevronDown size={12} />
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" className="w-72 max-h-[420px]">
-                {[...groups.entries()].map(([provider, models]) => (
-                    <div key={provider}>
-                        <DropdownMenuLabel>{provider}</DropdownMenuLabel>
-                        {models.map(model => (
-                            <DropdownMenuItem key={`${provider}/${model.id}`} onSelect={() => void thread.setModel(model)}>
-                                <span className="flex-1 truncate">{model.name}</span>
-                                {model.contextWindow ? <span className="text-[11px] text-gray-400">{formatTokens(model.contextWindow)}</span> : null}
-                                {current?.provider === model.provider && current.id === model.id && <Check size={14} className="text-ide-accent" />}
-                            </DropdownMenuItem>
-                        ))}
+        <Dialog open={open} onOpenChange={onOpenChange}>
+            <DialogContent className="max-w-[440px] gap-3 p-5">
+                <DialogTitle className="text-[14px]">{tr(`添加 ${name} 渠道`, `Add a ${name} channel`)}</DialogTitle>
+                <DialogDescription className="text-[12px] text-[var(--jb-comment)]">
+                    {tr(`保存到「供应商」（同一个地址和 key 只存一份，其他 agent 也能用），并写进 ${name} 自己的配置：终端里的 ${agent} 也用它。`, `Saved to Providers (one entry per address and key, for every agent) and written into ${name}'s own config, so ${agent} in a terminal uses it too.`)}
+                </DialogDescription>
+                <form
+                    className="flex flex-col gap-2"
+                    onSubmit={(e) => {
+                        e.preventDefault()
+                        void save()
+                    }}
+                >
+                    <input className={field} value={baseUrl} spellCheck={false} autoFocus placeholder={agent === 'claude' ? 'https://api.example.com' : 'https://api.example.com/v1'} aria-label={tr('地址', 'Address')} onChange={e => setBaseUrl(e.target.value)} />
+                    <input className={field} type="password" autoComplete="off" value={apiKey} placeholder="sk-…" aria-label="API key" onChange={e => setApiKey(e.target.value)} />
+                    {needsModel && <input className={field} value={model} spellCheck={false} placeholder={agent === 'claude' ? 'claude-sonnet-4-5' : 'gpt-5'} aria-label={tr('模型', 'Model')} onChange={e => setModel(e.target.value)} />}
+                    {error && <div role="alert" className="whitespace-pre-wrap text-[12px] text-red-600 dark:text-red-400">{error}</div>}
+                    <div className="flex justify-end gap-2 pt-1">
+                        <Button type="button" variant="ghost" size="sm" onClick={() => onOpenChange(false)}>{tr('取消', 'Cancel')}</Button>
+                        <Button type="submit" variant="primary" size="sm" disabled={busy || !baseUrl.trim() || !apiKey.trim() || (needsModel && !model.trim())}>
+                            {busy && <Loader2 size={13} className="animate-spin" />}
+                            {tr('保存并使用', 'Save and use')}
+                        </Button>
                     </div>
-                ))}
-            </DropdownMenuContent>
-        </DropdownMenu>
+                </form>
+            </DialogContent>
+        </Dialog>
     )
 })
 
@@ -337,20 +524,21 @@ export const AgentPicker = observer(({ thread }: { thread: Thread }) => {
         // A thread of another agent keeps saying which one it is.
         return thread.agent === 'pi'
             ? null
-            : <span className={cn(pill, 'pointer-events-none')}><Bot size={13} /><span>{thread.agentLabel}</span></span>
+            : <span className={cn(pill, 'pointer-events-none')}><AgentIcon agent={thread.agent} /><span>{thread.agentLabel}</span></span>
     }
     const pending = installingFor.get(thread.key)
     const pendingLabel = pending && agentsStore.get(pending)?.label
     return (
         <DropdownMenu>
             <DropdownMenuTrigger className={pill} title={tr('这个线程用哪个 Agent', 'Which agent runs this thread')} aria-label={tr(`Agent：${thread.agentLabel}`, `Agent: ${thread.agentLabel}`)}>
-                {pendingLabel ? <Loader2 size={13} className="animate-spin" /> : <Bot size={13} />}
+                {pendingLabel ? <Loader2 size={13} className="animate-spin" /> : <AgentIcon agent={thread.agent} />}
                 <span>{pendingLabel ? tr(`正在安装 ${pendingLabel}…`, `Installing ${pendingLabel}…`) : thread.agentLabel}</span>
                 <ChevronDown size={12} />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" className="w-80">
                 <DropdownMenuLabel>{tr('Agent', 'Agent')}</DropdownMenuLabel>
                 <DropdownMenuItem onSelect={() => void pickAgent(thread, undefined, 'pi')} className="h-auto items-start py-1.5">
+                    <AgentIcon agent="pi" className="mt-0.5" />
                     <span className="min-w-0 flex-1">pi</span>
                     {thread.agent === 'pi' && <Check size={14} className="mt-0.5 text-ide-accent" />}
                 </DropdownMenuItem>
@@ -363,6 +551,7 @@ export const AgentPicker = observer(({ thread }: { thread: Thread }) => {
                             onSelect={() => void pickAgent(thread, agent, agent.id)}
                             className="h-auto items-start py-1.5"
                         >
+                            <AgentIcon agent={agent.id} className="mt-0.5" />
                             <span className="flex min-w-0 flex-1 flex-col">
                                 <span>{agent.label}</span>
                                 {agentHint(agent) && <span className="text-[11.5px] break-all text-gray-500">{agentHint(agent)}</span>}

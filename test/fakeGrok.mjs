@@ -13,6 +13,8 @@
 //   "slow"   streams a reply for a while; an interjection meanwhile is taken in before a second call
 //   "late"   ends at once, but lets an interjection that comes in its last call strand
 //   "fail"   fails the prompt request
+//   "bg"     starts a background task and ends; when it finishes, Grok wakes on its own in a
+//            `task-completed-…` turn, which ends with turn_completed and no prompt_complete
 //   other    answers "echo: <prompt>"
 import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
@@ -203,6 +205,24 @@ async function prompt(session, params) {
             update(session, say(`heard: ${heard.join(' / ')}`))
             endCall(session)
         }
+        return endTurn(session)
+    }
+    if (text === 'bg') {
+        update(session, say('started'))
+        endCall(session)
+        const taskId = randomUUID()
+        setTimeout(() => {
+            // As recorded from Grok Build 1.0.46: queue/changed names the wake turn, its reply ends in
+            // turn_completed, and neither prompt_complete nor an empty queue/changed follows.
+            session.promptId = `task-completed-${taskId}`
+            session.calls = 0
+            queueChanged(session, { id: session.promptId, text: `<system-reminder>\nBackground task "${taskId}" completed (exit code: 0).\n</system-reminder>` })
+            write({ jsonrpc: '2.0', method: '_x.ai/task_completed', params: { sessionId: session.id, update: { sessionUpdate: 'task_completed', task_snapshot: { task_id: taskId } } } })
+            modelCall(session)
+            update(session, say('the task finished'))
+            endCall(session)
+            xai(session, { sessionUpdate: 'turn_completed', prompt_id: session.promptId, stop_reason: 'end_turn', usage: turnUsage(session.calls), elapsed_ms: 10 })
+        }, 100)
         return endTurn(session)
     }
     if (text === 'late') {

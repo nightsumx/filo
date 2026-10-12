@@ -10,10 +10,10 @@ export interface AcpAgentSpec {
     id: AcpAgentId
     label: string
     /**
-     * Protocol to use: 'acp' (default), 'codex-app-server', or 'claude-stream'. Native protocols
-     * bypass the ACP adapter for richer features.
+     * Protocol to use: 'acp' (default), 'codex-app-server', or 'claude-tui' (the CLI's own TUI, see
+     * electron/native/claudeTui.ts). Native protocols bypass the ACP adapter.
      */
-    protocol?: 'acp' | 'codex-app-server' | 'claude-stream'
+    protocol?: 'acp' | 'codex-app-server' | 'claude-tui'
     /** The ACP command on the login shell's PATH (or in `dirs`), with its arguments. */
     bin: string
     args?: string[]
@@ -28,7 +28,7 @@ export interface AcpAgentSpec {
      * like Codex and Claude Code need an ACP adapter on top of it; `dirs` are extra folders to look in.
      */
     cli?: { bin: string, env: string, dirs?: string[] }
-    /** An API key the agent takes from pi's auth.json (Model providers) when the environment has none. */
+    /** An API key the agent takes from pi's auth.json (Providers) when the environment has none. */
     apiKey?: { provider: string, env: string }
     /** What to do when the agent says it is not signed in. */
     signIn: { zh: string, en: string }
@@ -37,6 +37,11 @@ export interface AcpAgentSpec {
      * Undefined: decide from totalTokens.
      */
     inputIncludesCache?: boolean
+    /**
+     * session/load answers before the history is all sent (Gemini CLI 0.63 does not await its
+     * streamHistory): the load waits for the updates to go quiet before the session counts as open.
+     */
+    lateHistory?: boolean
 }
 
 export interface AgentArchive {
@@ -53,27 +58,27 @@ export const ACP_AGENTS: readonly AcpAgentSpec[] = [
         protocol: 'codex-app-server',
         bin: 'codex',
         args: ['app-server'],
+        // Where Codex's own installer (chatgpt.com/codex/install.sh) puts it.
+        dirs: ['~/.local/bin'],
         // The CLI itself speaks app-server; the version the adapter was checked against.
         npm: '@openai/codex@0.160.1',
-        cli: { bin: 'codex', env: 'CODEX_PATH' },
+        cli: { bin: 'codex', env: 'CODEX_PATH', dirs: ['~/.local/bin'] },
         inputIncludesCache: true,
         signIn: { zh: '在终端里运行 codex 完成登录', en: 'run codex in a terminal and sign in' },
     },
     {
         id: 'claude',
         label: 'Claude Code',
-        // Anthropic does not allow claude.ai sign-in in third-party apps: the adapter's
-        // --hide-claude-auth refuses turns a subscription would pay for, so an API key is needed.
-        bin: 'claude-agent-acp',
-        args: ['--hide-claude-auth'],
-        npm: '@agentclientprotocol/claude-agent-acp@0.86.0',
-        // The adapter runs this CLI instead of the one bundled with its SDK.
-        cli: { bin: 'claude', env: 'CLAUDE_CODE_EXECUTABLE', dirs: ['~/.local/bin', '~/.claude/local'] },
-        apiKey: { provider: 'anthropic', env: 'ANTHROPIC_API_KEY' },
+        // The user's own interactive `claude`, unmodified, in a terminal the thread holds
+        // (electron/native/claudeTui.ts): it signs in and bills as it does in their terminal.
+        protocol: 'claude-tui',
+        bin: 'claude',
+        // Where Claude Code's installer and its migrated local install put it.
+        dirs: ['~/.local/bin', '~/.claude/local'],
         inputIncludesCache: false,
         signIn: {
-            zh: '在 设置 → 模型供应商 里填 Anthropic 的 API key（Anthropic 不允许第三方应用使用 Claude 订阅）',
-            en: 'enter an Anthropic API key in Settings → Model providers (Anthropic does not allow Claude subscriptions in third-party apps)',
+            zh: '在这个对话的终端里运行 /login 登录',
+            en: 'run /login in this thread\'s terminal',
         },
     },
     {
@@ -106,7 +111,8 @@ export const ACP_AGENTS: readonly AcpAgentSpec[] = [
         npm: '@google/gemini-cli@0.63.0',
         apiKey: { provider: 'google', env: 'GEMINI_API_KEY' },
         inputIncludesCache: true,
-        signIn: { zh: '在终端里运行 gemini 登录，或在 设置 → 模型供应商 里填 Google 的 API key', en: 'run gemini in a terminal and sign in, or enter a Google API key in Settings → Model providers' },
+        lateHistory: true,
+        signIn: { zh: '在终端里运行 gemini 登录，或在 设置 → 供应商 里填 Google 的 API key', en: 'run gemini in a terminal and sign in, or enter a Google API key in Settings → Providers' },
     },
     {
         id: 'copilot',

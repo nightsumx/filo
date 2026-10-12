@@ -1,6 +1,8 @@
 import type { AcpConfigOption, AgentFeatures, AgentKind } from '@shared/agents'
 import type { ApprovalChoice, ApprovalMode, ApprovalRequest, AskResponse, AutopilotAnswer, AutopilotCard, AutopilotStatus, CapabilityId, GuiCommands, PlanDecision, ReviewApply, ReviewProgress, TodoDetails } from '@shared/capabilities'
 import type { AgentExitInfo } from '@shared/ipc'
+import type { AgentChannel, RouteGroup, RoutedAgent, ThreadRoute, ThreadRouteInfo } from '@shared/routes'
+import { isRoutedAgent, ROUTES_PROVIDER, TERMINAL_AGENTS } from '@shared/routes'
 import type { Presence } from '@shared/capabilities'
 import type {
     AgentMessage,
@@ -19,6 +21,7 @@ import type { ThreadActivity } from '@/lib/threadActivity'
 import type { BlockTime, Step, TimelineMessage, ToolExecState, ToolResultView } from '@/lib/timeline'
 import { newThreadLabel, tr } from '@/lib/i18n'
 import { parsePartialJson } from '@/lib/partialJson'
+import { modelKey, startModel } from '@/lib/startModel'
 import { childToolCallIds, subagentsIn } from '@/lib/subagents'
 import { threadActivity } from '@/lib/threadActivity'
 import { blockTimeKey, buildTurns, contentImages, contentText, pendingCards } from '@/lib/timeline'
@@ -27,7 +30,8 @@ import { tuiTitle } from '@/lib/toolMeta'
 import { agentFeatures, agentLabel, agentOfKey } from '@shared/agents'
 import { APPROVAL_MODES, APPROVAL_TITLE_PREFIX, GUI_COMMAND_PREFIX, GUI_STATUS } from '@shared/capabilities'
 import { isShownEntry } from '@shared/entries'
-import { readableError, uid } from '@/lib/utils'
+import { CACHE_WARM, cacheTtlMs } from 'pi-capabilities/lib/promptCache.ts'
+import { ipcMessage, readableError, uid } from '@/lib/utils'
 import { makeAutoObservable, observable, runInAction, toJS } from 'mobx'
 import { toast } from 'sonner'
 
@@ -73,6 +77,15 @@ export interface ThreadHost {
     setApprovalMode: (mode: ApprovalMode) => void
     /** Bumps when pi's own settings.json changes from the app; pi reads it only at startup. */
     piSettingsEpoch: number
+    /** Per agent, what routing starts its processes with (RoutesState.launchKeys). */
+    readonly routeLaunchKeys: Partial<Record<string, string>>
+    /** The groups an agent can pick (pickableGroups); undefined until routing and the provider models are known. */
+    routeGroups: (agent: RoutedAgent) => RouteGroup[] | undefined
+    /** Per agent, the model (modelKey) last chosen in any thread: fresh threads start on it. */
+    readonly lastModels: Partial<Record<AgentKind, string>>
+    rememberModel: (agent: AgentKind, key: string) => void
+    /** The budget capability's limit per prompt, in US dollars. */
+    readonly budget: number
 }
 
 function toolView(result: any): ToolResultView | undefined {
@@ -106,6 +119,8 @@ export class Thread {
     blockTimes = observable.map<string, BlockTime>()
     pendingPrompt: { text: string, images: ImageContent[], timestamp: number } | null = null
     loaded = false
+    /** A chat its agent continues only in a terminal (Cursor's own CLI chats): the command that does. */
+    terminalOnly: string | undefined = undefined
     /** True once the session exists on disk (opened from the list, or after a completed run). */
     persisted: boolean
 
@@ -126,7 +141,24 @@ export class Thread {
     stats: SessionStats | null = null
     /** ACP agents' session settings (mode, model, effort, …) as they declare them. */
     configOptions: AcpConfigOption[] = []
+    /**
+     * The thread's routing, chosen in its model picker: for agents other than pi the group its
+     * process starts on, and a pinned member. pi's group is its model (filo/<group>).
+     */
+    route: ThreadRoute = {}
+    /** `route` is settled for this agent: chosen, or read back for the session it resumes. */
+    private routeKnown = false
+    /** Its process's routing, when it runs through the gateway. */
+    routeInfo: ThreadRouteInfo | null = null
+    /** Claude Code / Codex: what their own config points at, read at start and when the model menu opens. */
+    channel: AgentChannel | null = null
+    /** Bumps when a channel is picked in this thread: only this one restarts onto it. */
+    private channelEpoch = 0
+    /** The model picked in this thread (modelKey), put back when its process restarts before pi saved the session. */
+    private chosenModel: string | undefined = undefined
     queue: { steering: string[], followUp: string[] } = { steering: [], followUp: [] }
+    /** Images sent with queued messages, by text: the queue pi reports carries text only. */
+    private queuedImages = new Map<string, ImageContent[]>()
 
     uiRequests: UiRequest[] = []
     statuses: Record<string, string> = {}
@@ -136,12 +168,23 @@ export class Thread {
     images: ImageContent[] = []
     /** Tool call id of the subagent shown in place of the transcript (opened from the tree or its card). */
     subagentView: string | null = null
+    /**
+     * The agent's own TUI shown in place of the transcript and composer (Claude Code), by the user's
+     * choice or because the agent asks something only the TUI shows (`tui_view`).
+     */
+    tuiShown = false
+    /** Why the agent showed its TUI ('starting', 'dialog', …); a user's toggle clears it. */
+    tuiReason = ''
     unread = false
     /** Bumps whenever files may have changed (tool writes, run end) so the review pane refetches. */
     changeTick = 0
     lastUsed = Date.now()
     /** Last pi event; not observable (it changes per token). Read on a timer to spot stalled runs. */
     lastEventAt = 0
+    /** checkStall told about the current quiet stretch. */
+    private stallNoticed = false
+    /** What this prompt had cost at the last budget notice (checkSpend). */
+    private spendNoticed = 0
 
     private liveCounter = 0
     private partialArgs = new Map<number, string>()
@@ -168,8 +211,10 @@ export class Thread {
         this.name = init.name
         this.firstPrompt = init.firstPrompt
         this.persisted = !!init.sessionPath
-        makeAutoObservable<this, 'liveCounter' | 'partialArgs' | 'startPromise' | 'stopping' | 'loadedConfig' | 'restartPending' | 'settling' | 'unfollow' | 'agentStale' | 'entryReload' | 'host'>(this, {
+        makeAutoObservable<this, 'liveCounter' | 'partialArgs' | 'startPromise' | 'stopping' | 'loadedConfig' | 'restartPending' | 'settling' | 'unfollow' | 'agentStale' | 'entryReload' | 'host' | 'chosenModel' | 'routeKnown' | 'stallNoticed' | 'spendNoticed'>(this, {
             id: false,
+            stallNoticed: false,
+            spendNoticed: false,
             lastEventAt: false,
             liveCounter: false,
             partialArgs: false,
@@ -182,6 +227,8 @@ export class Thread {
             agentStale: false,
             entryReload: false,
             host: false,
+            chosenModel: false,
+            routeKnown: false,
         }, { autoBind: true })
     }
 
@@ -210,6 +257,7 @@ export class Thread {
             blockTimes: this.blockTimes,
             pendingPrompt: this.pendingPrompt,
             loaded: this.loaded,
+            terminalOnly: this.terminalOnly,
             persisted: this.persisted,
             agentId: this.agentId,
             agentStatus: this.agentStatus,
@@ -225,6 +273,9 @@ export class Thread {
             guiCommands: this.guiCommands,
             stats: this.stats,
             configOptions: this.configOptions,
+            route: this.route,
+            routeKnown: this.routeKnown,
+            routeInfo: this.routeInfo,
             queue: this.queue,
             uiRequests: this.uiRequests,
             statuses: this.statuses,
@@ -289,6 +340,16 @@ export class Thread {
         return this.agentStatus === 'ready' ? this.state?.terminalPid : undefined
     }
 
+    /** The terminal the agent's TUI runs in, while the process lives. */
+    get tuiTerminal(): string | undefined {
+        return this.agentId ? this.state?.tuiTerminal : undefined
+    }
+
+    showTui(shown: boolean) {
+        this.tuiShown = shown
+        this.tuiReason = ''
+    }
+
     /**
      * What the terminal pi on this session is doing changed (pi-cc-tui's presence). With a bridge,
      * an idle own pi gives way to joining it; without one the thread follows the file it writes.
@@ -343,6 +404,11 @@ export class Thread {
         }
         runInAction(() => {
             this.agent = agent
+            this.chosenModel = undefined
+            this.route = {}
+            this.routeKnown = false
+            this.routeInfo = null
+            this.channel = null
             this.state = null
             this.models = []
             this.thinkingLevels = []
@@ -369,7 +435,12 @@ export class Thread {
             blockTimes: this.blockTimes,
             pendingPrompt: this.pendingPrompt,
             running: this.running,
+            cacheTtlMs: this.cacheTtl,
         })
+    }
+
+    get cacheTtl() {
+        return cacheTtlMs(this.state?.model)
     }
 
     /** Steps of the assistant message still streaming; rendered under the last turn. */
@@ -575,6 +646,7 @@ export class Thread {
             this.live.splice(0, consumed)
             if (snapshot.name)
                 this.name = snapshot.name
+            this.terminalOnly = snapshot.terminalOnly
             this.loaded = true
         })
     }
@@ -582,6 +654,8 @@ export class Thread {
     // ---------------------------------------------------------------- process
 
     ensureAgent(): Promise<string> {
+        if (this.terminalOnly)
+            return Promise.reject(new Error(tr(`${this.agentLabel} 只能在终端里接着这个对话`, `${this.agentLabel} continues this chat only in a terminal`)))
         if (this.agentId && this.agentStatus === 'ready')
             return Promise.resolve(this.agentId)
         this.startPromise ??= this.startAgent().catch((error) => {
@@ -603,9 +677,10 @@ export class Thread {
         // A path pi never wrote (thread left empty) cannot be resumed; start fresh instead.
         const resumable = this.persisted ? this.sessionPath : undefined
         const capabilities = this.host.enabledCapabilities
+        await this.settleRoute(resumable)
         this.loadedConfig = this.configKey()
         this.restartPending = false
-        const agentId = await api().agentStart({ cwd: this.cwd, agent: this.agent, sessionPath: resumable, capabilities, approvalMode: this.host.approvalMode })
+        const agentId = await api().agentStart({ cwd: this.cwd, agent: this.agent, sessionPath: resumable, capabilities, approvalMode: this.host.approvalMode, route: toJS(this.route) })
         runInAction(() => {
             this.agentId = agentId
             this.stopping = false
@@ -616,7 +691,12 @@ export class Thread {
             this.refreshModels(),
             this.refreshCommands(),
             this.refreshStats(),
+            this.refreshRoute(),
+            this.refreshChannel(),
         ])
+        if (!this.persisted)
+            await this.pickStartModel()
+        await this.alignRouteModel()
         runInAction(() => {
             this.agentStatus = 'ready'
             this.agentStale = false
@@ -637,9 +717,10 @@ export class Thread {
 
     private configKey(): string {
         // Capabilities and pi's settings mean nothing to other agents: never restart those for them.
+        const route = this.host.routeLaunchKeys[this.agent] ?? ''
         if (this.agent !== 'pi')
-            return this.agent
-        return `${this.host.enabledCapabilities.join(',')}#${this.host.piSettingsEpoch}`
+            return `${this.agent}#${route}#${this.route.group ?? ''}#${this.channelEpoch}`
+        return `${this.host.enabledCapabilities.join(',')}#${this.host.piSettingsEpoch}#${route}`
     }
 
     /**
@@ -738,6 +819,19 @@ export class Thread {
         })
     }
 
+    /** A fresh thread's model (startModel): its own pick, else its agent's last, else Opus 5.5. */
+    private async pickStartModel() {
+        // On a group, the agent's own model is not what answers; on an endpoint of its config, its config names the model.
+        if (this.agent !== 'pi' && (this.route.group || this.channel?.current || this.channel?.other))
+            return
+        const model = startModel(this.models, this.state?.model, this.chosenModel ?? this.host.lastModels[this.agent])
+        if (!model || !this.agentId)
+            return
+        const response = await api().agentRequest(this.agentId, { type: 'set_model', provider: model.provider, modelId: model.id }).catch(() => undefined)
+        if (response?.success)
+            await Promise.all([this.syncState(), this.refreshStats()])
+    }
+
     async refreshCommands() {
         const data = await this.call<{ commands: SlashCommand[] }>({ type: 'get_commands' })
         if (data) {
@@ -767,10 +861,16 @@ export class Thread {
         if (this.running) {
             // Codex-style: typing during a run steers the agent after its current tool calls.
             try {
+                if (images.length)
+                    this.queuedImages.set(text, images)
                 await this.request({ type: 'prompt', message: text, images, streamingBehavior: 'steer' })
             }
             catch (error: any) {
-                runInAction(() => (this.draft = text))
+                runInAction(() => {
+                    this.queuedImages.delete(text)
+                    this.draft = text
+                    this.images = images
+                })
                 toast.error(error.message)
             }
             return
@@ -810,10 +910,8 @@ export class Thread {
         if (!this.agentId)
             return
         try {
-            const queued = await this.request<{ steering: string[], followUp: string[] }>({ type: 'clear_queue' })
-            const restored = [...(queued.data?.steering ?? []), ...(queued.data?.followUp ?? [])]
-            if (restored.length)
-                runInAction(() => (this.draft = [...restored, this.draft].filter(Boolean).join('\n')))
+            const queued = await this.takeQueue()
+            runInAction(() => this.restore([...queued.steering, ...queued.followUp], queued.images))
             await this.request({ type: 'abort' })
         }
         catch (error: any) {
@@ -821,9 +919,248 @@ export class Thread {
         }
     }
 
+    /** Queued messages that can be taken back: all of pi's, and every agent's follow-ups (Grok's interjections are sent already). */
+    unqueueable(kind: 'steering' | 'followUp'): boolean {
+        return kind === 'followUp' || this.agent === 'pi'
+    }
+
+    /** Alt+Up, as in the terminal's pi: every queued message back into the editor; the run goes on. */
+    async dequeueAll() {
+        try {
+            const queued = await this.takeQueue()
+            runInAction(() => this.restore([...queued.steering, ...queued.followUp], queued.images))
+        }
+        catch (error: any) {
+            toast.error(error.message)
+        }
+    }
+
+    /**
+     * One queued message back into the editor. pi takes back only the whole queue (clear_queue), so
+     * the others go in again right after, in order and as what they were (steer or follow-up).
+     */
+    async dequeue(kind: 'steering' | 'followUp', text: string) {
+        let queued: Awaited<ReturnType<Thread['takeQueue']>>
+        try {
+            queued = await this.takeQueue()
+        }
+        catch (error: any) {
+            toast.error(error.message)
+            return
+        }
+        const list = queued[kind]
+        const at = list.indexOf(text)
+        if (at >= 0)
+            list.splice(at, 1)
+        const back = at >= 0 ? [text] : []
+        const requeue = [
+            ...queued.steering.map(message => ({ message, streamingBehavior: 'steer' })),
+            ...queued.followUp.map(message => ({ message, streamingBehavior: 'followUp' })),
+        ]
+        for (const [i, { message, streamingBehavior }] of requeue.entries()) {
+            const images = queued.images.get(message) ?? []
+            if (images.length)
+                runInAction(() => this.queuedImages.set(message, images))
+            try {
+                await this.request({ type: 'prompt', message, images, streamingBehavior })
+            }
+            catch (error: any) {
+                // What did not go in again is not lost: it joins the editor too.
+                back.push(...requeue.slice(i).map(r => r.message))
+                toast.error(error.message)
+                break
+            }
+        }
+        runInAction(() => this.restore(back, queued.images))
+        if (at < 0)
+            toast.info(tr('这条已经送出了，撤不回来', 'That message went out already'))
+    }
+
+    /** Empties the agent's queue; the images come along, as its queue_update forgets them. */
+    private async takeQueue() {
+        const images = new Map(this.queuedImages)
+        const response = await this.request<{ steering: string[], followUp: string[] }>({ type: 'clear_queue' })
+        return { steering: response.data?.steering ?? [], followUp: response.data?.followUp ?? [], images }
+    }
+
+    /** Taken-back messages go in front of what is being typed, with their images. */
+    private restore(texts: string[], images: Map<string, ImageContent[]>) {
+        if (!texts.length)
+            return
+        this.draft = [...texts, this.draft].filter(Boolean).join('\n')
+        this.images = [...texts.flatMap(t => images.get(t) ?? []), ...this.images]
+        for (const t of texts)
+            this.queuedImages.delete(t)
+    }
+
+    // ---------------------------------------------------------------- routing
+
+    /** Groups this thread's agent can pick as models (their API, with members). */
+    get routeGroups(): RouteGroup[] {
+        return isRoutedAgent(this.agent) ? this.host.routeGroups(this.agent) ?? [] : []
+    }
+
+    /** The group the thread is on: pi's model when that is a group, the others' process group. */
+    get routeGroup(): RouteGroup | undefined {
+        const model = this.state?.model
+        const id = this.agent === 'pi' ? (model?.provider === ROUTES_PROVIDER ? model.id : undefined) : this.route.group
+        return id ? this.routeGroups.find(g => g.id === id) : undefined
+    }
+
+    /**
+     * Before a start: a fresh thread of an agent other than pi takes the group last picked for the
+     * agent (as it takes the last model); a resumed session the group it was last on.
+     */
+    private async settleRoute(resumable: string | undefined) {
+        if (this.agent === 'pi' || this.routeKnown)
+            return
+        let group: string | undefined
+        if (resumable) {
+            group = await api().sessionRoute(resumable).catch(() => undefined)
+        }
+        else {
+            const remembered = this.chosenModel ?? this.host.lastModels[this.agent]
+            if (remembered?.startsWith(`${ROUTES_PROVIDER}/`))
+                group = remembered.slice(ROUTES_PROVIDER.length + 1)
+        }
+        runInAction(() => {
+            this.routeKnown = true
+            // Before routing loaded, the main process checks the group itself.
+            const known = isRoutedAgent(this.agent) ? this.host.routeGroups(this.agent) : undefined
+            if (group && (!known || known.some(g => g.id === group)))
+                this.route = { group }
+        })
+    }
+
+    /** Grok on a group also selects the group's model, as a session it resumes may name its own. */
+    private async alignRouteModel() {
+        const group = this.agent === 'grok' ? this.route.group : undefined
+        const id = group && `${ROUTES_PROVIDER}-${group}`
+        if (!id || !this.agentId || this.state?.model?.id === id || !this.models.some(m => m.id === id))
+            return
+        const response = await api().agentRequest(this.agentId, { type: 'set_model', provider: this.models.find(m => m.id === id)!.provider, modelId: id }).catch(() => undefined)
+        if (response?.success)
+            await this.syncState()
+    }
+
+    /** Reads the process's routing again (after a request, it names the member that answered). */
+    async refreshRoute() {
+        const agentId = this.agentId
+        const info = agentId ? await api().threadRoute(agentId).catch(() => undefined) : undefined
+        runInAction(() => {
+            if (this.agentId === agentId)
+                this.routeInfo = info ?? null
+        })
+        // A new session got its key: it resumes on the same group.
+        if (this.agent !== 'pi' && this.persisted && this.sessionPath)
+            void api().setSessionRoute(this.sessionPath, this.route.group).catch(() => {})
+    }
+
+    /** Pins a member of the thread's group (or with none, back to the group's order); the next request uses it. */
+    async setRoute(route: ThreadRoute) {
+        this.route = { ...this.route, pin: route.pin }
+        if (!route.pin)
+            delete this.route.pin
+        if (!this.agentId)
+            return
+        const info = await api().setThreadRoute(this.agentId, { pin: route.pin }).catch(() => undefined)
+        runInAction(() => (this.routeInfo = info ?? null))
+    }
+
+    /** Puts the thread on a group, as picking a model does. Other agents than pi restart onto it, resuming the session. */
+    async chooseGroup(id: string) {
+        if (!this.routeGroups.some(g => g.id === id))
+            return
+        if (this.agent === 'pi') {
+            const model = this.models.find(m => m.provider === ROUTES_PROVIDER && m.id === id)
+            if (!model) {
+                toast.error(tr('这个线程的 pi 还没有加载这个组，稍后再试', 'This thread\'s pi has not loaded the group yet; try again in a moment'))
+                return
+            }
+            if (this.route.pin)
+                await this.setRoute({})
+            await this.setModel(model)
+            return
+        }
+        if (this.route.group === id)
+            return
+        const key = `${ROUTES_PROVIDER}/${id}`
+        runInAction(() => {
+            this.route = { group: id }
+            this.routeKnown = true
+            this.chosenModel = key
+        })
+        this.host.rememberModel(this.agent, key)
+        await this.restartForRoute()
+    }
+
+    async refreshChannel() {
+        const agent = TERMINAL_AGENTS.find(a => a === this.agent)
+        const channel = agent ? await api().agentChannel(agent).catch(() => null) : null
+        runInAction(() => (this.channel = channel))
+    }
+
+    /** Writes a provider model (or with null, what was there before) into the agent's own config, then follows it. */
+    async useChannel(pick: { provider: string, model: string } | null) {
+        const agent = TERMINAL_AGENTS.find(a => a === this.agent)
+        if (!agent)
+            return
+        try {
+            await this.channelChosen(await api().useChannel(agent, pick))
+        }
+        catch (error) {
+            toast.error(ipcMessage(error))
+        }
+    }
+
+    /**
+     * The agent's own config now points at `channel` (the main process wrote it): this thread restarts
+     * onto it, off any group, resuming the session. Other threads keep what they started with.
+     */
+    async channelChosen(channel: AgentChannel) {
+        runInAction(() => {
+            this.channel = channel
+            this.route = {}
+            this.routeKnown = true
+            this.chosenModel = undefined
+            this.channelEpoch++
+        })
+        if (this.host.lastModels[this.agent]?.startsWith(`${ROUTES_PROVIDER}/`))
+            this.host.rememberModel(this.agent, '')
+        await this.restartForRoute()
+    }
+
+    /** The process follows the thread's group: remembered for the session, then a restart that resumes it. */
+    private async restartForRoute() {
+        if (this.persisted && this.sessionPath)
+            await api().setSessionRoute(this.sessionPath, this.route.group).catch(() => {})
+        await this.applyConfig()
+    }
+
+    /** Routing settings changed: a group this thread was on may be gone; pi's list of groups restarts it. */
+    async routesChanged() {
+        const known = isRoutedAgent(this.agent) ? this.host.routeGroups(this.agent) : undefined
+        if (this.agent !== 'pi' && this.route.group && known && !known.some(g => g.id === this.route.group)) {
+            runInAction(() => (this.route = {}))
+            if (this.persisted && this.sessionPath)
+                void api().setSessionRoute(this.sessionPath, undefined).catch(() => {})
+        }
+        await this.applyConfig()
+    }
+
     async setModel(model: PiModel) {
         try {
+            // One of the agent's own models: off the group first (a restart onto its own vendor).
+            if (this.agent !== 'pi' && this.route.group) {
+                runInAction(() => {
+                    this.route = {}
+                    this.routeKnown = true
+                })
+                await this.restartForRoute()
+            }
             await this.request({ type: 'set_model', provider: model.provider, modelId: model.id })
+            this.chosenModel = modelKey(model)
+            this.host.rememberModel(this.agent, this.chosenModel)
             await Promise.all([this.syncState(), this.refreshModels(), this.refreshStats()])
         }
         catch (error: any) {
@@ -1107,12 +1444,55 @@ export class Thread {
 
     // ---------------------------------------------------------------- events
 
+    /**
+     * The budget capability for agents pi does not run (Claude Code, Codex, …), which Filo cannot hold
+     * before a request: a notice each time a prompt has cost another limit, with a way to stop.
+     */
+    private checkSpend() {
+        if (!this.host.enabledCapabilities.includes('budget'))
+            return
+        const messages = [...this.items, ...this.live].map(i => i.message)
+        let spent = 0
+        for (let i = messages.length - 1; i >= 0; i--) {
+            const m = messages[i]
+            if (m.role === 'user')
+                break
+            if (m.role === 'assistant')
+                spent += m.usage?.cost?.total ?? 0
+        }
+        const limit = this.host.budget
+        if (spent < this.spendNoticed + limit)
+            return
+        this.spendNoticed = spent
+        toast.warning(tr(`「${this.title}」这次提问已经花了 $${spent.toFixed(2)}，超过了上限 $${limit}`, `"${this.title}" has cost $${spent.toFixed(2)} on this prompt, past the $${limit} limit`), {
+            description: tr(`${agentLabel(this.agent)} 不会因此停下，再花 $${limit} 时再提醒。`, `${agentLabel(this.agent)} keeps going; another notice comes $${limit} later.`),
+            action: { label: tr('停止', 'Stop'), onClick: () => void this.abort() },
+        })
+    }
+
+    /**
+     * For agents pi does not run: a run quiet for longer than its prompt cache lives gets one notice,
+     * since the next request reads the whole context at full price. pi's subagents have their own
+     * (capabilities/extensions/subagent.ts).
+     */
+    checkStall(now: number) {
+        if (this.agent === 'pi' || !this.running || this.stallNoticed || this.waitingForUser || this.tuiShown || !this.lastEventAt || now - this.lastEventAt < this.cacheTtl)
+            return
+        this.stallNoticed = true
+        const minutes = Math.round((now - this.lastEventAt) / 60_000)
+        toast.warning(tr(`「${this.title}」已经 ${minutes} 分钟没有动静`, `"${this.title}" has been quiet for ${minutes} minutes`), {
+            description: tr('提示缓存已经过期，下一次请求会全价重读整个上下文。', 'Its prompt cache has expired: the next request reads the whole context at full price.'),
+            action: { label: tr('停止', 'Stop'), onClick: () => void this.abort() },
+        })
+    }
+
     private pushLive(message: AgentMessage) {
         this.live.push({ key: `live-${this.liveCounter++}`, message, endedAt: Date.now() })
     }
 
     handleEvent(event: PiEvent) {
         this.lastEventAt = Date.now()
+        this.stallNoticed = false
         switch (event.type) {
             case 'agent_start':
                 if (!this.running) {
@@ -1135,9 +1515,13 @@ export class Thread {
                 const message = event.message as AgentMessage
                 if (message.role === 'assistant')
                     this.streaming = null
-                if (message.role === 'user')
+                if (message.role === 'user') {
                     this.pendingPrompt = null
+                    this.spendNoticed = 0
+                }
                 this.pushLive(message)
+                if (message.role === 'assistant' && this.agent !== 'pi')
+                    this.checkSpend()
                 break
             }
             case 'tool_execution_start':
@@ -1155,6 +1539,11 @@ export class Thread {
                 break
             case 'queue_update':
                 this.queue = { steering: event.steering ?? [], followUp: event.followUp ?? [] }
+                // Delivered ones need their images no more.
+                for (const text of [...this.queuedImages.keys()]) {
+                    if (!this.queue.steering.includes(text) && !this.queue.followUp.includes(text))
+                        this.queuedImages.delete(text)
+                }
                 break
             case 'compaction_start':
                 this.compacting = true
@@ -1183,9 +1572,11 @@ export class Thread {
                 this.handleUiRequest(event)
                 break
             // A review report or an autopilot entry: appended while the agent may be idle, when no
-            // settle reloads the session.
+            // settle reloads the session. pi warming the cache only moves its age on.
             case 'entry_appended':
-                if (isShownEntry(event.entry)) {
+                if (event.entry?.type === 'usage' && event.entry.kind === CACHE_WARM)
+                    this.pushLive({ role: 'custom', customType: CACHE_WARM, content: '', display: false, details: event.entry, timestamp: Date.now() })
+                else if (isShownEntry(event.entry)) {
                     this.pushLive({ role: 'custom', customType: event.entry.customType, content: '', display: true, details: event.entry.data, timestamp: Date.now() })
                     this.entryReload ??= setTimeout(() => {
                         this.entryReload = null
@@ -1209,6 +1600,19 @@ export class Thread {
                 break
             case 'extension_ui_cancel':
                 this.uiRequests = this.uiRequests.filter(r => r.id !== event.id)
+                break
+            // The agent's TUI asks something the transcript cannot show (or got past it).
+            case 'tui_view':
+                if (event.show) {
+                    if (!this.tuiShown)
+                        this.tuiReason = String(event.reason ?? '')
+                    this.tuiShown = true
+                    void this.syncState()
+                }
+                else if (this.tuiShown && this.tuiReason && this.tuiReason === event.reason) {
+                    this.tuiShown = false
+                    this.tuiReason = ''
+                }
                 break
             case 'extension_error':
                 toast.error(`${tr('扩展出错：', 'Extension error: ')}${event.error}`, { description: event.extensionPath })
@@ -1348,7 +1752,7 @@ export class Thread {
             // Approvals belong to tool calls, and none run once settled (a subagent's child included).
             this.uiRequests = this.uiRequests.filter(r => !r.approval)
         })
-        await this.refreshStats()
+        await Promise.all([this.refreshStats(), this.refreshRoute()])
         this.host.onSettled(this)
         if (this.restartPending)
             await this.applyConfig()
@@ -1361,6 +1765,7 @@ export class Thread {
         }
         const unexpected = !this.stopping
         this.agentId = null
+        this.routeInfo = null
         this.agentStatus = unexpected ? 'exited' : 'none'
         this.startPromise = null
         this.running = false

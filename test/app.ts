@@ -3,12 +3,17 @@
 import { spawn } from 'node:child_process'
 import { realpathSync } from 'node:fs'
 import { createRequire } from 'node:module'
+import net from 'node:net'
 import os from 'node:os'
 import path from 'node:path'
 import process from 'node:process'
 
 const ROOT = path.resolve(import.meta.dirname, '..')
-export const PORT = 9336
+/**
+ * The app's remote-debugging port, a free one picked by launch() (PI_E2E_PORT to choose it), so
+ * runs from different sessions on one machine never attach to each other's app.
+ */
+export let PORT = Number(process.env.PI_E2E_PORT) || 9336
 /** CDP modifier bits are 1 Alt, 2 Ctrl, 4 Meta, 8 Shift; the app's ⌘ is Ctrl off macOS (src/platform.ts). */
 export const COMMAND = process.platform === 'darwin' ? 4 : 2
 
@@ -123,13 +128,17 @@ export function check(ok: boolean, message: string) {
 /** Off-screen and never focused (electron/background.ts), so a run doesn't take over the computer; PI_E2E_SHOW=1 to watch it. */
 export const BACKGROUND_ENV: Record<string, string> = process.env.PI_E2E_SHOW === '1' ? {} : { PI_GUI_BACKGROUND: '1' }
 
+/** The app skips its setup assistant unless a run passes PI_GUI_SKIP_SETUP: '' (test/setup-e2e.ts). */
+export const TEST_ENV: Record<string, string> = { PI_GUI_SKIP_SETUP: '1' }
+
 /** Starts the built app; PI_E2E_APP runs a packaged one instead (…/Filo.app/Contents/MacOS/Filo). */
 export async function launch(env: Record<string, string>) {
     // The electron package's main export is the binary path; the .bin shim would outlive kill().
     const packaged = process.env.PI_E2E_APP
+    PORT = Number(process.env.PI_E2E_PORT) || await freePort()
     const electron = packaged || createRequire(import.meta.url)('electron') as string
     const args = packaged ? [`--remote-debugging-port=${PORT}`] : ['.', `--remote-debugging-port=${PORT}`]
-    const app = spawn(electron, args, { cwd: ROOT, env: { ...process.env, ...BACKGROUND_ENV, ...env }, stdio: 'ignore' })
+    const app = spawn(electron, args, { cwd: ROOT, env: { ...process.env, ...BACKGROUND_ENV, ...TEST_ENV, ...env }, stdio: 'ignore' })
     return async () => {
         const exited = new Promise(resolve => app.once('exit', resolve))
         app.kill('SIGTERM')
@@ -139,3 +148,15 @@ export async function launch(env: Record<string, string>) {
     }
 }
 
+
+/** A port nothing listens on right now. */
+export function freePort(): Promise<number> {
+    return new Promise((resolve, reject) => {
+        const server = net.createServer()
+        server.once('error', reject)
+        server.listen(0, '127.0.0.1', () => {
+            const { port } = server.address() as net.AddressInfo
+            server.close(() => resolve(port))
+        })
+    })
+}

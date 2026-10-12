@@ -1,8 +1,11 @@
 import type { AcpAgentCaps, AgentAvailability, AgentKind } from './agents'
-import type { ApprovalMode, CapabilityId, Presence } from './capabilities'
+import type { Ledger } from 'pi-capabilities/lib/ledger.ts'
+import type { ApprovalMode, CapabilityChoice, CapabilityId, CapabilityState, Presence } from './capabilities'
 import type { LangPref } from './i18n'
 import type { AgentMessage, PiEvent, RpcResponse } from './pi'
-import type { AuthMethod, EndpointModel, EndpointSave, LoginUpdate, ProvidersState } from './providers'
+import type { AuthMethod, ChannelHealth, ChannelModel, ChannelSave, ChannelTestUpdate, EndpointModel, EndpointSave, LoginUpdate, ProvidersState } from './providers'
+import type { AgentChannel, RouteCatalog, RoutesState, TerminalAgent, ThreadRoute, ThreadRouteInfo } from './routes'
+import type { SetupProbe } from './setup'
 
 export interface PiEnv {
     /** node, or the app's own Electron for the bundled pi. */
@@ -69,6 +72,8 @@ export interface SessionSnapshot {
     cwd: string
     name?: string
     items: SessionItem[]
+    /** A chat the agent continues only in a terminal: the command that does it. */
+    terminalOnly?: string
 }
 
 export interface GitFileChange {
@@ -133,6 +138,41 @@ export interface GitFileEntries {
     newCount: number
 }
 
+/** One entry of a folder in the file tree. `ignored`: git ignores it (shown dimmed). */
+export interface DirEntry {
+    name: string
+    dir: boolean
+    ignored: boolean
+    /** A symbolic link (to a folder when `dir`). */
+    link?: boolean
+}
+
+/** A folder's entries, folders first; `more` counts the ones past the cap. */
+export interface DirListing {
+    entries: DirEntry[]
+    more: number
+}
+
+/** A file for the editor: UTF-8 text (without its byte order mark), or why it cannot be edited. */
+export type FileRead =
+    | { kind: 'text', text: string, bom: boolean, size: number }
+    | { kind: 'binary', size: number }
+    | { kind: 'tooLarge', size: number }
+    | { kind: 'missing' }
+
+/**
+ * Entries that changed in a watched folder; an empty name: the folder itself (or entries unknown).
+ * `listed`: entries came, went or were renamed, so the folder's listing changed too.
+ */
+export interface DirChange {
+    dir: string
+    names: string[]
+    listed: boolean
+}
+
+/** A save; refused when the file changed on disk since the editor read it (`disk` is what is there). */
+export type FileWrite = { ok: true } | { ok: false, disk: FileRead }
+
 /** Settings shared by every window; a change in one window reaches the others. */
 export interface GlobalPrefs {
     /** Project list order (cwds), including folders added manually. */
@@ -149,15 +189,45 @@ export interface GlobalPrefs {
     transcriptLang?: TranscriptLang
     /** Changes panel: files in a folder tree (default) or a flat list. */
     reviewView?: ReviewView
-    /** Capabilities every pi process loads: a preset id (so the preset's later changes apply) or a custom list; absent means DEFAULT_CAPABILITIES. Older state has a map per project cwd. */
+    /** Older state: the capabilities, now in pi's settings.json (moved there once, piSettings.ts migrateCapabilities). A preset id or a list; older still, a map per project cwd. */
     capabilities?: string | CapabilityId[] | Record<string, CapabilityId[]>
-    /** Approval mode new threads start in: the last one chosen in any thread. */
+    /** Older state: the approval mode new threads start in, now in pi's settings.json. */
     approvalMode?: ApprovalMode
     /** Tokens at which every model compacts (see lib/compactAt); null: none, absent: not decided yet. */
     compactAt?: number | null
+    /** Per agent, the model (provider/id) new threads start on: the last one chosen in any of its threads. */
+    models?: Partial<Record<AgentKind, string>>
+    /** The agent a new thread starts with; absent: pi. */
+    defaultAgent?: AgentKind
+    /** The setup assistant's version the user went through (shared/setup.ts SETUP_VERSION); absent: never. */
+    setupDone?: number
 }
 
-export const GLOBAL_PREF_KEYS = ['projects', 'hiddenProjects', 'layout', 'theme', 'lang', 'transcriptLang', 'reviewView', 'capabilities', 'approvalMode', 'compactAt'] as const satisfies readonly (keyof GlobalPrefs)[]
+export const GLOBAL_PREF_KEYS = ['projects', 'hiddenProjects', 'layout', 'theme', 'lang', 'transcriptLang', 'reviewView', 'compactAt', 'models', 'defaultAgent', 'setupDone'] as const satisfies readonly (keyof GlobalPrefs)[]
+
+/** settings.json as running pi processes see it (piSettings.ts). */
+export interface PiSettingsState {
+    /** Changes when something they read at startup does (resources, compaction): they restart once idle. */
+    fingerprint: string
+    /** compaction.modelOverrides: a change restarts only the threads on that model. */
+    modelOverrides: Record<string, unknown>
+    capabilities: CapabilityState
+    /** pi-web-access (electron/piPackages.ts). */
+    webAccess: PiPackageState
+    /** pi's `cacheWarming`. */
+    cacheWarming: CacheWarming
+}
+
+/** pi's cache warming: off; while the agent runs; also between runs while a reply stays likely enough to pay for it. */
+export type CacheWarming = 'off' | 'streaming' | 'idle'
+export const CACHE_WARMING: readonly CacheWarming[] = ['off', 'streaming', 'idle']
+
+/** A pi package as settings.json lists it. */
+export interface PiPackageState {
+    installed: boolean
+    /** Its extensions load (installed and not filtered to none). */
+    enabled: boolean
+}
 
 /** A project window as saved for the next launch. */
 export interface SavedWindow {
@@ -294,6 +364,8 @@ export interface AgentStartOptions {
     capabilities?: CapabilityId[]
     /** Approval mode for a session that has not chosen one yet. */
     approvalMode?: ApprovalMode
+    /** The thread's own routing choice (composer), when its agent runs through the gateway. */
+    route?: ThreadRoute
 }
 
 export interface AgentExitInfo {
@@ -314,7 +386,8 @@ export interface TerminalInfo {
     busy: boolean
     /** Started to run this command; the terminal ends with it and can run it again. */
     command?: string
-    by: 'user' | 'agent'
+    /** setup: an installer the setup assistant runs; no project's Terminal tool window lists it. */
+    by: 'user' | 'agent' | 'setup'
     /** Set once its process has ended (command terminals stay open to show the output). */
     exit?: { code: number, signal?: number }
     createdAt: number
@@ -346,8 +419,14 @@ export interface PiBridge {
     installAgent: (id: string) => Promise<void>
     /** An agent install started or ended (any window). */
     onAgentsChanged: (listener: () => void) => () => void
+    /** The setup assistant's tools, after asking the login shell for PATH again. */
+    setupProbe: () => Promise<SetupProbe>
+    /** Runs a tool's official installer in a terminal of its own (`by: 'setup'`, in the home folder). */
+    setupInstall: (id: string, size?: { cols: number, rows: number }) => Promise<TerminalInfo>
     listSessions: () => Promise<SessionSummary[]>
     readSession: (path: string) => Promise<SessionSnapshot>
+    /** What pi sessions cost over the last `days` days (pi-capabilities/lib/ledger.ts). */
+    spendLedger: (days: number) => Promise<Ledger>
     /** pi: the file goes to the Trash. ACP: off the app's list; `history` deletes it in the agent too. */
     trashSession: (path: string, options?: { history?: boolean }) => Promise<void>
     /** Full-text search of prompts and replies in every session; every word must appear. */
@@ -415,9 +494,17 @@ export interface PiBridge {
     compactionInfo: (cwd: string, modelKey?: string) => Promise<CompactionInfo>
     /** compaction.* in pi's global settings.json; cwd only reports whether that project overrides it. */
     globalCompaction: (cwd?: string) => Promise<GlobalCompaction>
-    setGlobalCompaction: (patch: GlobalCompactionPatch) => Promise<void>
-    /** Another window wrote pi's settings.json. */
-    onPiSettingsChanged: (listener: (patch: GlobalCompactionPatch) => void) => () => void
+    setGlobalCompaction: (patch: GlobalCompactionPatch) => Promise<PiSettingsState>
+    /** What running pi processes read from settings.json, and the capability choice kept there. */
+    piSettings: () => Promise<PiSettingsState>
+    /** Merges into the capability choice in settings.json (shared with pi-cc-tui). */
+    setCapabilities: (patch: CapabilityChoice) => Promise<PiSettingsState>
+    /** `pi install` of pi-web-access, for pi in the app and in a terminal. */
+    installWebAccess: () => Promise<PiSettingsState>
+    setWebAccess: (enabled: boolean) => Promise<PiSettingsState>
+    setCacheWarming: (mode: CacheWarming) => Promise<PiSettingsState>
+    /** settings.json changed (this app, pi in a terminal, an editor). */
+    onPiSettingsChanged: (listener: (state: PiSettingsState) => void) => () => void
     /** App menu → 设置… (⌘,). */
     onOpenSettings: (listener: () => void) => () => void
 
@@ -439,6 +526,16 @@ export interface PiBridge {
     gitCommit: (cwd: string, message: string, paths: string[]) => Promise<string>
 
     openFolder: (path: string) => Promise<void>
+    /** Selects a file or folder in Finder / Explorer. */
+    revealPath: (path: string) => Promise<void>
+    /** A folder of the file tree. */
+    listDir: (dir: string) => Promise<DirListing>
+    readFile: (file: string) => Promise<FileRead>
+    /** See FileWrite; `expected` null overwrites whatever is on disk. */
+    writeFile: (file: string, text: string, options: { expected: string | null, bom: boolean }) => Promise<FileWrite>
+    /** The folders this window watches (tree folders, folders of open files); replaces the last set. */
+    watchDirs: (dirs: string[]) => void
+    onDirsChanged: (listener: (changes: DirChange[]) => void) => () => void
     /** The given folders that no longer exist (deleted or moved since they were added). */
     missingFolders: (paths: string[]) => Promise<string[]>
     /** Sets nativeTheme.themeSource, which drives prefers-color-scheme and the window chrome. */
@@ -469,7 +566,7 @@ export interface PiBridge {
     /** Plain text of the last lines, for sending output to a thread. */
     terminalText: (id: string, lines?: number) => Promise<string>
 
-    /** Settings → 模型供应商: pi's providers and the models.json entries the page edits. */
+    /** Settings → 供应商: pi's providers and the models.json entries the page edits. */
     providers: () => Promise<ProvidersState>
     /** Starts a sign-in; its prompts and outcome arrive on onProviderLogin under the returned id. */
     providerLogin: (provider: string, method: AuthMethod) => Promise<string>
@@ -479,11 +576,41 @@ export interface PiBridge {
     providerLogout: (provider: string) => Promise<void>
     saveEndpoint: (save: EndpointSave) => Promise<void>
     removeEndpoint: (id: string) => Promise<void>
+    /**
+     * Adds a provider from an address and key (an agent's model picker) and points the agent's config
+     * at its first model (useChannel). listError: the endpoint did not list its models, so it needs one named.
+     */
+    addChannel: (agent: TerminalAgent, save: Omit<ChannelSave, 'api'>) => Promise<AgentChannel | { listError: string }>
     /** The endpoint's own model list; without apiKey, the key pi has for `provider` is used. */
     endpointModels: (baseUrl: string, api: string, apiKey?: string, provider?: string) => Promise<EndpointModel[]>
     onProviderLogin: (listener: (update: LoginUpdate) => void) => () => void
     /** Credentials or endpoints changed (any window). */
     onProvidersChanged: (listener: () => void) => () => void
+    /** Channel test (pi-capabilities/lib/channelTest.ts): a provider's models with prices. */
+    channelModels: (provider: string) => Promise<ChannelModel[]>
+    /** Last results, the past week's cache record and runs under way, per "provider/model". */
+    channelHealth: () => Promise<ChannelHealth>
+    /** Starts a run (or returns the one already running on this model); updates arrive on onChannelTest. */
+    channelTest: (provider: string, model: string, idleMs?: number) => Promise<string>
+    channelCancel: (test: string) => Promise<void>
+    onChannelTest: (listener: (update: ChannelTestUpdate) => void) => () => void
+
+    /** Settings → 路由: groups, which agents use them, and the gateway's live status. */
+    routes: () => Promise<RoutesState>
+    routesSave: (config: RoutesState['config']) => Promise<void>
+    /** Models groups can name (pi's, signed in with a key); `force` reads them again. */
+    routeCatalog: (force?: boolean) => Promise<RouteCatalog>
+    /** A running thread's routing; undefined when its process does not run through the gateway. */
+    threadRoute: (agentId: string) => Promise<ThreadRouteInfo | undefined>
+    setThreadRoute: (agentId: string, route: ThreadRoute) => Promise<ThreadRouteInfo | undefined>
+    /** The group a Claude Code / Codex / Gemini / Grok session was last on, to resume it there. */
+    sessionRoute: (sessionKey: string) => Promise<string | undefined>
+    setSessionRoute: (sessionKey: string, group: string | undefined) => Promise<void>
+    /** What Claude Code's / Codex's own config points at. */
+    agentChannel: (agent: TerminalAgent) => Promise<AgentChannel>
+    /** Writes a provider model into the agent's own config, or with null, puts back what it had before. */
+    useChannel: (agent: TerminalAgent, pick: { provider: string, model: string } | null) => Promise<AgentChannel>
+    onRoutesChanged: (listener: (state: RoutesState) => void) => () => void
 }
 
 export interface AppNotice {
@@ -500,8 +627,11 @@ export const IPC = {
     listAgents: 'agents:list',
     installAgent: 'agents:install',
     agentsChanged: 'agents:changed',
+    setupProbe: 'setup:probe',
+    setupInstall: 'setup:install',
     listSessions: 'sessions:list',
     readSession: 'sessions:read',
+    spendLedger: 'sessions:spend-ledger',
     trashSession: 'sessions:trash',
     searchSessions: 'sessions:search',
     presence: 'sessions:presence',
@@ -520,6 +650,11 @@ export const IPC = {
     compactionInfo: 'pi:compaction-info',
     globalCompaction: 'pi:global-compaction',
     setGlobalCompaction: 'pi:set-global-compaction',
+    piSettings: 'pi:settings',
+    setCapabilities: 'pi:set-capabilities',
+    installWebAccess: 'pi:install-web-access',
+    setWebAccess: 'pi:set-web-access',
+    setCacheWarming: 'pi:set-cache-warming',
     gitStatus: 'git:status',
     gitBranches: 'git:branches',
     gitFileDiff: 'git:file-diff',
@@ -531,6 +666,12 @@ export const IPC = {
     gitCommit: 'git:commit',
     openFolder: 'shell:open-folder',
     missingFolders: 'fs:missing-folders',
+    revealPath: 'shell:reveal-path',
+    listDir: 'fs:list-dir',
+    readFile: 'fs:read-file',
+    writeFile: 'fs:write-file',
+    watchDirs: 'fs:watch-dirs',
+    dirsChanged: 'fs:dirs-changed',
     setTheme: 'theme:set',
     setLang: 'lang:set',
     openExternal: 'shell:open-external',
@@ -565,8 +706,24 @@ export const IPC = {
     saveEndpoint: 'providers:save-endpoint',
     removeEndpoint: 'providers:remove-endpoint',
     endpointModels: 'providers:endpoint-models',
+    addChannel: 'providers:add-channel',
     providerLoginUpdate: 'providers:login-update',
     providersChanged: 'providers:changed',
+    channelModels: 'providers:channel-models',
+    channelHealth: 'providers:channel-health',
+    channelTest: 'providers:channel-test',
+    channelCancel: 'providers:channel-cancel',
+    channelTestUpdate: 'providers:channel-test-update',
+    routes: 'routes:state',
+    routesSave: 'routes:save',
+    routeCatalog: 'routes:catalog',
+    threadRoute: 'routes:thread',
+    setThreadRoute: 'routes:set-thread',
+    sessionRoute: 'routes:session',
+    setSessionRoute: 'routes:set-session',
+    agentChannel: 'routes:agent-channel',
+    useChannel: 'routes:use-channel',
+    routesChanged: 'routes:changed',
     terminals: 'terminal:list',
     terminalsChanged: 'terminal:changed',
     terminalCreate: 'terminal:create',

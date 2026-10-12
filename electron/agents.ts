@@ -4,7 +4,7 @@ import type { PiEvent, RpcResponse } from '@shared/pi'
 import type { ChildProcessWithoutNullStreams } from 'node:child_process'
 import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import type { AcpService } from './acp/service'
+import type { AcpService, LaunchHook } from './acp/service'
 import { BridgeAgent } from './bridge'
 import { ENV } from '@shared/capabilities'
 import { capabilityArgs, hostExtensionArgs } from './capabilities'
@@ -36,6 +36,13 @@ export interface ManagedAgent {
     stop: () => Promise<void>
 }
 
+/** More for one pi process: routing's extension and its gateway key. */
+export interface PiExtra {
+    args?: string[]
+    env?: Record<string, string>
+    exited?: () => void
+}
+
 /** One `pi --mode rpc` child process bound to one working directory and session. */
 class PiAgent implements ManagedAgent {
     readonly id = randomUUID()
@@ -45,8 +52,8 @@ class PiAgent implements ManagedAgent {
     private stderr = ''
     private exited = false
 
-    constructor(env: PiEnv, options: AgentStartOptions, extensionsDir: string, callbacks: AgentCallbacks, hostEnv: Record<string, string> = {}) {
-        const args = ['--mode', 'rpc', ...hostExtensionArgs(extensionsDir), ...capabilityArgs(options.capabilities, extensionsDir, { approvalMode: options.approvalMode })]
+    constructor(env: PiEnv, options: AgentStartOptions, extensionsDir: string, callbacks: AgentCallbacks, hostEnv: Record<string, string> = {}, extra: PiExtra = {}) {
+        const args = ['--mode', 'rpc', ...hostExtensionArgs(extensionsDir), ...(extra.args ?? []), ...capabilityArgs(options.capabilities, extensionsDir, { approvalMode: options.approvalMode })]
         if (options.sessionPath)
             args.push('--session', options.sessionPath)
         const command = piCommand(env, args)
@@ -54,7 +61,7 @@ class PiAgent implements ManagedAgent {
             cwd: options.cwd,
             windowsVerbatimArguments: command.windowsVerbatimArguments,
             // The app loads its capabilities with -e; pi-cc-tui, if installed, leaves its copies off.
-            env: { ...piSpawnEnv(env), ...hostEnv, [ENV.host]: 'gui' },
+            env: { ...piSpawnEnv(env), ...hostEnv, ...extra.env, [ENV.host]: 'gui' },
             stdio: ['pipe', 'pipe', 'pipe'],
         })
 
@@ -135,27 +142,28 @@ export class AgentManager {
     /** `hostEnv`: variables for every pi the app starts (the terminal socket), read at each start. */
     constructor(private callbacks: AgentCallbacks, private extensionsDir: string, private hostEnv: () => Record<string, string> = () => ({})) {}
 
-    start(env: PiEnv, options: AgentStartOptions): string {
+    start(env: PiEnv, options: AgentStartOptions, extra: PiExtra = {}): string {
         const agent = new PiAgent(env, options, this.extensionsDir, {
             onEvent: this.callbacks.onEvent,
             onExit: (id, info) => {
                 this.agents.delete(id)
+                extra.exited?.()
                 this.callbacks.onExit(id, info)
             },
-        }, this.hostEnv())
+        }, this.hostEnv(), extra)
         this.agents.set(agent.id, agent)
         return agent.id
     }
 
     /** An ACP agent for a thread; resolves once its process is spawned (the session opens after). */
-    async startAcp(service: AcpService, agent: AcpAgentId, options: AgentStartOptions): Promise<string> {
+    async startAcp(service: AcpService, agent: AcpAgentId, options: AgentStartOptions, prepare?: LaunchHook): Promise<string> {
         const instance = await service.start(agent, options.cwd, options.sessionPath, {
             onEvent: this.callbacks.onEvent,
             onExit: (id, info) => {
                 this.agents.delete(id)
                 this.callbacks.onExit(id, info)
             },
-        })
+        }, prepare)
         this.agents.set(instance.id, instance)
         return instance.id
     }

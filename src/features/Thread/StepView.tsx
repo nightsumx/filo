@@ -1,5 +1,7 @@
 import type { Step } from '@/lib/timeline'
 import { Markdown } from '@/components/Markdown'
+import { TermLines } from '@/components/TermLines'
+import { displayText, headCount } from '@/lib/termOutput'
 import { useT } from '@/lib/transcriptText'
 import { cn } from '@/lib/utils'
 import { Archive, GitBranch, Puzzle } from 'lucide-react'
@@ -19,8 +21,9 @@ import { useViewState } from './viewState'
 function BashExecution({ id, message }: { id: string, message: Extract<Step, { kind: 'bash' }>['message'] }) {
     const t = useT()
     const [full, setFull] = useViewState(id, false)
-    const lines = (message.output ?? '').replace(/\n+$/, '').split('\n')
-    const clipped = !full && lines.length > 10
+    const lines = displayText(message.output ?? '').replace(/\n+$/, '').split('\n')
+    const head = headCount(lines, 10)
+    const clipped = !full && lines.length > head
     const failed = message.exitCode != null && message.exitCode !== 0
     return (
         <Gutter mark="$" markClassName="text-ide-accent">
@@ -32,11 +35,11 @@ function BashExecution({ id, message }: { id: string, message: Extract<Step, { k
                 {message.output && (
                     <div className="mt-0.5 rounded-md bg-ide-block px-3 py-2 text-[12px]">
                         <pre className={cn('whitespace-pre-wrap break-all text-gray-700 select-text', full && 'max-h-[480px] overflow-y-auto')}>
-                            {clipped ? lines.slice(0, 10).join('\n') : lines.join('\n')}
+                            <TermLines lines={clipped ? lines.slice(0, head) : lines} />
                         </pre>
-                        {lines.length > 10 && (
+                        {lines.length > head && (
                             <button type="button" onClick={() => setFull(v => !v)} className="mt-1 font-sans text-gray-400 hover:text-gray-900">
-                                {full ? t.showLess : `${t.moreLines(lines.length - 10)} · ${t.expand}`}
+                                {full ? t.showLess : `${t.moreLines(lines.length - head)} · ${t.expand}`}
                             </button>
                         )}
                     </div>

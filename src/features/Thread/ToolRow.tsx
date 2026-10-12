@@ -2,13 +2,17 @@
 //   ✓ Edit src/app.ts
 //     ↳ diff +15 -35 split [━━━━━━━━]
 //     <diff, first 24 rows>  … 117 more · click to expand
-// Other tools show a one-line "↳ 12 lines returned" result and expand into Input / Output sections.
+// Other tools show a one-line "↳ 12 lines returned" result and expand into Input / Output sections;
+// bash keeps the last lines of its output under it, running or done, as pi's TUI does; a running call
+// expands too, to read its whole output so far.
 import type { ImageContent, TextContent, ToolCall } from '@shared/pi'
 import type { DiffModel } from '@/lib/diffModel'
 import type { Step, ToolResultView } from '@/lib/timeline'
 import { ImageThumb } from '@/components/ImageView'
+import { TermLines } from '@/components/TermLines'
 import { TuiDiff } from '@/components/TuiDiff'
 import { diffFromContent, diffFromEdits, diffFromPatch } from '@/lib/diffModel'
+import { displayText, headCount, tailLines } from '@/lib/termOutput'
 import { formatToolInput, tuiSummary, tuiTitle } from '@/lib/toolMeta'
 import { useT } from '@/lib/transcriptText'
 import { cn } from '@/lib/utils'
@@ -17,6 +21,7 @@ import { useThread } from './ThreadContext'
 import { useViewState } from './viewState'
 import { createContext, memo, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { tr } from '@/lib/i18n'
+import { appStore } from '@/store/app'
 
 /** Thread cwd, so absolute paths in tool calls print relative like the TUI. */
 export const CwdContext = createContext<string | undefined>(undefined)
@@ -32,7 +37,8 @@ type ToolStep = Extract<Step, { kind: 'tool' }>
 type Status = 'running' | 'success' | 'error'
 
 function resultText(result?: ToolResultView): string {
-    const text = (result?.content ?? []).filter((c): c is TextContent => c.type === 'text').map(c => c.text).join('\n')
+    // ANSI colors and \r stripped, as pi's TUI shows tool output.
+    const text = displayText((result?.content ?? []).filter((c): c is TextContent => c.type === 'text').map(c => c.text).join('\n'))
     return text.length > OUTPUT_LIMIT ? `${text.slice(0, OUTPUT_LIMIT)}\n… ${text.length - OUTPUT_LIMIT} more chars truncated` : text
 }
 
@@ -130,39 +136,51 @@ function Delta({ added, removed }: { added: number, removed: number }) {
 }
 
 /** One Input / Output section of an expanded tool: tree branch, label, clipped mono body. */
-function IoSection({ id, label, body, last, maxLines, error }: { id: string, label: string, body: string, last: boolean, maxLines: number, error?: boolean }) {
+function IoSection({ id, label, body, last, maxLines, error, fullPath }: { id: string, label: string, body: string, last: boolean, maxLines: number, error?: boolean, fullPath?: string }) {
     const t = useT()
+    const cwd = useContext(CwdContext)
     const [full, setFull] = useViewState(id, false)
     const lines = body.replace(/\n+$/, '').split('\n')
-    const clipped = !full && lines.length > maxLines
-    const shown = clipped ? lines.slice(0, maxLines).join('\n') : lines.join('\n')
+    const head = headCount(lines, maxLines)
+    const clipped = !full && lines.length > head
+    const shown = clipped ? lines.slice(0, head) : lines
     return (
         <div>
             <div className="flex items-center gap-2 text-gray-500">
                 <span className="text-gray-400">{last ? '└' : '├'}</span>
                 <span className="font-medium text-gray-700">{label}</span>
-                {lines.length > maxLines && (
+                {lines.length > head && (
                     <button type="button" onClick={() => setFull(v => !v)} className="font-sans text-[12px] text-gray-400 hover:text-gray-900">
                         {full ? t.showLess : t.showAll(lines.length)}
+                    </button>
+                )}
+                {/* pi kept only the end of a long output; the rest is in this file. */}
+                {fullPath && cwd && (
+                    <button type="button" onClick={() => appStore.openFile(fullPath, cwd)} className="font-sans text-[12px] text-gray-400 hover:text-gray-900">
+                        {tr('打开完整输出', 'open full output')}
                     </button>
                 )}
             </div>
             <div className={cn('flex', !last && 'border-l border-gray-300/70', 'ml-[3px]')}>
                 <pre className={cn('min-w-0 flex-1 whitespace-pre-wrap break-all py-0.5 pl-3.5 select-text', full && 'max-h-[480px] overflow-y-auto', error ? 'text-red-600' : 'text-gray-700')}>
-                    {shown || <span className="font-sans text-gray-400">{t.empty}</span>}
-                    {clipped && <span className="font-sans text-gray-400">{`\n${t.moreLines(lines.length - maxLines)}`}</span>}
+                    {shown.join('\n') ? <TermLines lines={shown} /> : <span className="font-sans text-gray-400">{t.empty}</span>}
+                    {clipped && (
+                        <button type="button" onClick={() => setFull(true)} className="block font-sans text-gray-400 hover:text-gray-900">
+                            {`${t.moreLines(lines.length - head)} · ${t.expand}`}
+                        </button>
+                    )}
                 </pre>
             </div>
         </div>
     )
 }
 
-function IoPanel({ call, output, error }: { call: ToolCall, output: string, error: boolean }) {
+function IoPanel({ call, output, error, fullPath }: { call: ToolCall, output: string, error: boolean, fullPath?: string }) {
     const input = formatToolInput(call.arguments)
     return (
         <div className="mt-1 flex flex-col gap-1 rounded-md bg-ide-block px-3 py-2 font-mono text-[12px]">
             {input && <IoSection id={`io:${call.id}:in`} label="Input" body={input} last={false} maxLines={INPUT_PREVIEW_LINES} />}
-            <IoSection id={`io:${call.id}:out`} label="Output" body={output} last maxLines={OUTPUT_PREVIEW_LINES} error={error} />
+            <IoSection id={`io:${call.id}:out`} label="Output" body={output} last maxLines={OUTPUT_PREVIEW_LINES} error={error} fullPath={fullPath} />
         </div>
     )
 }
@@ -213,12 +231,23 @@ const PendingLabel = observer(({ toolCallId }: { toolCallId: string }) => {
     return <span className="text-gray-500">{t.pending}</span>
 })
 
-/** Live tail of a running command's output, so long builds are not a silent spinner. */
-function LiveTail({ text }: { text: string }) {
-    const tail = text.replace(/\n+$/, '').split('\n').slice(-5).join('\n')
-    if (!tail)
+/**
+ * Last lines of a command's output, so long builds are not a silent spinner. Kept once it finishes
+ * (pi's TUI shows the same five lines): dropping them then made the transcript jump while it streamed.
+ * A QR code the tail cuts into is shown whole (tailLines).
+ */
+function OutputTail({ text }: { text: string }) {
+    const lines = tailLines(text)
+    if (!lines.length)
         return null
-    return <pre className="mt-0.5 whitespace-pre-wrap break-all pl-4 font-mono text-[12px] text-gray-400">{tail}</pre>
+    return <pre className="mt-0.5 whitespace-pre-wrap break-all pl-4 font-mono text-[12px] text-gray-400 select-text"><TermLines lines={lines} /></pre>
+}
+
+/** pi's "[Showing lines … Full output: <path>]" note under truncated output; the tail leaves it out, like pi's TUI. */
+function withoutTruncationNote(text: string, result?: ToolResultView): string {
+    const path = result?.details?.fullOutputPath
+    const at = text.lastIndexOf('\n\n[')
+    return typeof path === 'string' && at !== -1 && text.trimEnd().endsWith(']') && text.slice(at).includes(path) ? text.slice(0, at) : text
 }
 
 /**
@@ -260,6 +289,7 @@ export const ToolRow = memo(({ call, result, running, startedAt, ms, action, lab
             <>
                 <PendingLabel toolCallId={call.id} />
                 {time}
+                {(output || formatToolInput(call.arguments)) && hint}
             </>
         )
     }
@@ -338,7 +368,7 @@ export const ToolRow = memo(({ call, result, running, startedAt, ms, action, lab
                     </button>
                     {action}
                 </div>
-                {status === 'running' && name === 'bash' && <LiveTail text={output} />}
+                {name === 'bash' && !expanded && <OutputTail text={withoutTruncationNote(output, result)} />}
                 {diff && name === 'edit' && (
                     <div className="mt-1">
                         <TuiDiff model={diff} path={path} mode={mode} limit={expanded ? undefined : EDIT_COLLAPSED_ROWS} onShowMore={() => setExpanded(true)} />
@@ -349,7 +379,7 @@ export const ToolRow = memo(({ call, result, running, startedAt, ms, action, lab
                         <TuiDiff model={diff} path={path} mode="unified" />
                     </div>
                 )}
-                {expanded && !diff && status !== 'running' && <IoPanel call={call} output={output} error={failed} />}
+                {expanded && !diff && <IoPanel call={call} output={output} error={failed} fullPath={typeof result?.details?.fullOutputPath === 'string' ? result.details.fullOutputPath : undefined} />}
                 {images.map((_, i) => (
                     <div key={i} className="mt-1">
                         <ImageThumb images={images} index={i} alt="" className="max-h-80 w-fit rounded-md" />

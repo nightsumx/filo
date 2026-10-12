@@ -33,7 +33,8 @@ describe('acp session keys', () => {
     })
 
     it('every agent can be found or installed', () => {
-        for (const spec of ACP_AGENTS)
+        // Claude Code runs as the user installed it; the app does not ship or install it.
+        for (const spec of ACP_AGENTS.filter(s => s.protocol !== 'claude-tui'))
             expect(spec.npm || spec.archive, spec.id).toBeTruthy()
     })
 })

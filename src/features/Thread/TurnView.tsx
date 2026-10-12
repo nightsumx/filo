@@ -1,5 +1,6 @@
 import type { SubagentRun } from '@/lib/subagents'
 import type { Step, Turn, UserPrompt } from '@/lib/timeline'
+import { EXPECTED_MISSES, isNotable, missesByReason, type CacheMiss } from 'pi-capabilities/lib/promptCache.ts'
 import type { TranscriptRow } from '@/lib/transcriptRows'
 import type { Thread } from '@/store/thread'
 import { ActionBtn } from '@/components/ActionBtn'
@@ -251,6 +252,35 @@ function TokenBreakdown({ label, total, slices }: { label: string, total: number
     )
 }
 
+/** The turn's requests that billed their prefix again, by reason, with what they cost (promptCache.ts). */
+function CacheMisses({ misses }: { misses: CacheMiss[] }) {
+    const t = useT()
+    const groups = missesByReason(misses)
+    const extra = groups.reduce((sum, g) => sum + g.extraCost, 0)
+    return (
+        <section className="flex flex-col gap-1.5">
+            <div className="flex items-baseline justify-between gap-4">
+                <span className="text-[11px] font-medium uppercase tracking-wide text-gray-500">{t.statCacheMisses}</span>
+                {extra > 0 && <span className="font-medium text-[var(--sl-warn)]">{`+${formatCost(extra)}`}</span>}
+            </div>
+            <div className="grid grid-cols-[auto_1fr_auto_auto] items-center gap-x-2 gap-y-0.5">
+                {groups.map(g => (
+                    <Fragment key={g.reason}>
+                        <span aria-hidden className={cn('size-2 rounded-full', EXPECTED_MISSES.has(g.reason) ? 'bg-gray-400' : 'bg-[var(--sl-warn)]')} />
+                        <span className="text-gray-600">
+                            {g.reason === 'idle' && g.count === 1 ? `${t.missReason.idle} ${t.duration(misses.find(m => m.reason === 'idle')!.idleMs)}` : t.missReason[g.reason]}
+                            {g.count > 1 && <span className="text-gray-400">{` ×${g.count}`}</span>}
+                        </span>
+                        <span className="text-right text-gray-800">{t.missedTokens(formatCount(g.missed))}</span>
+                        <span className="text-right text-gray-400">{g.extraCost ? `+${formatCost(g.extraCost)}` : ''}</span>
+                    </Fragment>
+                ))}
+            </div>
+            <p className="text-[11.5px] leading-snug text-gray-500">{groups.map(g => t.missReasonHint[g.reason]).join(' ')}</p>
+        </section>
+    )
+}
+
 /** Hover card under a turn's footer: timing, cost, colour-coded token breakdown and models. */
 function TurnDetails({ turn }: { turn: Turn }) {
     const t = useT()
@@ -294,6 +324,7 @@ function TurnDetails({ turn }: { turn: Turn }) {
                                 ]
                             : []}
                     />
+                    {usage.cacheMisses.length > 0 && <CacheMisses misses={usage.cacheMisses} />}
                     {cachedPct > 0 && (
                         <div className="flex items-center gap-1.5 self-start rounded-full bg-emerald-500/10 px-2 py-0.5 text-[11.5px] font-medium text-emerald-600">
                             <span aria-hidden className="size-1.5 rounded-full bg-emerald-500" />
@@ -419,6 +450,7 @@ export const TranscriptRowView = memo(({ row, thread, subagent, top }: { row: Tr
             const { turn } = row
             const ms = turn.endedAt - turn.startedAt
             const cost = turn.usage?.cost ?? 0
+            const misses = turn.usage?.cacheMisses.filter(isNotable) ?? []
             return (
                 <div className={cn(pad, 'group/turn')}>
                     <Gutter mark="✻" markClassName="text-gray-400">
@@ -429,6 +461,10 @@ export const TranscriptRowView = memo(({ row, thread, subagent, top }: { row: Tr
                                         <span tabIndex={0} className="cursor-default rounded-sm outline-none hover:text-gray-800 focus-visible:ring-1 focus-visible:ring-gray-400">
                                             {ms > 1000 ? t.workedFor(verbFor(t, turn.key)[1], t.duration(ms)) : t.doneAt(t.clock(turn.endedAt))}
                                             {cost > 0 && <span>{` · ${formatCost(cost)}`}</span>}
+                                            {misses.length > 0 && (
+                                                // Amber unless the user caused it (idling, a model or thinking switch). Re-billed tails stay in the card.
+                                                <span className={cn(misses.some(m => !EXPECTED_MISSES.has(m.reason)) && 'text-[var(--sl-warn)]')}>{` · ${t.cacheMisses(misses.length)}`}</span>
+                                            )}
                                         </span>
                                     </TooltipTrigger>
                                     <TooltipContent side="top" align="start" className="w-[300px] rounded-lg p-3">

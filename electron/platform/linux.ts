@@ -39,6 +39,7 @@ export const linux: Platform = {
     findIn: findExecutable,
     command: directCommand,
     withPath: (env, value) => ({ ...env, PATH: value }),
+    nodeRuntime: electron => electron,
     launcher: shLauncher,
 
     descendants: pid => descendants(pid, 'ps'),

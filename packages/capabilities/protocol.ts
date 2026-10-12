@@ -5,7 +5,7 @@
 // to other extensions in the same pi as GUI_EVENTS on `pi.events`.
 // Extensions import these with `import type` only; the event names and env vars are repeated there.
 
-export type CapabilityId = 'todo' | 'ask' | 'approval' | 'plan' | 'subagent' | 'review' | 'autopilot' | 'terminal'
+export type CapabilityId = 'todo' | 'ask' | 'approval' | 'plan' | 'subagent' | 'review' | 'autopilot' | 'budget' | 'terminal'
 
 /** Hidden commands are filtered out of the slash menu. */
 export const GUI_COMMAND_PREFIX = 'gui-'

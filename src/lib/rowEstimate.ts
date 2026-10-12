@@ -4,6 +4,7 @@
 // real sessions; text is wrapped by an approximate glyph width.
 import type { Step } from './timeline'
 import type { TranscriptRow } from './transcriptRows'
+import { displayText, isBlockArt, tailLines } from './termOutput'
 
 const LINE = 22.3
 /** Gap between markdown blocks (paragraph / list margins). */
@@ -25,6 +26,10 @@ const THINKING_LINES = 5
 const SHOW_MORE = 27
 const DIFF_ROW = 21
 const DIFF_ROWS = 24
+/** A line of ToolRow's bash tail (12px mono), and a block-art line, drawn at line-height 1. */
+const TAIL_LINE = 18
+const ART_LINE = 12
+const TAIL_INDENT = 16
 
 const WIDE = /[\u1100-\u115F\u2E80-\uA4CF\uAC00-\uD7A3\uF900-\uFAFF\uFE30-\uFE4F\uFF00-\uFF60\uFFE0-\uFFE6]/
 
@@ -173,6 +178,14 @@ function cardHeight(step: Extract<Step, { kind: 'autopilot-card' }>, width: numb
     return h
 }
 
+/** The bash tail: the output's last lines, wrapped (break-all) at the width under the indent; block art doesn't wrap. */
+function tailHeight(step: ToolStep, width: number): number {
+    const lines = tailLines(displayText((step.result?.content ?? []).map(c => (c.type === 'text' ? c.text : '')).join('\n')))
+    if (!lines.length)
+        return 0
+    return 2 + lines.reduce((h, l) => h + (isBlockArt(l) ? ART_LINE : Math.max(1, Math.ceil(textWidth(l) * (12 / 13.5) / Math.max(120, width - TAIL_INDENT))) * TAIL_LINE), 0)
+}
+
 /** A pending ask is a form (question, choices, buttons); an answered one lists question → answer. */
 function askHeight(step: ToolStep): number {
     const details = step.result?.details
@@ -244,6 +257,8 @@ function estimate(row: TranscriptRow, listWidth: number): number {
                     }
                     if (step.call.name === 'edit' && !step.result?.isError)
                         return pad + ROW_LINE + RESULT_LINE + 16 + Math.min(DIFF_ROWS, editLines(step.call.arguments) + 6) * DIFF_ROW
+                    if (step.call.name === 'bash')
+                        return pad + ROW_LINE + RESULT_LINE + tailHeight(step, width)
                     return pad + ROW_LINE + RESULT_LINE
                 case 'review':
                     return pad + reviewHeight(step, width)

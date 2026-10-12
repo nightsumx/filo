@@ -54,7 +54,7 @@ pi install npm:pi-cc-tui
 
 **退出**：第一次按 ctrl+c，状态栏第二行显示 `Press ctrl+c again to exit`；800ms 内再按一次退出（pi 原本是 500ms，没有提示）。
 
-**权限模式**：option+m（非 macOS 是 alt+m）切换 Claude Code 的几种模式；shift+tab 仍归 pi 切换思考强度。`/permissions` 直接选，`--gui-approval ask|edits|auto` 设启动时的审批模式（默认 `auto`）。
+**权限模式**：option+m（非 macOS 是 alt+m）切换 Claude Code 的几种模式；shift+tab 仍归 pi 切换思考强度。`/permissions` 直接选，`--gui-approval ask|edits|auto` 设启动时的审批模式。选过的模式存进 `~/.pi/agent/settings.json`（`pi-capabilities.approvalMode`，默认 `auto`），作为新会话的起始模式，和 Filo 桌面版共用。
 
 | 模式 | 改文件（`edit`、`write`） | 跑命令（`bash`、`powershell`） |
 |---|---|---|
@@ -77,11 +77,13 @@ pi install npm:pi-cc-tui
 
 **自动驾驶**：`/autopilot` 开关。打开后每轮结束，另一个只读的 pi 按你的规则库（`~/.pi/agent/autopilot/rules.md`）检查结果，替你回复 Agent：继续、去验证、提交，或者结束。推送、部署、发布、付费生成、删除未提交的东西、sudo、打印密钥会被拦下，变成卡片。审美、方向、花钱这类只有你能定的事也会变成卡片。`/inbox` 处理所有会话里等你的卡片。你在它开着时插的话会记下来，`/autopilot learn` 据此提议改规则。
 
-审批、Plan 模式、提问、Todo、子代理、审查和自动驾驶来自 `pi-capabilities`，和 Filo 桌面版用的是同一套扩展，打包在本插件里。在桌面版里这些会自动关闭，由桌面版自己加载。
+审批、Plan 模式、提问、Todo、子代理、审查和自动驾驶来自 `pi-capabilities`，和 Filo 桌面版用的是同一套扩展，打包在本插件里。在桌面版里这些会自动关闭，由桌面版自己加载。加载哪些由 `~/.pi/agent/settings.json` 的 `pi-capabilities.enabled` 决定（预设 `lean`、`standard`、`full`，或一个列表；没设时是 `full`），和桌面版「设置 → 能力」是同一份。`/capabilities` 修改它并重新加载 pi。
 
 **压缩进度**：`/compact` 和自动压缩时显示 `· Compacting conversation… (1m 37s · ↓ 2.1k tokens · esc to cancel)`，下面一行 `▰▰▰▱▱▱ 60%` 进度条。仍然走 pi 默认的摘要逻辑；摘要最终长度事先未知，进度按已流出的 token 估算，逐渐逼近 99%，不是精确完成度。
 
-**状态栏**：两行。第一行是 Claude Code 常见 `statusLine` 脚本的精简版；第二行是 Claude Code 的模式行：左边是权限模式（`default` 下显示 `? for shortcuts`，输入命令时显示 `! for bash mode`），右边是距自动压缩的估算。
+**状态栏**：两行。第一行是 Claude Code 常见 `statusLine` 脚本的精简版；第二行是 Claude Code 的模式行：左边是权限模式（`default` 下显示 `? for shortcuts`，输入命令时显示 `! for bash mode`），右边是距自动压缩的估算。`cache 83%` 是整个对话的提示缓存命中率，按输入量加权。未命中的算法和 pi 的 `/session` 统计缓存浪费时一样；明显的未命中会变色：琥珀色是空闲超过缓存寿命、换了模型或思考档位，或者只是尾部被重新计费；红色是缓存丢了却看不出原因。丢了缓存的那一轮会在页脚写明：`✻ Worked for 3s · done 7:11 PM · cache miss (dropped mid-run, +$0.16)`。`/cache` 先对比本会话实际花了多少、理论最低要多少（每次都读满缓存、不用保温），再按原因汇总未命中，再从新到旧列出每一次读回了多少、属于哪条提示；多数请求在对话没变时丢了缓存，会说明这是渠道（常见于中转）的问题。`/cost [天数]` 按 pi 的标价汇总最近几天（默认 7 天）所有 pi、Claude Code 和 Codex 会话的花费（订阅也按标价算），按天、agent、项目、模型分开，并列出缓存未命中重计费和缓存保温花了多少。
+
+**缓存测试**：`/channel-test [provider/model]` 检查一个渠道（常见的是中转）是不是真的缓存了提示词。先给出预计花费，确认后发一段 7 次请求的脚本对话（加上 4 分钟空闲检查是 8 次），把每次回复报告的缓存读取和真缓存应该读到的量对比。从没发过的提示词也“读到”缓存，或者读到的比发过的还多，说明数字是编的（按固定比例计费的中转）。报告列出每次请求、耗时，以及这个模型过去 7 天在你会话里的记录。`/channel-test last` 显示上次的结果，`/channel-test stop` 停止。结果存在 `~/.pi/agent/channel-tests.json`，Filo 里也能看到。
 
 | 段 | 含义 | 颜色 |
 |---|---|---|
@@ -89,7 +91,7 @@ pi install npm:pi-cc-tui
 | `██░░░ 410k/1000k` | 上下文占用 | 绿 → 50% 琥珀 → 80% 珊瑚红 |
 | `$3.20` | 本会话花费 | 灰 → $1 琥珀 → $5 珊瑚红 |
 | `Opus 5.5 (high)` | 模型；思考强度 high / xhigh / max 时显示 | 淡紫 / 琥珀 |
-| `⏱ 12s` | 距上次回复 | 4 分钟琥珀，5 分钟变 `✗` 珊瑚红（提示缓存过期） |
+| `⏱ 12s` | 距上次用到提示缓存（回复或 pi 保温） | 缓存最后一分钟琥珀，过期后变 `✗` 珊瑚红（模型的 `promptCache` 寿命，没有就按 5 分钟） |
 | `55% until auto-compact` | 第二行右对齐，按 pi 的 `compaction.reserveTokens` 计算 | 灰 |
 
 **主题 `claude-code` 和 `claude-code-light`**：Claude Code 的暗色和亮色配色。正文用终端默认前景色，行内代码和链接用和 Claude Code 相同的 256 色号（153 / 12），同一个终端里两边渲染完全一致。代码块用 16 色 ANSI 调色板，diff 用 Monokai，和 Claude Code 暗色一样。亮色主题用 Claude Code 亮色的配色。

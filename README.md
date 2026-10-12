@@ -26,7 +26,7 @@ The scripts download the latest [release](https://github.com/nightsumx/filo/rele
 - Linux: checks the SHA-256 and puts the AppImage in `~/.local/share/filo`, with an app menu entry and a `~/.local/bin/filo` command. AppImages need FUSE (`fuse3`), which most distributions have.
 - Windows: checks the SHA-256 and runs the installer silently for your user (`%LOCALAPPDATA%\Programs\Filo`, Start menu and desktop shortcuts).
 
-No Node.js or pi CLI needed: Filo comes with its own pi, and uses yours if your login shell has one. Sign in to a subscription, add an API key or connect a local model under Settings → Model providers. It all goes to pi's own `~/.pi/agent`.
+No Node.js or pi CLI needed: Filo comes with its own pi, and uses yours if your login shell has one. On first launch a setup assistant offers Node.js, pi for your terminal, Claude Code, Codex and Grok Build, each with its official installer in a terminal inside the window (you type any password or answer its prompts there), then asks which agent new threads start with. Settings → Agents changes that and reopens the assistant. Sign in to a subscription, add an API key or connect a local model under Settings → Providers. It all goes to pi's own `~/.pi/agent`.
 
 The releases page has the `.dmg`, the AppImages and `Filo-Setup-x64.exe` for a manual install. The macOS app is not notarized, so macOS blocks its first launch from a browser download: open it once, then System Settings → Privacy & Security → Open Anyway. The Windows installer is not signed, so SmartScreen asks once: More info → Run anyway.
 
@@ -39,13 +39,13 @@ The releases page has the `.dmg`, the AppImages and `Filo-Setup-x64.exe` for a m
 - **Fork** any earlier prompt into a new tab.
 - **No pop-ups.** Tool approvals, the agent's questions and plan sign-off are answered inline in the conversation.
 - **Terminal pi, in the app.** pi running in a terminal shows up in the project tree (working, waiting for you, idle). With [pi-cc-tui](packages/pi-cc-tui) installed, opening its session joins that pi: its run streams into the app as it happens, and what you send from the app runs there, in one session file. Without it, the app follows the session file and warns that sending from both sides forks the conversation.
-- **Other agents.** Codex, Claude Code, Grok Build, OpenCode, Gemini CLI, GitHub Copilot and Cursor run in the same threads over the [Agent Client Protocol](https://agentclientprotocol.com). The agent picker installs one into the app's own folder if you don't have it, and their own past sessions are listed and searchable.
+- **Other agents.** Codex, Claude Code, Grok Build, OpenCode, Gemini CLI, GitHub Copilot and Cursor run in the same threads over the [Agent Client Protocol](https://agentclientprotocol.com). The agent picker installs one into the app's own folder if you don't have it, and their own past sessions are listed and searchable. Claude Code and Codex also list every model you have an API key for under Providers as a channel, the way cc-switch does: picking one writes it into their own `settings.json` / `config.toml`, so `claude` and `codex` in a terminal use it too, even with Filo closed. "Add a channel…" takes just an address and a key; the same address and key added from the other agent joins the same provider, each model on its own API, and the same menu can switch back to what the file had before.
 
 ## How it works
 
 Each thread runs `pi --mode rpc` (or an ACP agent) as a child process of Electron's main process; the renderer talks to it over IPC. Sessions are pi's own JSONL files under `~/.pi/agent/sessions`, so the terminal and the app see the same history.
 
-App features that need the agent's cooperation (approvals, questions, plan mode, todos, subagents, review, autopilot) are pi extensions in [`packages/capabilities`](packages/capabilities), loaded with `-e` per thread. [`packages/pi-cc-tui`](packages/pi-cc-tui) loads the same extensions in the terminal, with Claude Code style dialogs, plus the presence file and bridge socket the app uses to find and join terminal sessions.
+App features that need the agent's cooperation (approvals, questions, plan mode, todos, subagents, review, autopilot, the spending limit) are pi extensions in [`packages/capabilities`](packages/capabilities), loaded with `-e` per thread. [`packages/pi-cc-tui`](packages/pi-cc-tui) loads the same extensions in the terminal, with Claude Code style dialogs, plus the presence file and bridge socket the app uses to find and join terminal sessions.
 
 | Path | What's there |
 |---|---|

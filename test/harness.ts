@@ -26,11 +26,14 @@ export interface MockRequest {
 /**
  * thinking streams as reasoning_content before the reply, like llama.cpp / DeepSeek endpoints.
  * `delayMs` holds the rest of the reply back (after thinking, if any), and `usage` sets the token
- * counts; both only matter where timings and stats are shown (site screenshots).
+ * counts; both only matter where timings and stats are shown (site screenshots). `streamMs` sends a
+ * text reply line by line, one line every that many ms, for checks that need output arriving live.
+ * `error` answers with that HTTP status instead, the way a provider refuses a request.
  */
-export type MockReply = { delayMs?: number, usage?: { input: number, output: number } } & (
+export type MockReply = { delayMs?: number, streamMs?: number, usage?: { input: number, output: number } } & (
     | { text: string, thinking?: string }
     | { toolCalls: { name: string, arguments: Record<string, unknown> }[], thinking?: string, text?: string }
+    | { error: number }
 )
 
 export interface MockLlm {
@@ -68,6 +71,11 @@ export async function startMockLlm(reply: (request: MockRequest, index: number) 
             }
             requests.push(request)
             const answer = reply(request, requests.length - 1)
+            if ('error' in answer) {
+                res.writeHead(answer.error, { 'content-type': 'application/json' })
+                res.end(JSON.stringify({ error: { message: `mock error ${answer.error}` } }))
+                return
+            }
             const chunk = (delta: unknown, finish: string | null = null) => res.write(`data: ${JSON.stringify({
                 id: 'mock',
                 object: 'chat.completion.chunk',
@@ -93,10 +101,28 @@ export async function startMockLlm(reply: (request: MockRequest, index: number) 
                     })
                     chunk({}, 'tool_calls')
                 }
+                else if (answer.streamMs) {
+                    const lines = answer.text.split(/(?<=\n)/)
+                    const next = () => {
+                        if (res.destroyed)
+                            return
+                        const line = lines.shift()
+                        if (line === undefined) {
+                            chunk({}, 'stop')
+                            return end()
+                        }
+                        chunk({ role: 'assistant', content: line })
+                        setTimeout(next, answer.streamMs)
+                    }
+                    return next()
+                }
                 else {
                     chunk({ role: 'assistant', content: answer.text })
                     chunk({}, 'stop')
                 }
+                end()
+            }
+            const end = () => {
                 const { input, output } = answer.usage ?? { input: 1, output: 1 }
                 res.write(`data: ${JSON.stringify({ id: 'mock', object: 'chat.completion.chunk', created: 0, model: parsed.model, choices: [], usage: { prompt_tokens: input, completion_tokens: output, total_tokens: input + output } })}\n\n`)
                 res.end('data: [DONE]\n\n')
@@ -147,10 +173,10 @@ export interface PiSession {
 }
 
 /**
- * Starts pi in a throwaway agent dir whose only model is the mock, so user settings, extensions
- * and credentials are never read.
+ * Starts pi in a throwaway agent dir whose only model is the mock (`model` adds to its models.json
+ * entry: a price, a cache lifetime), so user settings, extensions and credentials are never read.
  */
-export async function startPi(env: PiEnv, llm: MockLlm, capabilities: CapabilityId[], options: { approvalMode?: ApprovalMode, settings?: Record<string, unknown>, hostEnv?: Record<string, string> } = {}): Promise<PiSession> {
+export async function startPi(env: PiEnv, llm: MockLlm, capabilities: CapabilityId[], options: { approvalMode?: ApprovalMode, settings?: Record<string, unknown>, hostEnv?: Record<string, string>, model?: Record<string, unknown> } = {}): Promise<PiSession> {
     // Resolved: Windows' temp folder can be an 8.3 name (C:\Users\RUNNER~1), git prints the long one.
     const root = await realpath(await mkdtemp(path.join(os.tmpdir(), 'pi-gui-test-')))
     const agentDir = path.join(root, 'agent')
@@ -158,7 +184,7 @@ export async function startPi(env: PiEnv, llm: MockLlm, capabilities: Capability
     await mkdir(agentDir, { recursive: true })
     await mkdir(cwd, { recursive: true })
     await writeFile(path.join(agentDir, 'models.json'), JSON.stringify({
-        providers: { mock: { baseUrl: llm.baseUrl, api: 'openai-completions', apiKey: 'mock', models: [{ id: 'mock-1', contextWindow: 100_000, maxTokens: 1000 }] } },
+        providers: { mock: { baseUrl: llm.baseUrl, api: 'openai-completions', apiKey: 'mock', models: [{ id: 'mock-1', contextWindow: 100_000, maxTokens: 1000, ...options.model }] } },
     }))
     await writeFile(path.join(agentDir, 'settings.json'), JSON.stringify({ defaultProvider: 'mock', defaultModel: 'mock-1', defaultThinkingLevel: 'off', ...options.settings }))
 

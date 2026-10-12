@@ -1,23 +1,27 @@
 // "项目" tool window, laid out like WebStorm's Project view: the window's project is the root node,
 // with its path next to the name, and expands into its threads. A merged window lists each of its
-// projects as a root. Clicking a thread opens (or focuses) its tab.
+// projects as a root. Clicking a thread opens (or focuses) its tab. The "文件" view (FileTree.tsx)
+// shows the same roots as folders.
 import type { SessionSummary } from '@shared/ipc'
 import { agentLabel, agentOfKey } from '@shared/agents'
 import type { Project } from '@/store/app'
 import type { Thread } from '@/store/thread'
 import { ConflictMark } from '@/components/ConflictMark'
 import type { SubagentRun } from '@/lib/subagents'
-import { ActivityBadge, PiGlyph, StatusDot, SubagentMark, TerminalStatus } from '@/components/StatusIcons'
+import { ActivityBadge, StatusDot, SubagentMark, TerminalStatus } from '@/components/StatusIcons'
+import { AgentIcon } from '@/components/AgentIcon'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { childToolCount, subagentActivity, subagentLive } from '@/lib/subagents'
 import { formatElapsed } from '@/lib/threadActivity'
 import { cn, relativeTime, shortPath } from '@/lib/utils'
 import { appStore } from '@/store/app'
-import { AppWindow, ChevronRight, ChevronsDownUp, ChevronsUpDown, EyeOff, FolderOpen, FolderPlus, Minus, MoreHorizontal, Plus, X } from 'lucide-react'
+import { AppWindow, ChevronRight, ChevronsDownUp, ChevronsUpDown, EyeOff, FolderOpen, FolderPlus, LocateFixed, Minus, MoreHorizontal, Plus, X } from 'lucide-react'
 import { confirm } from '@/lib/confirm'
 import { observer } from 'mobx-react-lite'
 import { useEffect, useState } from 'react'
+import { fileTreeStore } from '@/store/fileTree'
 import { ProjectBadge } from '../Toolbar/ProjectBadge'
+import { FileTree, locateActiveFile } from './FileTree'
 import { newThreadLabel, tr } from '@/lib/i18n'
 import { keys, parentPath, projectKeys, showInFolderLabel } from '@/platform'
 
@@ -109,7 +113,7 @@ const ThreadRow = observer(({ thread, session, selected }: { thread?: Thread, se
                 aria-selected={selected}
                 tabIndex={-1}
                 data-tree-row
-                title={busy ? `${title}\n${activity!.text}` : terminal ? `${title}\n${tr('终端中的 pi', 'pi in a terminal')}` : title}
+                title={[title, agent === 'pi' ? '' : agentLabel(agent), busy ? activity!.text : terminal ? tr('终端中的 pi', 'pi in a terminal') : ''].filter(Boolean).join('\n')}
                 onClick={open}
                 onKeyDown={(e) => {
                     if (e.key === 'Enter')
@@ -122,9 +126,8 @@ const ThreadRow = observer(({ thread, session, selected }: { thread?: Thread, se
                 className={cn(rowBase, 'pl-[30px]', busy && 'h-auto flex-col items-stretch gap-0 pb-1', selected ? rowSelected : 'hover:bg-ide-hover')}
             >
                 <div className="flex h-6 min-w-0 flex-1 items-center gap-1.5">
-                    {terminal ? <TerminalStatus presence={terminal} /> : thread ? <StatusDot thread={thread} /> : <PiGlyph dim />}
+                    {terminal ? <TerminalStatus presence={terminal} /> : thread ? <StatusDot thread={thread} /> : <AgentIcon agent={agent} dim />}
                     <span className={cn('min-w-0 flex-1 truncate', thread ? 'text-gray-900' : 'text-gray-700')}>{title}</span>
-                    {agent !== 'pi' && <span className="shrink-0 text-[11px] text-gray-400">{agentLabel(agent)}</span>}
                     <ConflictMark cwd={thread?.cwd ?? session!.cwd} session={thread?.sessionPath ?? session?.path} />
                     {running
                         ? <span className="shrink-0 text-[11px] tabular-nums text-gray-500" title={tr('已运行', 'Running for')}>{formatElapsed(now - thread!.runStartedAt)}</span>
@@ -371,31 +374,82 @@ export const Sidebar = observer(() => {
     const toggleAll = () => setExpanded(anyExpanded ? new Set() : new Set(appStore.windowProjectList.map(p => p.cwd)))
     const toggleAllLabel = anyExpanded ? tr('全部折叠', 'Collapse all') : tr('全部展开', 'Expand all')
 
+    const files = appStore.sidebarView === 'files'
     return (
         <nav className="ide-island flex w-[272px] shrink-0 flex-col bg-ide-side" aria-label={tr('项目', 'Projects')}>
-            <div className="flex h-[34px] shrink-0 items-center gap-0.5 pl-3 pr-1.5">
-                <span className="flex-1 text-[13px] font-semibold text-gray-900">{tr('项目', 'Projects')}</span>
-                <button type="button" aria-label={tr('添加项目到此窗口', 'Add project to this window')} title={tr('添加项目到此窗口', 'Add project to this window')} onClick={() => void appStore.addProjectHere()} className={toolBtn}>
-                    <FolderPlus size={14} />
-                </button>
-                <button type="button" aria-label={toggleAllLabel} title={toggleAllLabel} onClick={toggleAll} className={toolBtn}>
-                    {anyExpanded ? <ChevronsDownUp size={14} /> : <ChevronsUpDown size={14} />}
-                </button>
+            <div className="flex h-[34px] shrink-0 items-center gap-0.5 pl-1.5 pr-1.5">
+                <ViewTabs />
+                {files
+                    ? (
+                            <>
+                                <button type="button" aria-label={tr('定位当前文件', 'Locate opened file')} title={tr('定位当前文件', 'Locate opened file')} disabled={!appStore.activeFile} onClick={locateActiveFile} className={cn(toolBtn, 'disabled:opacity-40 disabled:hover:bg-transparent')}>
+                                    <LocateFixed size={14} />
+                                </button>
+                                <button type="button" aria-label={tr('全部折叠', 'Collapse all')} title={tr('全部折叠', 'Collapse all')} onClick={fileTreeStore.collapseAll} className={toolBtn}>
+                                    <ChevronsDownUp size={14} />
+                                </button>
+                            </>
+                        )
+                    : (
+                            <>
+                                <button type="button" aria-label={tr('添加项目到此窗口', 'Add project to this window')} title={tr('添加项目到此窗口', 'Add project to this window')} onClick={() => void appStore.addProjectHere()} className={toolBtn}>
+                                    <FolderPlus size={14} />
+                                </button>
+                                <button type="button" aria-label={toggleAllLabel} title={toggleAllLabel} onClick={toggleAll} className={toolBtn}>
+                                    {anyExpanded ? <ChevronsDownUp size={14} /> : <ChevronsUpDown size={14} />}
+                                </button>
+                            </>
+                        )}
                 <button type="button" aria-label={tr('隐藏项目面板', 'Hide projects panel')} title={tr(`隐藏（${keys('⌘B')}）`, `Hide (${keys('⌘B')})`)} onClick={appStore.toggleSidebar} className={toolBtn}>
                     <Minus size={14} />
                 </button>
             </div>
-            <div role="tree" aria-label={tr('项目和线程', 'Projects and threads')} className="group/tree flex-1 overflow-y-auto px-1.5 pb-2 scrollbar-trigger">
-                {appStore.windowProjectList.map(project => (
-                    <ProjectNode
-                        key={project.cwd}
-                        project={project}
-                        index={appStore.projects.findIndex(p => p.cwd === project.cwd)}
-                        expanded={expanded.has(project.cwd)}
-                        onToggle={open => toggle(project.cwd, open)}
-                    />
-                ))}
-            </div>
+            {files
+                ? <FileTree />
+                : (
+                        <div role="tree" aria-label={tr('项目和线程', 'Projects and threads')} className="group/tree flex-1 overflow-y-auto px-1.5 pb-2 scrollbar-trigger">
+                            {appStore.windowProjectList.map(project => (
+                                <ProjectNode
+                                    key={project.cwd}
+                                    project={project}
+                                    index={appStore.projects.findIndex(p => p.cwd === project.cwd)}
+                                    expanded={expanded.has(project.cwd)}
+                                    onToggle={open => toggle(project.cwd, open)}
+                                />
+                            ))}
+                        </div>
+                    )}
         </nav>
+    )
+})
+
+/**
+ * The tool window's views as title tabs, like a JetBrains tool window with several contents: the
+ * projects' threads, or their files.
+ */
+const ViewTabs = observer(() => {
+    const views = [
+        { id: 'threads', label: tr('线程', 'Threads'), hint: keys('⌘B') },
+        { id: 'files', label: tr('文件', 'Files'), hint: keys('⌘⇧E') },
+    ] as const
+    return (
+        <div role="tablist" aria-label={tr('项目面板视图', 'Projects panel view')} className="flex min-w-0 flex-1 items-center gap-0.5">
+            {views.map(v => (
+                <button
+                    key={v.id}
+                    type="button"
+                    role="tab"
+                    aria-selected={appStore.sidebarView === v.id}
+                    title={`${v.label}${v.id === 'files' ? `（${v.hint}）` : ''}`}
+                    onClick={() => appStore.setSidebarView(v.id)}
+                    className={cn(
+                        'h-6 rounded-md px-1.5 text-[13px] outline-none focus-visible:ring-2 focus-visible:ring-ide-accent/50',
+                        appStore.sidebarView === v.id ? 'font-semibold text-gray-900' : 'text-gray-500 hover:bg-black/[0.06] hover:text-gray-800',
+                    )}
+                >
+                    {v.label}
+                </button>
+            ))}
+        </div>
     )
 })

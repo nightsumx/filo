@@ -13,13 +13,14 @@ import { existsSync } from 'node:fs'
 import { mkdir, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import process from 'node:process'
-import { BACKGROUND_ENV, workDir } from './app'
+import { BACKGROUND_ENV, freePort, TEST_ENV, workDir } from './app'
 import { findPi, startMockLlm, startPi } from './harness'
 
 const ROOT = path.resolve(import.meta.dirname, '..')
 const BASELINE = path.join(ROOT, 'test/density-baseline.json')
 const WORK = workDir('pi-gui-density')
-const PORT = 9335
+/** Free at start, so runs from different sessions never attach to each other's app. */
+const PORT = Number(process.env.PI_E2E_PORT) || await freePort()
 const VIEWPORT = { width: 1280, height: 820 }
 /** Allowed growth of the transcript height before the comparison fails. */
 const TOLERANCE = 0.02
@@ -262,7 +263,7 @@ async function measure(agentDir: string, userData: string): Promise<Metrics> {
     const electron = createRequire(import.meta.url)('electron') as string
     const app = spawn(electron, ['.', `--remote-debugging-port=${PORT}`], {
         cwd: ROOT,
-        env: { ...process.env, ...BACKGROUND_ENV, PI_GUI_USER_DATA: userData, PI_CODING_AGENT_DIR: agentDir },
+        env: { ...process.env, ...BACKGROUND_ENV, ...TEST_ENV, PI_GUI_USER_DATA: userData, PI_CODING_AGENT_DIR: agentDir },
         stdio: 'ignore',
     })
     try {

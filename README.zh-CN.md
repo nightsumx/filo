@@ -26,7 +26,7 @@ irm https://filoapp.dev/install.ps1 | iex
 - Linux：校验 SHA-256，把 AppImage 放到 `~/.local/share/filo`，加上应用菜单项和 `~/.local/bin/filo` 命令。AppImage 需要 FUSE（`fuse3`），大多数发行版自带。
 - Windows：校验 SHA-256，为当前用户静默安装到 `%LOCALAPPDATA%\Programs\Filo`，加上开始菜单和桌面快捷方式。
 
-不需要 Node.js 或 pi 命令行：Filo 自带一份 pi，登录 shell 里有你自己的 pi 就用你的。在“设置 → 模型供应商”里登录订阅、填 API key，或者接入本地模型，配置都存在 pi 自己的 `~/.pi/agent`。
+不需要 Node.js 或 pi 命令行：Filo 自带一份 pi，登录 shell 里有你自己的 pi 就用你的。第一次打开时有个设置向导：可以装 Node.js、终端用的 pi、Claude Code、Codex 和 Grok Build，每个都在窗口里的终端里跑官方安装程序（要输密码或回答提示就在里面输），然后选新线程默认用哪个 agent。之后在“设置 → Agent”里可以改，也能重新打开向导。在“设置 → 供应商”里登录订阅、填 API key，或者接入本地模型，配置都存在 pi 自己的 `~/.pi/agent`。
 
 也可以从 releases 页面手动下载 `.dmg`、AppImage 或 `Filo-Setup-x64.exe`。macOS 版没有经过 Apple 公证，浏览器下载的第一次打开会被拦下：先打开一次，再到“系统设置 → 隐私与安全性”点“仍要打开”。Windows 安装程序没有代码签名，SmartScreen 会拦一次：点“更多信息”，再点“仍要运行”。
 
@@ -39,19 +39,19 @@ irm https://filoapp.dev/install.ps1 | iex
 - **分叉**：从任意一次提问分叉出新标签。
 - **不弹窗**：工具审批、Agent 的提问、计划确认都在对话里原地处理。
 - **终端里的 pi 也在这里**。终端里运行的 pi 会出现在项目树里（在跑、等你回答、空闲）。装了 [pi-cc-tui](packages/pi-cc-tui) 的话，在桌面端打开同一个会话会直接连上那个 pi：终端里的运行实时显示在桌面端，在桌面端发送的消息也在那个 pi 里执行，会话文件只有一条线。没装的话，桌面端跟随会话文件刷新，并提醒你两边同时发送会让对话分叉。
-- **其他 Agent**。Codex、Claude Code、Grok Build、OpenCode、Gemini CLI、GitHub Copilot 和 Cursor 通过 [Agent Client Protocol](https://agentclientprotocol.com) 跑在同样的线程里。没装的 Agent 可以在选择器里一键装到应用自己的目录；它们各自的历史会话也会列出来，可以搜索。
+- **其他 Agent**。Codex、Claude Code、Grok Build、OpenCode、Gemini CLI、GitHub Copilot 和 Cursor 通过 [Agent Client Protocol](https://agentclientprotocol.com) 跑在同样的线程里。没装的 Agent 可以在选择器里一键装到应用自己的目录；它们各自的历史会话也会列出来，可以搜索。Claude Code 和 Codex 的模型列表里还有「供应商」里所有填了 API key 的模型，当作渠道用，和 cc-switch 一样：选中就写进它们自己的 `settings.json` / `config.toml`，终端里的 `claude`、`codex` 也用它，关掉 Filo 也不变。「添加渠道…」只要填地址和 key，从另一个 agent 加同一个地址和 key 会并进同一个供应商，每个模型用自己的接口；同一个菜单里也能换回文件原来的设置。
 
 ## 工作原理
 
 每个线程在 Electron 主进程里起一个 `pi --mode rpc`（或 ACP Agent）子进程，渲染进程通过 IPC 和它通信。会话就是 pi 自己在 `~/.pi/agent/sessions` 下的 JSONL 文件，所以终端和桌面端看到的是同一份历史。
 
-需要 Agent 配合的功能（审批、提问、计划模式、待办、子 Agent、审查、自动驾驶）是 [`packages/capabilities`](packages/capabilities) 里的 pi 扩展，每个线程用 `-e` 加载。[`packages/pi-cc-tui`](packages/pi-cc-tui) 在终端里加载同一批扩展，换成 Claude Code 风格的对话框，另外提供桌面端用来发现和连接终端会话的 presence 文件和 bridge socket。
+需要 Agent 配合的功能（审批、提问、计划模式、待办、子 Agent、审查、自动驾驶、花费上限）是 [`packages/capabilities`](packages/capabilities) 里的 pi 扩展，每个线程用 `-e` 加载。[`packages/pi-cc-tui`](packages/pi-cc-tui) 在终端里加载同一批扩展，换成 Claude Code 风格的对话框，另外提供桌面端用来发现和连接终端会话的 presence 文件和 bridge socket。
 
 | 路径 | 内容 |
 |---|---|
 | `electron/` | 主进程：pi 与 ACP 进程、会话、搜索索引、git、presence、窗口 |
 | `src/` | 渲染进程：React + MobX（`src/store`），各功能在 `src/features` |
-| `shared/` | 两边共用的类型和常量（IPC、pi 的 RPC、Agent、模型供应商） |
+| `shared/` | 两边共用的类型和常量（IPC、pi 的 RPC、Agent、供应商） |
 | `packages/capabilities` | 桌面端和 pi-cc-tui 共用的 pi 扩展；`protocol.ts` 是两边的约定 |
 | `packages/pi-cc-tui` | 让 pi 的终端界面像 Claude Code，发布在 npm |
 | `bundled-pi/` | 应用自带的 pi 版本（lockfile），由 `scripts/bundle-pi.sh` 安装 |

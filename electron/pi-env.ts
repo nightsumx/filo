@@ -26,7 +26,8 @@ let shellPath = process.env.PATH ?? ''
 
 /**
  * The shipped pi's CLI and the launcher that starts it, set by main at startup. `runtime` is the
- * Electron binary that runs it, by default this process's (tests pass the electron package's).
+ * Electron binary that runs it, by default this process's (tests pass the electron package's); on
+ * macOS its Helper runs it (platform.nodeRuntime).
  */
 interface BundledPi { cli: string, launcher: string, runtime?: string }
 let bundledPi: BundledPi | undefined
@@ -92,7 +93,7 @@ async function resolveBundled(): Promise<PiEnvResult | undefined> {
         return undefined
     if (!process.env.PI_GUI_PI)
         await loadShellPath()
-    return checkVersion({ nodePath: bundledPi.runtime ?? process.execPath, piPath: bundledPi.cli, version: '', bundled: { launcher: bundledPi.launcher } })
+    return checkVersion({ nodePath: platform.nodeRuntime(bundledPi.runtime ?? process.execPath), piPath: bundledPi.cli, version: '', bundled: { launcher: bundledPi.launcher } })
 }
 
 /** `pi --version` through the same command and environment the threads use. */
@@ -113,6 +114,19 @@ let shellLoaded = false
 /** The login shell's PATH (asked once), for finding other agents' commands. */
 export async function loginShellPath(): Promise<string> {
     await loadShellPath()
+    return shellPath
+}
+
+/**
+ * Asks the login shell again, after an installer changed the profile or put a tool on PATH: later
+ * lookups (agents, the pi to start) see the new PATH, and the pi env is resolved again.
+ */
+export async function refreshShellPath(): Promise<string> {
+    shellLoaded = true
+    const fromShell = await platform.shellEnv().catch(() => undefined)
+    if (fromShell?.path)
+        shellPath = fromShell.path
+    cached = undefined
     return shellPath
 }
 

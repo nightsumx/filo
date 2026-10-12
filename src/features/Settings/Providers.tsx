@@ -1,11 +1,12 @@
-// Settings → 模型供应商: pi's providers with their sign-in state. A row opens in place to show all of
-// its settings at once: sign-in flows (API key, OAuth, device code) run inline there, next to the
-// models.json endpoint (a proxy for a built-in, the whole OpenAI/Anthropic-compatible server for a
-// custom one). Everything is pi's own auth.json and models.json, so
-// the terminal pi sees the same setup.
+// Settings → 供应商: addresses and keys every agent shares, with their sign-in state. A row opens in
+// place to show all of its settings at once: sign-in flows (API key, OAuth, device code) run inline
+// there, next to the models.json endpoint (a proxy for a built-in, the whole OpenAI/Anthropic-
+// compatible server for a custom one). Everything is pi's own auth.json and models.json, so the
+// terminal sees the same setup.
 import type { Localized } from '@shared/i18n'
 import type { AuthMethod, Endpoint, EndpointModel, LoginNotice, LoginPrompt, LoginUpdate, ProviderInfo, ProvidersState } from '@shared/providers'
 import { ENDPOINT_APIS, sortProviders } from '@shared/providers'
+import { AGENT_APIS, ROUTED_AGENT_LABELS, TERMINAL_AGENTS } from '@shared/routes'
 import { Button } from '@/components/ui/button'
 import { Comment, flatFieldClass, Segmented, SettingsPage, Switch } from '@/components/ui/form'
 import { tr } from '@/lib/i18n'
@@ -15,6 +16,7 @@ import { Check, ChevronRight, Copy, ExternalLink, Loader2, Plus, RefreshCw, Sear
 import { observer } from 'mobx-react-lite'
 import { useEffect, useId, useRef, useState } from 'react'
 import { toast } from 'sonner'
+import { ChannelTestLine } from './ChannelTest'
 import { ProviderIcon } from './providerIcons'
 
 const DANGER = 'text-[var(--sl-danger)]'
@@ -34,6 +36,14 @@ const API_LABELS: Record<string, { label: string, title: string }> = {
     'openai-completions': { label: 'OpenAI Chat', title: 'OpenAI Chat Completions (/chat/completions)' },
     'openai-responses': { label: 'OpenAI Responses', title: 'OpenAI Responses (/responses)' },
     'anthropic-messages': { label: 'Anthropic', title: 'Anthropic Messages (/v1/messages)' },
+}
+
+/** Who can use a provider: pi any of it, Claude Code and Codex the models on their API (channels). A subscription is for pi alone. */
+function usedBy(p: ProviderInfo) {
+    if (p.stored === 'oauth')
+        return tr('订阅只给 pi 用', 'Subscription: pi only')
+    const agents = ['pi', ...TERMINAL_AGENTS.filter(a => p.apis.some(api => AGENT_APIS[a].some(x => x === api))).map(a => ROUTED_AGENT_LABELS[a])]
+    return tr(`给 ${agents.join('、')} 用`, `Used by ${agents.join(', ')}`)
 }
 
 const modelCount = (n: number) => tr(`${n} 个模型`, n === 1 ? '1 model' : `${n} models`)
@@ -169,7 +179,7 @@ export const ProvidersPage = observer(() => {
         }
     }
 
-    const title = tr('模型供应商', 'Model providers')
+    const title = tr('供应商', 'Providers')
     if (!state) {
         return (
             <SettingsPage title={title}>
@@ -208,8 +218,8 @@ export const ProvidersPage = observer(() => {
             <div className="py-3">
                 <Comment>
                     {tr(
-                        '登录信息存在 pi 的 auth.json，自定义端点存在 models.json，终端里的 pi 用的是同一份。改动后，打开的线程会在空闲时重启 pi，会话保留。',
-                        'Sign-ins are saved to pi\'s auth.json and custom endpoints to models.json, the same files the terminal pi uses. After a change, open threads restart pi once idle and keep their session.',
+                        '供应商是一个地址加 key，所有 agent 共用：pi 都能用，Claude Code 和 Codex 用接口对得上的模型，在它们的模型菜单里选。订阅登录只给 pi 用。存在 pi 的 auth.json 和 models.json，终端里读的是同一份。改动后，打开的线程会在空闲时重启，会话保留。',
+                        'A provider is an address and a key that every agent shares: pi can use all of it, Claude Code and Codex the models on their API, picked from their model menu. Subscription sign-ins are for pi only. They are kept in pi\'s auth.json and models.json, which the terminal reads too. After a change, open threads restart once idle and keep their session.',
                     )}
                 </Comment>
                 {state.modelsError && (
@@ -277,6 +287,7 @@ const ProviderRow = observer(function ProviderRow({ provider: p, endpoint, open,
     const proxy = p.builtIn && endpoint?.baseUrl
     const details = [
         p.configured ? sourceText(p, endpoint) : '',
+        p.configured ? usedBy(p) : '',
         p.configured ? tr(`${p.available} 个模型可用`, `${p.available === 1 ? '1 model' : `${p.available} models`} available`) : modelCount(p.models),
         proxy ? tr(`经由 ${endpoint.baseUrl}`, `via ${endpoint.baseUrl}`) : '',
         !p.builtIn && endpoint?.baseUrl ? endpoint.baseUrl : '',
@@ -309,6 +320,11 @@ const ProviderRow = observer(function ProviderRow({ provider: p, endpoint, open,
                         : (
                             <div className="ml-8">
                                 <EndpointForm provider={p} endpoint={endpoint} onDone={onClose} onRemove={onRemove} />
+                                {p.configured && (
+                                    <div className="mt-1 rounded-[6px] bg-[var(--jb-fill)] px-3 py-2">
+                                        <ChannelTestLine provider={p.id} />
+                                    </div>
+                                )}
                             </div>
                         )}
                 </div>
@@ -369,6 +385,7 @@ const BuiltInPanel = observer(function BuiltInPanel({ provider: p, endpoint, log
                 </>
             )}
             <BaseUrlLine provider={p} endpoint={endpoint} />
+            {p.configured && <ChannelTestLine provider={p.id} />}
         </div>
     )
 })
@@ -603,6 +620,8 @@ interface ModelDraft {
     images: boolean
     reasoning?: boolean
     maxTokens?: number
+    /** Its own API; none follows the provider's. */
+    api?: string
 }
 
 const draftOf = (m: EndpointModel): ModelDraft => ({
@@ -612,6 +631,7 @@ const draftOf = (m: EndpointModel): ModelDraft => ({
     images: !!m.images,
     reasoning: m.reasoning,
     maxTokens: m.maxTokens,
+    api: m.api,
 })
 
 /**
@@ -682,6 +702,7 @@ const EndpointForm = observer(function EndpointForm({ provider, endpoint, onDone
                 maxTokens: m.maxTokens,
                 reasoning: m.reasoning,
                 images: m.images,
+                api: m.api ?? api,
             }))
             await window.pi.saveEndpoint({ endpoint: { id: id.trim(), name: name.trim() || undefined, baseUrl: baseUrl.trim(), api, models: endpointModels }, apiKey: keyless ? undefined : apiKey.trim() || undefined, keyless, create: isNew })
             toast.success(tr('已保存', 'Saved'))
@@ -786,6 +807,7 @@ const EndpointForm = observer(function EndpointForm({ provider, endpoint, onDone
                         <div className="flex gap-2 text-[11px] text-[var(--jb-comment)]">
                             <span className="flex-1">ID</span>
                             <span className="w-[76px]">{tr('上下文 (K)', 'Context (K)')}</span>
+                            <span className="w-[112px]">{tr('接口', 'API')}</span>
                             <span className="w-[64px]">{tr('图片', 'Images')}</span>
                             <span className="w-7" />
                         </div>
@@ -795,6 +817,7 @@ const EndpointForm = observer(function EndpointForm({ provider, endpoint, onDone
                             <ModelRow
                                 key={i}
                                 model={m}
+                                api={api}
                                 onChange={next => setModels(list => list.map((x, j) => (j === i ? next : x)))}
                                 onRemove={() => setModels(list => list.filter((_, j) => j !== i))}
                             />
@@ -825,7 +848,7 @@ const EndpointForm = observer(function EndpointForm({ provider, endpoint, onDone
     )
 })
 
-const ModelRow = observer(function ModelRow({ model, onChange, onRemove }: { model: ModelDraft, onChange: (m: ModelDraft) => void, onRemove: () => void }) {
+const ModelRow = observer(function ModelRow({ model, api, onChange, onRemove }: { model: ModelDraft, api: string, onChange: (m: ModelDraft) => void, onRemove: () => void }) {
     const imagesId = useId()
     const field = cn(flatFieldClass, 'h-7 min-w-0 bg-[var(--jb-dialog-bg)] px-2')
     return (
@@ -839,6 +862,15 @@ const ModelRow = observer(function ModelRow({ model, onChange, onRemove }: { mod
                 aria-label={tr('上下文窗口（千 tokens）', 'Context window (thousands of tokens)')}
                 onChange={e => onChange({ ...model, contextK: e.target.value })}
             />
+            <select
+                className={cn(field, 'w-[112px] text-[12px]')}
+                value={model.api ?? api}
+                title={API_LABELS[model.api ?? api]?.title}
+                aria-label={tr(`${model.id || '模型'} 的接口`, `API of ${model.id || 'the model'}`)}
+                onChange={e => onChange({ ...model, api: e.target.value === api ? undefined : e.target.value })}
+            >
+                {[...new Set<string>([...ENDPOINT_APIS, api, model.api ?? api])].map(value => <option key={value} value={value}>{API_LABELS[value]?.label ?? value}</option>)}
+            </select>
             <span className="flex w-[64px] items-center">
                 <span id={imagesId} className="sr-only">{tr(`${model.id || '模型'} 接受图片`, `${model.id || 'Model'} accepts images`)}</span>
                 <Switch labelledBy={imagesId} checked={model.images} onChange={images => onChange({ ...model, images })} />

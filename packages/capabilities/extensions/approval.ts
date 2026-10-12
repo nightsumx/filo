@@ -3,7 +3,10 @@
 // (and a subagent can forward its child's prompts unchanged). The mode is per session:
 //   /gui-approval ask|edits|auto       switch mode (the GUI's mode picker)
 //   pi.events gui-approval:set <mode>  switch mode from another extension (pi-cc-tui's mode key)
-//   --gui-approval <mode>              mode for sessions that never chose one (or PI_KIT_APPROVAL_MODE)
+//   --gui-approval <mode>              mode for sessions that never chose one (or PI_KIT_APPROVAL_MODE;
+//                                      else the one saved in settings.json, see lib/settings.ts)
+// A mode chosen in the terminal is saved to settings.json for the next session, as the desktop app
+// does for its threads (it saves its own: in rpc mode nothing is written here).
 // The current mode goes down as status `gui-approval` and event `gui-approval:mode`. In the terminal
 // the prompt is Claude Code's permission dialog. Both hosts follow Claude Code's rules:
 // - No (or dismissing the prompt) ends the turn, and the rest of the tool batch is declined unasked,
@@ -12,10 +15,12 @@
 //   session. Files outside the project are asked about one at a time.
 import type { ExtensionAPI, ExtensionContext, ToolCallEvent } from '@earendil-works/pi-coding-agent'
 import type { ApprovalChoice, ApprovalMode, ApprovalRequest, GuiCommands } from '../protocol'
+import { getAgentDir } from '@earendil-works/pi-coding-agent'
 import path from 'node:path'
 import process from 'node:process'
 import { mirrored } from '../lib/mirror'
 import { isReadOnlyCommand } from '../lib/readonly'
+import { readCapabilityState, writeCapabilityChoice } from '../lib/settings'
 import { promptApproval } from '../tui/approval'
 import { serialized } from '../tui/dialog'
 
@@ -24,7 +29,6 @@ const STATUS = 'gui-approval'
 const ENTRY = 'gui-approval'
 const TITLE_PREFIX = 'gui-approval '
 const MODES: ApprovalMode[] = ['ask', 'edits', 'auto']
-const DEFAULT_MODE: ApprovalMode = 'auto'
 const SET_EVENT = 'gui-approval:set'
 const MODE_EVENT = 'gui-approval:mode'
 const ENV_MODE = 'PI_KIT_APPROVAL_MODE'
@@ -90,7 +94,7 @@ const SKIPPED = `Not run: the user declined an earlier call in this batch. Stop 
 export default function (pi: ExtensionAPI) {
     pi.registerFlag(COMMAND, { type: 'string', description: 'Approval mode for new sessions: ask, edits or auto' })
 
-    const state: State = { mode: DEFAULT_MODE, always: [] }
+    const state: State = { mode: 'auto', always: [] }
     let current: ExtensionContext | undefined
     /** Set by a No: the rest of this assistant message's tool calls are declined too. */
     let declined = false
@@ -131,7 +135,7 @@ export default function (pi: ExtensionAPI) {
             .pop() as { data?: Partial<State> } | undefined
         current = ctx
         const flag = pi.getFlag(COMMAND) ?? process.env[ENV_MODE]
-        state.mode = isMode(saved?.data?.mode) ? saved.data.mode : isMode(flag) ? flag : DEFAULT_MODE
+        state.mode = isMode(saved?.data?.mode) ? saved.data.mode : isMode(flag) ? flag : readCapabilityState(getAgentDir()).approvalMode
         state.always = Array.isArray(saved?.data?.always) ? saved.data.always.filter(s => typeof s === 'string') : []
         publish(ctx)
     })
@@ -140,6 +144,8 @@ export default function (pi: ExtensionAPI) {
         state.mode = mode
         persist()
         publish(ctx)
+        if (ctx.mode === 'tui')
+            void writeCapabilityChoice(getAgentDir(), { approvalMode: mode }).catch(() => {})
     }
 
     pi.events.on(SET_EVENT, (mode) => {

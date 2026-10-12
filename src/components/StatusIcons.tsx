@@ -1,13 +1,13 @@
 import type { ProjectActivity } from '@/store/app'
 import type { Thread } from '@/store/thread'
 import { tr } from '@/lib/i18n'
-import { cn } from '@/lib/utils'
 import type { Presence } from '@shared/capabilities'
 import type { SubagentStatus } from '@/lib/subagents'
 import { Ban, Check, Loader2, SquareTerminal, X } from 'lucide-react'
 import { observer } from 'mobx-react-lite'
+import { AgentIcon } from '@/components/AgentIcon'
 
-/** Per-thread status used by tabs and the project tree: waiting > running > error > unread > idle π. */
+/** Per-thread status used by tabs and the project tree: waiting > running > error > unread > the agent's mark when idle. */
 export const StatusDot = observer(({ thread, dim }: { thread: Thread, dim?: boolean }) => {
     if (thread.waitingForUser)
         return <span className="mx-[3px] h-2 w-2 shrink-0 rounded-full bg-amber-500" aria-label={tr('等待处理', 'Needs you')} />
@@ -17,7 +17,7 @@ export const StatusDot = observer(({ thread, dim }: { thread: Thread, dim?: bool
         return <span className="mx-[3px] h-2 w-2 shrink-0 rounded-full bg-red-500" aria-label={tr('出错', 'Error')} />
     if (thread.unread)
         return <span className="mx-[3px] h-2 w-2 shrink-0 rounded-full bg-ide-accent" aria-label={tr('有新回复', 'New reply')} />
-    return <PiGlyph dim={dim} />
+    return <AgentIcon agent={thread.agent} dim={dim} />
 })
 
 /**
@@ -44,10 +44,6 @@ export function SubagentMark({ status, waiting }: { status: SubagentStatus, wait
     if (status === 'failed')
         return <X size={14} strokeWidth={2.25} className="shrink-0 text-red-500" role="img" aria-label={tr('失败', 'Failed')} />
     return <Ban size={12} strokeWidth={2} className="mx-px shrink-0 text-gray-400" role="img" aria-label={status === 'cancelled' ? tr('已取消', 'Cancelled') : tr('已中断', 'Interrupted')} />
-}
-
-export function PiGlyph({ dim }: { dim?: boolean }) {
-    return <span aria-hidden className={cn('w-3.5 shrink-0 text-center font-serif text-[14px] italic leading-none select-none', dim ? 'text-gray-400' : 'text-gray-500')}>π</span>
 }
 
 /** Project-level summary: amber = needs input, spinner = running, blue = unread. */

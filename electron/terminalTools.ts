@@ -26,7 +26,8 @@ export function summary(info: TerminalInfo): TerminalSummary {
         id: info.id,
         title: info.title,
         ...(info.command ? { command: info.command } : {}),
-        by: info.by,
+        // Setup terminals never reach the agent (they are listed for no project).
+        by: info.by === 'agent' ? 'agent' : 'user',
         status: info.exit ? 'exited' : info.busy ? 'running' : 'idle',
         ...(info.exit ? { exitCode: info.exit.code } : {}),
     }
@@ -148,7 +149,7 @@ export class TerminalTools {
         const cwd = this.projectOf(request.cwd)
         const ofProject = (id: unknown) => {
             const info = typeof id === 'string' ? this.terminals.get(id) : undefined
-            if (!info || info.cwd !== cwd)
+            if (!info || info.cwd !== cwd || info.by === 'setup')
                 throw new Error(`no terminal ${String(id)} in this project; call terminal_read without an id to list them`)
             return info
         }
@@ -176,7 +177,7 @@ export class TerminalTools {
 
         if (request.method === 'read') {
             if (request.id === undefined)
-                return { ok: true, terminals: this.terminals.list().filter(t => t.cwd === cwd).map(summary) }
+                return { ok: true, terminals: this.terminals.list().filter(t => t.cwd === cwd && t.by !== 'setup').map(summary) }
             const info = ofProject(request.id)
             const waitFor = typeof request.waitFor === 'string' ? request.waitFor : ''
             let matched: boolean | undefined

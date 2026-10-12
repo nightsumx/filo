@@ -49,6 +49,26 @@ const KILL_GRACE_MS = 1500
 const DEFAULT_COLS = 100
 const DEFAULT_ROWS = 24
 
+/**
+ * A program the app runs in a terminal of its own and drives itself (Claude Code's TUI): not one of
+ * the project's terminals (no list, no close with the project), and nothing answers its terminal
+ * queries unless main does, as no window may show it.
+ */
+export interface TerminalProgram {
+    file: string
+    args: string[]
+    env: Record<string, string>
+    /** What a window typed into it (not what the app injects). */
+    onInput?: (data: string) => void
+    onExit?: (exit: { code: number, signal?: number }) => void
+}
+
+/**
+ * Replies a window's xterm sends to the program's queries (device attributes, cursor position, mode
+ * reports, colours): main's headless terminal answered already, so a window's copy is dropped.
+ */
+const QUERY_REPLY = /^(?:\x1B\[[?>]?[\d;]*c|\x1B\[\d+;\d+R|\x1B\[\d*n|\x1B\[\??[\d;]*\$y|\x1BP[^\x1B]*\x1B\\|\x1B\]\d+;[^\x07\x1B]*(?:\x07|\x1B\\))+$/
+
 interface Entry {
     info: TerminalInfo
     pty: IPty | null
@@ -66,6 +86,7 @@ interface Entry {
     rows: number
     /** Exit listeners of the current process (stop, restart). */
     exited: Set<() => void>
+    program?: TerminalProgram
 }
 
 /**
@@ -131,7 +152,7 @@ export class Terminals {
     }
 
     list(): TerminalInfo[] {
-        return [...this.entries.values()].map(e => ({ ...e.info }))
+        return [...this.entries.values()].filter(e => !e.program).map(e => ({ ...e.info }))
     }
 
     get(id: string): TerminalInfo | undefined {
@@ -139,7 +160,29 @@ export class Terminals {
         return info && { ...info }
     }
 
-    create(create: TerminalCreate, by: TerminalInfo['by'] = 'user'): TerminalInfo {
+    /** Starts a program the app drives (TerminalProgram); its terminal id. */
+    run(create: TerminalCreate, program: TerminalProgram): string {
+        return this.create(create, 'agent', program).id
+    }
+
+    /** The app's own input to a program's terminal (not a window's keystrokes). */
+    inject(id: string, data: string) {
+        this.entries.get(id)?.pty?.write(data)
+    }
+
+    /** The visible screen as plain text, as main's terminal holds it now. */
+    screen(id: string): string {
+        const entry = this.entries.get(id)
+        if (!entry)
+            return ''
+        const buffer = entry.headless.buffer.active
+        const lines: string[] = []
+        for (let i = buffer.viewportY; i < buffer.viewportY + entry.headless.rows; i++)
+            lines.push(buffer.getLine(i)?.translateToString(true) ?? '')
+        return lines.join('\n')
+    }
+
+    create(create: TerminalCreate, by: TerminalInfo['by'] = 'user', program?: TerminalProgram): TerminalInfo {
         const cwd = create.cwd
         if (!path.isAbsolute(cwd) || !statSync(cwd, { throwIfNoEntry: false })?.isDirectory())
             throw new Error(`not a folder: ${cwd}`)
@@ -164,6 +207,12 @@ export class Terminals {
             cols,
             rows,
             exited: new Set(),
+            program,
+        }
+        if (program) {
+            entry.info.title = create.label?.trim() || path.basename(program.file)
+            entry.info.busy = false
+            headless.onData(data => entry.pty?.write(data))
         }
         this.entries.set(entry.info.id, entry)
         try {
@@ -181,12 +230,13 @@ export class Terminals {
 
     private spawn(entry: Entry) {
         const { command } = entry.info
-        const pty = this.loadPty().spawn(entry.shell, platform.shellArgs(entry.shell, command), {
+        const program = entry.program
+        const pty = this.loadPty().spawn(program?.file ?? entry.shell, program?.args ?? platform.shellArgs(entry.shell, command), {
             name: 'xterm-256color',
             cols: entry.cols,
             rows: entry.rows,
             cwd: entry.info.cwd,
-            env: terminalEnv(process.env, this.options.appVersion),
+            env: terminalEnv(program?.env ?? process.env, this.options.appVersion),
         })
         entry.pty = pty
         entry.info.exit = undefined
@@ -200,6 +250,11 @@ export class Terminals {
             const listeners = [...entry.exited]
             entry.exited.clear()
             listeners.forEach(f => f())
+            if (program) {
+                entry.info.exit = { code: exitCode, ...(signal ? { signal } : {}) }
+                program.onExit?.(entry.info.exit)
+                return
+            }
             if (!this.entries.has(entry.info.id))
                 return
             // A shell the user exited closes, as in Terminal.app; a command's output stays to be read.
@@ -271,7 +326,13 @@ export class Terminals {
     }
 
     write(id: string, data: string) {
-        this.entries.get(id)?.pty?.write(data)
+        const entry = this.entries.get(id)
+        if (entry?.program) {
+            if (QUERY_REPLY.test(data))
+                return
+            entry.program.onInput?.(data)
+        }
+        entry?.pty?.write(data)
     }
 
     /** Several windows may show one terminal; the last one to resize sets its size, as in tmux. */
@@ -353,7 +414,8 @@ export class Terminals {
 
     /** Every terminal of folders no window shows any more. */
     closeOutside(open: ReadonlySet<string>): Promise<void> {
-        return Promise.all([...this.entries.values()].filter(e => !open.has(e.info.cwd)).map(e => this.close(e.info.id))).then(() => {})
+        // The setup assistant's terminals belong to no project; the assistant closes them.
+        return Promise.all([...this.entries.values()].filter(e => e.info.by !== 'setup' && !e.program && !open.has(e.info.cwd)).map(e => this.close(e.info.id))).then(() => {})
     }
 
     /** Quit: everything ends, within the kill grace. */
@@ -363,7 +425,7 @@ export class Terminals {
 
     /** Terminals of these folders with something running in them (the close-window prompt). */
     busyIn(cwds: readonly string[]): number {
-        return [...this.entries.values()].filter(e => e.info.busy && cwds.includes(e.info.cwd)).length
+        return [...this.entries.values()].filter(e => e.info.by !== 'setup' && !e.program && e.info.busy && cwds.includes(e.info.cwd)).length
     }
 
     private drop(entry: Entry) {
@@ -397,7 +459,7 @@ export class Terminals {
         try {
             for (const entry of this.entries.values()) {
                 const pty = entry.pty
-                if (!pty || entry.info.command)
+                if (!pty || entry.info.command || entry.program)
                     continue
                 const fg = await platform.foreground(pty).catch(() => '')
                 if (entry.pty !== pty)

@@ -1,9 +1,9 @@
-import type { ApprovalMode, ApprovalRequest, AskDetails, AskResponse, CapabilityId, PlanDetails, ReviewDetails, ReviewProgress, SubagentDetails, TodoDetails } from '@shared/capabilities'
+import type { ApprovalRequest, AskDetails, AskResponse, CapabilityId, PlanDetails, ReviewDetails, ReviewProgress, SubagentDetails, TodoDetails } from '@shared/capabilities'
 import type { PiEnv } from '@shared/ipc'
 import type { MockLlm, MockReply, MockRequest, PiSession } from './harness'
 import { APPROVAL_TITLE_PREFIX, CAPABILITIES } from '@shared/capabilities'
 import { execFileSync } from 'node:child_process'
-import { writeFileSync } from 'node:fs'
+import { readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { findPi, startMockLlm, startPi } from './harness'
@@ -21,7 +21,7 @@ afterEach(async () => {
     }
 })
 
-async function setup(capabilities: CapabilityId[], reply: (request: MockRequest, index: number) => MockReply, options: { approvalMode?: ApprovalMode, settings?: Record<string, unknown>, hostEnv?: Record<string, string> } = {}) {
+async function setup(capabilities: CapabilityId[], reply: (request: MockRequest, index: number) => MockReply, options: Parameters<typeof startPi>[3] = {}) {
     const llm = await startMockLlm(reply)
     const slot: { llm: MockLlm, pi?: PiSession } = { llm }
     open.push(slot)
@@ -353,6 +353,45 @@ describe.runIf(process.env.PI_GUI_SKIP_E2E !== '1')('capability extensions (real
     const subagentUpdate = (match: (d: SubagentDetails) => boolean) => (e: any) =>
         e.type === 'tool_execution_update' && e.toolName === 'subagent' && match(e.partialResult.details)
 
+    // $1 per million input tokens, and every reply reads a million: each request costs $1.
+    const dollar = { model: { cost: { input: 1, output: 0, cacheRead: 0, cacheWrite: 0 } }, settings: { 'pi-capabilities': { budget: 1.5 } } }
+    const working: MockReply = { toolCalls: [{ name: 'bash', arguments: { command: 'true' } }], usage: { input: 1_000_000, output: 1 } }
+    const budgetAsk = (e: any) => e.type === 'extension_ui_request' && e.method === 'select' && String(e.title).includes('上限')
+
+    it('budget: past the limit the run asks before its next request, and stopping ends it', async ({ skip }) => {
+        if (!env)
+            return skip('pi not installed')
+        const { llm, pi } = await setup(['budget'], () => working, dollar)
+        await pi.request({ type: 'prompt', message: 'go' })
+        const ask: any = await pi.waitFor(budgetAsk, 20_000)
+        expect(ask.title).toContain('$2.00')
+        expect(llm.requests).toHaveLength(2)
+        pi.send({ type: 'extension_ui_response', id: ask.id, value: ask.options[2] })
+        await pi.waitFor(e => e.type === 'agent_settled', 20_000)
+        expect(llm.requests).toHaveLength(2)
+    }, 40_000)
+
+    it('budget: going on asks again a limit later; a new prompt starts from zero', async ({ skip }) => {
+        if (!env)
+            return skip('pi not installed')
+        let n = 0
+        const { llm, pi } = await setup(['budget'], () => n++ < 4 ? working : { text: 'done' }, dollar)
+        await pi.request({ type: 'prompt', message: 'go' })
+        const first: any = await pi.waitFor(budgetAsk, 20_000)
+        pi.send({ type: 'extension_ui_response', id: first.id, value: first.options[0] })
+        const second: any = await pi.waitFor(e => budgetAsk(e) && (e as any).id !== first.id, 20_000)
+        expect(second.title).toContain('$4.00')
+        pi.send({ type: 'extension_ui_response', id: second.id, value: second.options[1] })
+        await pi.waitFor(e => e.type === 'agent_settled', 20_000)
+        expect(llm.requests).toHaveLength(5)
+
+        // Under the limit again: one request costs $1.
+        n = 3
+        const asked = pi.events.filter(budgetAsk).length
+        await pi.run('again')
+        expect(pi.events.filter(budgetAsk)).toHaveLength(asked)
+    }, 40_000)
+
     it('subagent: runs a child pi, streams its transcript, returns its reply and usage', async ({ skip }) => {
         if (!env)
             return skip('pi not installed')
@@ -416,6 +455,40 @@ describe.runIf(process.env.PI_GUI_SKIP_E2E !== '1')('capability extensions (real
         expect(parentAfter.toolResults[0]).toContain('The user cancelled this subagent')
     }, 40_000)
 
+    it('subagent: a failed run keeps its session, and resume continues it instead of starting over', async ({ skip }) => {
+        if (!env)
+            return skip('pi not installed')
+        let childRequests = 0
+        const { llm, pi } = await setup(['subagent'], (r) => {
+            if (toolNames(r).includes('subagent')) {
+                if (r.toolResults.length === 0)
+                    return { toolCalls: [{ name: 'subagent', arguments: { title: 'Look around', task: 'CHILD TASK: list files' } }] }
+                if (r.toolResults.length === 1) {
+                    const hint = r.toolResults[0]
+                    const start = hint.indexOf('resume: "') + 'resume: "'.length
+                    return { toolCalls: [{ name: 'subagent', arguments: { title: 'Look around', task: 'CONTINUE NOW', resume: hint.slice(start, hint.indexOf('"', start)) } }] }
+                }
+                return { text: 'parent done' }
+            }
+            if (JSON.stringify(r.messages).includes('CONTINUE NOW'))
+                return { text: 'child resumed' }
+            return childRequests++ === 0 ? { toolCalls: [{ name: 'bash', arguments: { command: 'echo first-step' } }] } : { error: 402 }
+        }, { settings: { retry: { enabled: false } } })
+        await pi.run('go')
+
+        const ends: any[] = pi.events.filter(toolEnd('subagent'))
+        expect(ends.map(e => (e.result.details as SubagentDetails).status)).toEqual(['failed', 'done'])
+        expect(llm.requests.filter(r => toolNames(r).includes('subagent'))[1].toolResults[0]).toContain('resume: "')
+        // The resumed child got its earlier work back, not a fresh start.
+        const resumed = llm.requests.find(r => !toolNames(r).includes('subagent') && JSON.stringify(r.messages).includes('CONTINUE NOW'))!
+        expect(JSON.stringify(resumed.messages)).toContain('CHILD TASK')
+        expect(JSON.stringify(resumed.messages)).toContain('first-step')
+        expect(llm.requests.filter(r => toolNames(r).includes('subagent')).at(-1)!.toolResults[1]).toBe('child resumed')
+        // A finished run deletes its session.
+        await new Promise(resolve => setTimeout(resolve, 500))
+        expect(readdirSync(path.join(pi.agentDir, 'subagent-sessions'))).toEqual([])
+    }, 60_000)
+
     it('subagent: aborting the parent run stops the child', async ({ skip }) => {
         if (!env)
             return skip('pi not installed')
@@ -426,6 +499,17 @@ describe.runIf(process.env.PI_GUI_SKIP_E2E !== '1')('capability extensions (real
         const end: any = await pi.waitFor(toolEnd('subagent'), 5000)
         expect((end.result.details as SubagentDetails).status).toBe('cancelled')
         await pi.waitFor(e => e.type === 'agent_settled')
+    }, 40_000)
+
+    it('subagent: a child quiet for longer than the cache lives gets one notice', async ({ skip }) => {
+        if (!env)
+            return skip('pi not installed')
+        const { pi } = await setup(['subagent'], delegate([{ toolCalls: [{ name: 'bash', arguments: { command: 'sleep 5' } }] }]), { model: { promptCache: { short: 2 } } })
+        await pi.run('go')
+        const notices = pi.events.filter((e: any) => e.type === 'extension_ui_request' && e.method === 'notify' && String(e.message).includes('没有动静'))
+        expect(notices).toHaveLength(1)
+        expect((notices[0] as any).message).toContain('Look around')
+        expect((notices[0] as any).message).toContain('Bash(sleep 5)')
     }, 40_000)
 
     it('subagent: the child\'s approvals are forwarded with its title', async ({ skip }) => {
@@ -580,6 +664,22 @@ describe.runIf(process.env.PI_GUI_SKIP_E2E !== '1')('capability extensions (real
         await new Promise(resolve => setTimeout(resolve, 300))
         expect(pi.events.some(e => e.type === 'entry_appended' && e.entry?.customType === 'pi-kit-review')).toBe(false)
     }, 60_000)
+
+    it('settings.json: pi keeps the shared choice when it saves; the app\'s pi leaves the mode to the app', async ({ skip }) => {
+        if (!env)
+            return skip('pi not installed')
+        const choice = { enabled: 'standard', approvalMode: 'ask' }
+        const { pi } = await setup(['approval'], script(), { approvalMode: 'auto', settings: { 'pi-capabilities': choice } })
+        const file = path.join(pi.agentDir, 'settings.json')
+        expect((await pi.request({ type: 'set_auto_compaction', enabled: false })).success).toBe(true)
+        // The flag the app passes wins over settings.json; switching in rpc mode writes nothing.
+        expect(statusOf(pi, 'gui-approval')).toBe('auto')
+        await pi.request({ type: 'prompt', message: '/gui-approval edits' })
+        await pi.waitFor(e => e.type === 'extension_ui_request' && e.method === 'setStatus' && e.statusText === 'edits')
+        const saved = JSON.parse(readFileSync(file, 'utf8'))
+        expect(saved.compaction).toEqual({ enabled: false })
+        expect(saved['pi-capabilities']).toEqual(choice)
+    }, 30_000)
 
     it('gui- commands are registered as extension commands', async ({ skip }) => {
         if (!env)

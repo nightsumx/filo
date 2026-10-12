@@ -71,12 +71,24 @@ describe('models.json endpoints', () => {
         expect(textOnly.providers.local.models).toEqual([{ id: 'm' }])
     })
 
+    it('puts a model on its own API with the address in that API\'s shape, and back', () => {
+        const save = (api: string, models: { id: string, api?: string }[]) => ({ endpoint: { id: 'r', baseUrl: api === 'anthropic-messages' ? 'https://r.test' : 'https://r.test/v1', api, models } })
+        const both = applyEndpoint({}, save('anthropic-messages', [{ id: 'claude-x' }, { id: 'gpt-x', api: 'openai-responses' }]), false)
+        expect(both.providers.r.models).toEqual([{ id: 'claude-x' }, { id: 'gpt-x', api: 'openai-responses', baseUrl: 'https://r.test/v1' }])
+        expect(readEndpoints(both)[0].models!.map(m => m.api)).toEqual([undefined, 'openai-responses'])
+        // The provider moves to the other API: each model's address follows, a hand-written one stays.
+        both.providers.r.models.push({ id: 'own', api: 'openai-responses', baseUrl: 'https://elsewhere.test/v1' })
+        const flipped = applyEndpoint(both, save('openai-responses', [{ id: 'claude-x', api: 'anthropic-messages' }, { id: 'gpt-x', api: 'openai-responses' }, { id: 'own' }]), false)
+        expect(flipped.providers.r.models).toEqual([{ id: 'claude-x', api: 'anthropic-messages', baseUrl: 'https://r.test' }, { id: 'gpt-x' }, { id: 'own', baseUrl: 'https://elsewhere.test/v1' }])
+        expect(checkEndpoint(save('openai-responses', [{ id: 'm', api: 'made-up' }]), false)).toBeTruthy()
+    })
+
     it('reads entries back without key values, and removes one', () => {
         const json = applyEndpoint({ providers: { anthropic: { apiKey: 'secret' } } }, custom, false)
         const endpoints = readEndpoints(json)
         expect(endpoints).toEqual([
             { id: 'anthropic', name: undefined, baseUrl: undefined, api: undefined, models: undefined, hasKey: true, keyless: undefined },
-            { id: 'local', name: 'Local', baseUrl: 'http://127.0.0.1:11434/v1', api: 'openai-completions', models: [{ id: 'qwen3:8b', name: undefined, contextWindow: 32768, maxTokens: undefined, reasoning: undefined, images: undefined }], hasKey: false, keyless: true },
+            { id: 'local', name: 'Local', baseUrl: 'http://127.0.0.1:11434/v1', api: 'openai-completions', models: [{ id: 'qwen3:8b', name: undefined, contextWindow: 32768, maxTokens: undefined, reasoning: undefined, images: undefined, api: undefined }], hasKey: false, keyless: true },
         ])
         expect(JSON.stringify(endpoints)).not.toContain('secret')
         expect(removeEndpoint(json, 'local')).toEqual({ providers: { anthropic: { apiKey: 'secret' } } })
@@ -91,7 +103,7 @@ describe('models.json endpoints', () => {
         expect(checkEndpoint({ endpoint: { ...ok.endpoint, baseUrl: '' } }, false)).toBeTruthy()
         expect(checkEndpoint({ endpoint: { ...ok.endpoint, api: '' } }, false)).toBeTruthy()
         expect(checkEndpoint({ endpoint: { ...ok.endpoint, api: 'made-up' } }, false)).toBeTruthy()
-        expect(checkEndpoint({ endpoint: { ...ok.endpoint, api: 'google-generative-ai' } }, false, 'google-generative-ai')).toBeUndefined()
+        expect(checkEndpoint({ endpoint: { ...ok.endpoint, api: 'google-generative-ai' } }, false, { id: 'm', api: 'google-generative-ai' })).toBeUndefined()
         expect(checkEndpoint({ endpoint: { ...ok.endpoint, models: [] } }, false)).toBeTruthy()
         expect(checkEndpoint({ endpoint: { ...ok.endpoint, models: [{ id: 'm' }, { id: 'm ' }] } }, false)).toBeTruthy()
         expect(checkEndpoint({ endpoint: { ...ok.endpoint, models: [{ id: 'm', contextWindow: -5 }] } }, false)).toBeTruthy()
@@ -269,5 +281,62 @@ describe('ProviderHelper', () => {
         // The last entry gone, pi still loads the file.
         expect(after.modelsError).toBeUndefined()
         expect(JSON.parse(await readFile(path.join(dir, 'auth.json'), 'utf8')).relay).toBeUndefined()
+    }, 30_000)
+
+    it('lists routable models and resolves their endpoint and key', async () => {
+        await writeFile(path.join(dir, 'models.json'), JSON.stringify({
+            providers: {
+                relay: { baseUrl: 'http://127.0.0.1:1/api', api: 'anthropic-messages', apiKey: 'rk-route', headers: { 'x-tenant': 't1' }, models: [{ id: 'claude-x', contextWindow: 200000 }] },
+                ollama: { baseUrl: 'http://127.0.0.1:1/v1', api: 'openai-completions', apiKey: 'none', models: [{ id: 'qwen' }] },
+                // What terminal sync writes: the app's groups, never members of a group, nor a provider to set up.
+                filo: { baseUrl: 'http://127.0.0.1:2/v1', api: 'openai-completions', apiKey: 'filo-x', models: [{ id: 'g1' }] },
+            },
+        }))
+        await helper.setKey('deepseek', 'sk-route')
+        const catalog = await helper.routeCatalog()
+        expect(catalog.models.some(m => m.provider === 'filo')).toBe(false)
+        expect((await helper.list()).providers.some(p => p.id === 'filo')).toBe(false)
+        expect(catalog.error).toBeUndefined()
+        expect(catalog.models.find(m => m.provider === 'relay')).toMatchObject({ id: 'claude-x', api: 'anthropic-messages', contextWindow: 200000 })
+        expect(catalog.models.some(m => m.provider === 'deepseek' && m.api === 'openai-completions')).toBe(true)
+        // Providers without a key are not listed at all.
+        expect(catalog.models.some(m => m.provider === 'groq')).toBe(false)
+        expect(await helper.routeTarget('relay', 'claude-x')).toEqual({ api: 'anthropic-messages', baseUrl: 'http://127.0.0.1:1/api', apiKey: 'rk-route', headers: { 'x-tenant': 't1' } })
+        expect(await helper.routeTarget('deepseek', catalog.models.find(m => m.provider === 'deepseek')!.id)).toMatchObject({ apiKey: 'sk-route' })
+        await expect(helper.routeTarget('relay', 'gone')).rejects.toThrow('model-gone')
+        await helper.logout('deepseek')
+        await rm(path.join(dir, 'models.json'), { force: true })
+    }, 30_000)
+
+    it('adds a channel from its address and key: the agent\'s API, the host as its id, the endpoint\'s models', async () => {
+        await rm(path.join(dir, 'models.json'), { force: true })
+        const asked: string[] = []
+        const fetcher: typeof fetch = async (url) => {
+            asked.push(String(url))
+            return String(url).includes('bare')
+                ? new Response('not found', { status: 404 })
+                : new Response(JSON.stringify({ data: [{ id: 'claude-sonnet-4-5' }, { id: 'gpt-5' }, { id: 'glm-x' }] }), { status: 200 })
+        }
+        const service = new ProviderService(helper, () => {}, fetcher)
+        // Models pi knows go on their maker's API, the rest on the agent's.
+        expect(await service.addChannel({ baseUrl: 'https://relay.test/v1/', api: 'anthropic-messages', apiKey: 'rk-1' })).toEqual({ provider: 'relay.test', model: 'claude-sonnet-4-5' })
+        // The same address and key from Codex: the same provider.
+        expect(await service.addChannel({ baseUrl: 'https://relay.test', api: 'openai-responses', apiKey: 'rk-1' })).toEqual({ provider: 'relay.test', model: 'gpt-5' })
+        // Another key is another provider.
+        expect(await service.addChannel({ baseUrl: 'https://relay.test', api: 'openai-responses', apiKey: 'rk-2' })).toEqual({ provider: 'relay.test-2', model: 'gpt-5' })
+        expect(asked).toEqual(['https://relay.test/v1/models', 'https://relay.test/v1/models', 'https://relay.test/v1/models'])
+        expect(await service.addChannel({ baseUrl: 'https://bare.test', api: 'openai-responses', apiKey: 'rk-3' })).toMatchObject({ listError: expect.stringContaining('404') })
+        expect(await service.addChannel({ baseUrl: 'https://bare.test', api: 'openai-responses', apiKey: 'rk-3', model: 'gpt-x' })).toEqual({ provider: 'bare.test', model: 'gpt-x' })
+        const providers = JSON.parse(await readFile(path.join(dir, 'models.json'), 'utf8')).providers
+        expect(providers['relay.test']).toMatchObject({ baseUrl: 'https://relay.test', api: 'anthropic-messages', models: [{ id: 'claude-sonnet-4-5' }, { id: 'gpt-5', api: 'openai-responses', baseUrl: 'https://relay.test/v1' }, { id: 'glm-x' }] })
+        expect(providers['relay.test-2']).toMatchObject({ baseUrl: 'https://relay.test/v1', api: 'openai-responses', models: [{ id: 'claude-sonnet-4-5', api: 'anthropic-messages', baseUrl: 'https://relay.test' }, { id: 'gpt-5' }, { id: 'glm-x' }] })
+        expect(providers['bare.test']).toMatchObject({ models: [{ id: 'gpt-x' }] })
+        expect(JSON.parse(await readFile(path.join(dir, 'auth.json'), 'utf8'))['relay.test-2']).toEqual({ type: 'api_key', key: 'rk-2' })
+        const relay = (await helper.list()).providers.find(p => p.id === 'relay.test')
+        expect(relay?.apis.sort()).toEqual(['anthropic-messages', 'openai-responses'])
+        const catalog = await helper.routeCatalog()
+        expect(catalog.models.filter(m => m.provider === 'relay.test').map(m => [m.id, m.api])).toEqual([['claude-sonnet-4-5', 'anthropic-messages'], ['gpt-5', 'openai-responses'], ['glm-x', 'anthropic-messages']])
+        for (const id of ['relay.test', 'relay.test-2', 'bare.test'])
+            await service.removeEndpoint(id)
     }, 30_000)
 })

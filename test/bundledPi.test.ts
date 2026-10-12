@@ -8,6 +8,7 @@ import path from 'node:path'
 import process from 'node:process'
 import { afterEach, describe, expect, it } from 'vitest'
 import { resetPiEnv, resolvePiEnv } from '../electron/pi-env'
+import { platform } from '../electron/platform'
 import { findPi, startMockLlm, startPi } from './harness'
 
 const saved = { pi: process.env.PI_GUI_PI, node: process.env.PI_GUI_NODE }
@@ -25,15 +26,18 @@ afterEach(async () => {
 })
 
 const toolNames = (r: MockRequest) => r.tools.map((t: any) => t.function?.name ?? t.name)
-// Prints the variable Electron needs to act as node, as seen by a command pi runs.
-const PROBE = 'echo "flag=[${ELECTRON_RUN_AS_NODE:-}]"'
+// Prints the variable Electron needs to act as node, as seen by a command pi runs, and the program
+// running that pi (bash's parent; pi renames its process, so its executable is asked of lsof).
+const PROBE = 'echo "flag=[${ELECTRON_RUN_AS_NODE:-}] runtime=[$(lsof -a -p $PPID -d txt -Fn 2>/dev/null | sed -n 3s/^n//p)]"'
+// macOS: the Helper, not the main executable, which would put a bouncing icon in the Dock.
+const HELPER = /\/Electron Helper\.app\/Contents\/MacOS\/Electron Helper\]/
 
 describe.runIf(process.env.PI_GUI_SKIP_E2E !== '1')('bundled pi', () => {
     it('runs on Electron, keeps its flag from pi\'s commands, and starts subagents', async () => {
         process.env.PI_GUI_PI = 'bundled'
         const env = await findPi()
         expect(env?.bundled).toBeTruthy()
-        expect(env?.nodePath).toMatch(/electron(\.exe)?$/i)
+        expect(env?.nodePath).toMatch(platform.id === 'darwin' ? /\/Electron Helper$/ : /electron(\.exe)?$/i)
         expect(env?.version).toMatch(/^\d+\.\d+\.\d+/)
 
         // The parent runs the probe, then delegates; the child runs it too.
@@ -60,6 +64,11 @@ describe.runIf(process.env.PI_GUI_SKIP_E2E !== '1')('bundled pi', () => {
         const details = sub.result.details as SubagentDetails
         expect(details.status).toBe('done')
         expect(JSON.stringify(details.messages)).toContain('flag=[]')
+        // A subagent is pi started again by pi (PI_KIT_PI_LAUNCHER + process.execPath): the Helper too.
+        if (platform.id === 'darwin') {
+            expect(JSON.stringify(bash.result)).toMatch(HELPER)
+            expect(JSON.stringify(details.messages)).toMatch(HELPER)
+        }
     }, 60_000)
 
     it('the user\'s own pi wins; one that fails to start falls back with a note', async () => {

@@ -1,11 +1,12 @@
 import { Button } from '@/components/ui/button'
 import { Toaster } from '@/components/ui/sonner'
 import { TooltipProvider } from '@/components/ui/tooltip'
-import { appStore } from '@/store/app'
+import { appStore, isFileTab } from '@/store/app'
 import { terminalStore } from '@/store/terminals'
 import { AlertTriangle, FolderPlus, Loader2, Plus } from 'lucide-react'
 import { observer } from 'mobx-react-lite'
 import { Fragment, useEffect, useRef } from 'react'
+import { EditorPane } from './features/Editor'
 import { ReviewPanel } from './features/Review'
 import { SearchDialog } from './features/Search'
 import { SettingsDialog } from './features/Settings'
@@ -15,6 +16,7 @@ import { TerminalPanel, TerminalResizer, useTerminalViews } from './features/Ter
 import { closeTabWithConfirm, TabBar } from './features/Tabs/TabBar'
 import { ShortcutHints, ThreadPane } from './features/Thread'
 import { MainToolbar } from './features/Toolbar'
+import { Setup } from './features/Setup'
 import { Welcome } from './features/Welcome'
 import { newThreadLabel, tr } from '@/lib/i18n'
 import { commandKey, projectDigit } from '@/platform'
@@ -45,10 +47,12 @@ const Panes = observer(() => {
 
     return (
         <div ref={ref} className="flex min-w-0 flex-1">
-            {panes.map((thread, i) => (
-                <Fragment key={thread.id}>
+            {panes.map((tab, i) => (
+                <Fragment key={tab.id}>
                     {i > 0 && <div className="w-px shrink-0" />}
-                    <ThreadPane thread={thread} focused={thread.key === appStore.activeKey} />
+                    {isFileTab(tab)
+                        ? <EditorPane tab={tab} focused={tab.key === appStore.activeKey} />
+                        : <ThreadPane thread={tab} focused={tab.key === appStore.activeKey} />}
                 </Fragment>
             ))}
             {panes.length === 0 && (
@@ -146,9 +150,9 @@ function useShortcuts() {
                 e.preventDefault()
                 appStore.newThread(appStore.activeProject)
             }
-            else if (key === 'w' && !e.shiftKey && appStore.active) {
+            else if (key === 'w' && !e.shiftKey && appStore.activeTab) {
                 e.preventDefault()
-                void closeTabWithConfirm(appStore.active)
+                void closeTabWithConfirm(appStore.activeTab)
             }
             else if (/^[1-9]$/.test(e.key)) {
                 e.preventDefault()
@@ -166,13 +170,25 @@ function useShortcuts() {
                 e.preventDefault()
                 appStore.toggleSidebar()
             }
+            else if (key === 'e' && e.shiftKey) {
+                e.preventDefault()
+                appStore.showSidebarView('files')
+            }
             else if (key === 'f' && e.shiftKey) {
                 e.preventDefault()
                 appStore.setSearchOpen(!appStore.searchOpen)
             }
         }
+        // Editor tabs save on their own shortly after typing stops; leaving the window saves now.
+        const onBlur = () => void appStore.flushFiles()
         window.addEventListener('keydown', onKey)
-        return () => window.removeEventListener('keydown', onKey)
+        window.addEventListener('blur', onBlur)
+        window.addEventListener('pagehide', onBlur)
+        return () => {
+            window.removeEventListener('keydown', onKey)
+            window.removeEventListener('blur', onBlur)
+            window.removeEventListener('pagehide', onBlur)
+        }
     }, [])
 }
 
@@ -188,14 +204,20 @@ export const App = observer(() => {
                     </div>
                 )}
                 {env && !env.ok && <EnvError error={env.error} />}
-                {env?.ok && appStore.windowProjects.length > 0 && (
+                {env?.ok && appStore.setupOpen && (
+                    <>
+                        <header className="app-drag h-[38px] shrink-0" />
+                        <Setup />
+                    </>
+                )}
+                {env?.ok && !appStore.setupOpen && appStore.windowProjects.length > 0 && (
                     <>
                         <MainToolbar />
                         <Workspace />
                         <StatusBar />
                     </>
                 )}
-                {env?.ok && appStore.windowProjects.length === 0 && (
+                {env?.ok && !appStore.setupOpen && appStore.windowProjects.length === 0 && (
                     <>
                         {/* Title bar strip: drags the window, clears the traffic lights. */}
                         <header className="app-drag h-[38px] shrink-0" />

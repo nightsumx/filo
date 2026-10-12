@@ -1,4 +1,4 @@
-// Brand icons for Settings → 模型供应商, from LobeHub's icon set (MIT). The color version where there
+// Brand icons for Settings → 供应商, from LobeHub's icon set (MIT). The color version where there
 // is one; the others draw in currentColor, so they follow the theme. Only the icons named here end
 // up in the bundle.
 import antgroup from '@lobehub/icons-static-svg/icons/antgroup-color.svg?raw'

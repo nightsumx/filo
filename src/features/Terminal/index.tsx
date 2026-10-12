@@ -18,10 +18,10 @@ const headerBtn = 'flex h-6 w-6 shrink-0 items-center justify-center rounded-md 
 /** Last focus request a terminal took; a tab shown for another reason (project switch) leaves focus alone. */
 let focusHandled = 0
 
-/** Keeps views only for terminals that still exist in projects this window shows. */
+/** Keeps views only for terminals that still exist in projects this window shows (and the setup assistant's). */
 export function useTerminalViews() {
     useEffect(() => reaction(
-        () => terminalStore.list.filter(t => appStore.windowProjects.includes(t.cwd)).map(t => t.id),
+        () => terminalStore.list.filter(t => t.by === 'setup' || appStore.windowProjects.includes(t.cwd)).map(t => t.id),
         (ids) => {
             const keep = new Set(ids)
             pruneViews(id => keep.has(id))

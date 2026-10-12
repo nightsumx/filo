@@ -1,7 +1,8 @@
 // Settings → 上下文压缩: pi's own compaction.* settings in the global ~/.pi/agent/settings.json, so
 // the terminal pi follows the same choices. The trigger is one "compact at N k" for every model
 // (lib/compactAt turns it into per-model reserves, the only absolute form pi has); models that should
-// compact elsewhere are listed under it as exceptions.
+// compact elsewhere are listed under it as exceptions. pi's cache warming sits here too: both decide
+// what re-reading the context costs.
 import type { GlobalCompaction, GlobalCompactionPatch } from '@shared/ipc'
 import type { PiModel } from '@shared/pi'
 import { Button } from '@/components/ui/button'
@@ -115,6 +116,25 @@ export const CompactionPage = observer(() => {
                     />
                 </>
             )}
+            <SettingRow
+                title={tr('提示缓存保温', 'Cache warming')}
+                description={tr(
+                    '提示缓存快过期时，pi 发一个只回 1 个 token 的请求让它续上，下一条就不用按全价重读上下文；只在预计省的比花的多时发。「空闲时也保温」在 Agent 停下后还会续一阵。渠道本身不保留缓存时（部分中转），保温省不了钱，可以关掉。终端里 pi 的 /settings 改的是同一项。',
+                    'When the prompt cache is about to expire, pi sends a request with a 1-token reply to keep it, so the next message does not read the context again at full price; only when that should save more than it costs. "Also idle" keeps it for a while after the agent stops. If the channel does not keep the cache (some relays), warming saves nothing; turn it off. pi\'s /settings in a terminal changes the same setting.',
+                )}
+                control={({ labelId }) => (
+                    <Segmented
+                        labelledBy={labelId}
+                        value={appStore.cacheWarming}
+                        options={[
+                            { value: 'off', label: tr('关闭', 'Off') },
+                            { value: 'streaming', label: tr('运行时', 'While running') },
+                            { value: 'idle', label: tr('空闲时也保温', 'Also idle') },
+                        ]}
+                        onChange={mode => void appStore.setCacheWarming(mode)}
+                    />
+                )}
+            />
             <Comment className="py-3">
                 {[
                     info.projectOverride && tr('当前项目的 .pi/settings.json 也设置了压缩，在这个项目里以它为准。', 'This project’s .pi/settings.json also sets compaction, and wins in this project. '),

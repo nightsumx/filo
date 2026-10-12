@@ -1,9 +1,11 @@
 import type { SubagentRun } from '@/lib/subagents'
 import type { Thread } from '@/store/thread'
+import type { Virtualizer } from '@tanstack/react-virtual'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { ArrowDown } from 'lucide-react'
 import { observer } from 'mobx-react-lite'
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from 'react'
+import { flushSync } from 'react-dom'
 import { estimateRow } from '@/lib/rowEstimate'
 import { runTurns } from '@/lib/subagents'
 import type { TranscriptRow } from '@/lib/transcriptRows'
@@ -50,6 +52,29 @@ export const MessageList = observer(({ thread, subagent }: { thread: Thread, sub
     const scrollRef = useRef<HTMLDivElement>(null)
     const listRef = useRef<HTMLDivElement>(null)
     const stick = useRef(true)
+    const virtualizerRef = useRef<Virtualizer<HTMLDivElement, Element>>(null)
+    /** Rows still at their estimated height: their first measurement is coming. */
+    const estimated = useRef(new Set<string>())
+    /**
+     * Whether a row resizing above the top of the viewport moves scrollTop with it. Pinned, never: the
+     * bottom is the anchor, and the correction would stack on the bottom-following and bounce the view.
+     * Scrolled up, a row's first measurement is corrected if the row starts above the top (it mounted
+     * there while scrolling up), but later growth only if the whole row is above: a partly visible row
+     * that grows is the streaming reply getting longer at its end, and correcting for it moved the view
+     * down a line per token, right back to the bottom.
+     */
+    const adjustForResize = useCallback((item: { key: unknown, start: number, end: number }, _delta: number, v: Virtualizer<HTMLDivElement, Element>) => {
+        const first = estimated.current.delete(item.key as string)
+        if (stick.current)
+            return false
+        const top = v.scrollElement?.scrollTop ?? 0
+        return first ? item.start < top : item.end <= top
+    }, [])
+    /** Pins to the bottom or lets go. */
+    const follow = useCallback((on: boolean) => {
+        stick.current = on
+    }, [])
+    const [, rerender] = useReducer((n: number) => n + 1, 0)
     const [showJump, setShowJump] = useState(false)
     const viewKey = subagent ? `${thread.key}#${subagent.id}` : thread.key
     const childTurns = useMemo(() => subagent && runTurns(subagent), [subagent?.details, subagent?.status])
@@ -60,9 +85,7 @@ export const MessageList = observer(({ thread, subagent }: { thread: Thread, sub
     const rows = useMemo(() => transcriptRows(turns, openTurns), [turns, openTurns])
     // Expanding grows the list; don't let bottom-pinning scroll the clicked row away. Scrolling back
     // to the bottom pins again (onScroll).
-    const unpin = useCallback(() => {
-        stick.current = false
-    }, [])
+    const unpin = useCallback(() => follow(false), [follow])
     const toggleFold = useCallback((key: string) => {
         unpin()
         setUnfolded((prev) => {
@@ -79,13 +102,37 @@ export const MessageList = observer(({ thread, subagent }: { thread: Thread, sub
         count: rows.length,
         getScrollElement: () => scrollRef.current,
         getItemKey: i => rows[i].key,
-        estimateSize: i => estimateRow(rows[i], scrollRef.current?.clientWidth ?? 0),
+        estimateSize: (i) => {
+            estimated.current.add(rows[i].key)
+            return estimateRow(rows[i], scrollRef.current?.clientWidth ?? 0)
+        },
         overscan: 6,
         paddingStart: PAD_TOP,
         paddingEnd: PAD_BOTTOM,
         // Scroll-driven range changes render before the next paint, so newly exposed rows are never blank.
         useFlushSync: true,
+        // A row resized (streaming text, a result coming in): render before this frame paints, so the
+        // list's height and the bottom-following below land in it rather than a frame late.
+        onChange: (_, sync) => {
+            if (!sync && stick.current)
+                queueMicrotask(() => flushSync(rerender))
+        },
     })
+    if (!virtualizerRef.current) {
+        virtualizerRef.current = virtualizer
+        virtualizer.shouldAdjustScrollPositionOnItemSizeChange = adjustForResize
+    }
+
+    /**
+     * The bottom-following scrolls count as scrolling to the virtualizer, which then leaves newly
+     * mounted rows at their estimate until the next frame (a streamed message turning into its row
+     * flashed at the wrong height). Pinned, they are measured as they mount.
+     */
+    const measureRow = useCallback((node: HTMLDivElement | null) => {
+        virtualizer.measureElement(node)
+        if (node && stick.current && virtualizer.isScrolling)
+            virtualizer.resizeItem(virtualizer.indexFromElement(node), node.offsetHeight)
+    }, [virtualizer])
 
     const toBottom = () => {
         const el = scrollRef.current
@@ -95,20 +142,65 @@ export const MessageList = observer(({ thread, subagent }: { thread: Thread, sub
 
     // Open a thread (or subagent) at its latest message.
     useLayoutEffect(() => {
-        stick.current = true
+        follow(true)
         setShowJump(false)
         toBottom()
-    }, [viewKey])
+    }, [viewKey, follow])
+
+    // Pinned: every render that changed the list's height scrolls with it before paint.
+    useLayoutEffect(() => {
+        if (stick.current)
+            toBottom()
+    })
 
     useEffect(() => {
         const el = scrollRef.current
         const list = listRef.current
         if (!el || !list)
             return
+        // Letting go is decided by the user's input, not by how far from the bottom the view is:
+        // a wheel tick moves a few dozen px, still "near the bottom", and the next streamed token
+        // would pull it straight back. Only coming back near the bottom pins again.
+        let lastTop = el.scrollTop
+        let dragging = false
         const onScroll = () => {
-            const distance = el.scrollHeight - el.scrollTop - el.clientHeight
-            stick.current = distance < STICK_THRESHOLD
+            const top = el.scrollTop
+            const distance = el.scrollHeight - top - el.clientHeight
+            // Moving up short of the bottom is the user: content shrinking only clamps to the bottom.
+            if (top < lastTop - 1 && distance > 1)
+                follow(false)
+            else if (!dragging)
+                follow(distance < STICK_THRESHOLD)
+            lastTop = top
             setShowJump(distance >= STICK_THRESHOLD * 2)
+        }
+        // Wheel and keys arrive before the scroll they cause, so a render in between can't undo them.
+        const scrollsInside = (target: EventTarget | null) => {
+            for (let node = target as HTMLElement | null; node && node !== el; node = node.parentElement) {
+                if (node.scrollTop > 0 && node.scrollHeight > node.clientHeight)
+                    return true
+            }
+            return false
+        }
+        const onWheel = (e: WheelEvent) => {
+            if (e.deltaY < 0 && el.scrollHeight > el.clientHeight && !scrollsInside(e.target))
+                follow(false)
+        }
+        const onKey = (e: KeyboardEvent) => {
+            const editable = e.target instanceof HTMLElement && (e.target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName))
+            if (!editable && (e.key === 'ArrowUp' || e.key === 'PageUp' || e.key === 'Home'))
+                follow(false)
+        }
+        // The scrollbar: let go while it's held, pin again on release if it ended at the bottom.
+        const onPointerDown = (e: PointerEvent) => {
+            if (e.target !== el)
+                return
+            dragging = true
+            follow(false)
+            window.addEventListener('pointerup', () => {
+                dragging = false
+                follow(el.scrollHeight - el.scrollTop - el.clientHeight < STICK_THRESHOLD)
+            }, { once: true })
         }
         // The list's height is the virtualizer's total size: it grows as rows are measured or output
         // streams in. While pinned, follow it.
@@ -119,11 +211,17 @@ export const MessageList = observer(({ thread, subagent }: { thread: Thread, sub
         observer.observe(list)
         observer.observe(el)
         el.addEventListener('scroll', onScroll, { passive: true })
+        el.addEventListener('wheel', onWheel, { passive: true })
+        el.addEventListener('keydown', onKey)
+        el.addEventListener('pointerdown', onPointerDown)
         return () => {
             observer.disconnect()
             el.removeEventListener('scroll', onScroll)
+            el.removeEventListener('wheel', onWheel)
+            el.removeEventListener('keydown', onKey)
+            el.removeEventListener('pointerdown', onPointerDown)
         }
-    }, [])
+    }, [follow])
 
     // Unfolded process scrolled past its "Ran …" row: pin that row on top, so collapsing it never
     // means scrolling back up hundreds of steps to find it.
@@ -195,12 +293,12 @@ export const MessageList = observer(({ thread, subagent }: { thread: Thread, sub
             return
         }
         revealed.current = reveal.n
-        stick.current = false
+        follow(false)
         virtualizer.scrollToIndex(index, { align: 'center' })
         // Rows above get measured as they mount; a second pass lands exactly.
         requestAnimationFrame(() => virtualizer.scrollToIndex(index, { align: 'center' }))
         setFlash(rows[index].key)
-    }, [reveal, rows, turns, openTurns, thread, toggleFold, virtualizer])
+    }, [reveal, rows, turns, openTurns, thread, toggleFold, virtualizer, follow])
     useEffect(() => {
         if (!flash)
             return
@@ -212,7 +310,7 @@ export const MessageList = observer(({ thread, subagent }: { thread: Thread, sub
 
     return (
         <div className="relative flex-1 min-h-0">
-            <div ref={scrollRef} data-transcript className="absolute inset-0 overflow-y-auto scrollbar-trigger [overflow-anchor:none]">
+            <div ref={scrollRef} data-transcript className="absolute inset-0 overflow-y-auto scrollbar-trigger [overflow-anchor:none] [scrollbar-gutter:stable]">
                 <div className="mx-auto w-full max-w-5xl px-5">
                     <TranscriptTextContext value={TRANSCRIPT_TEXT[appStore.transcriptLang]}>
                         <CwdContext value={thread.cwd}>
@@ -233,7 +331,7 @@ export const MessageList = observer(({ thread, subagent }: { thread: Thread, sub
                                                     {items.map(item => (
                                                         <div
                                                             key={item.key}
-                                                            ref={virtualizer.measureElement}
+                                                            ref={measureRow}
                                                             data-index={item.index}
                                                             data-row-kind={rows[item.index].kind}
                                                             data-revealed={flash === rows[item.index].key || undefined}
@@ -274,7 +372,7 @@ export const MessageList = observer(({ thread, subagent }: { thread: Thread, sub
                 <button
                     type="button"
                     onClick={() => {
-                        stick.current = true
+                        follow(true)
                         toBottom()
                     }}
                     className="absolute bottom-3 left-1/2 z-10 inline-flex h-8 w-8 -translate-x-1/2 items-center justify-center rounded-md border border-gray-200 light:border-transparent bg-elevated text-gray-600 shadow-md transition-all duration-200 animate-in fade-in slide-in-from-bottom-2 hover:text-gray-900"

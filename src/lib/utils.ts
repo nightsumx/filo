@@ -59,6 +59,20 @@ export function relativeTime(ts: number, now = Date.now()): string {
     return new Date(ts).toLocaleDateString(lang() === 'zh' ? 'zh-CN' : 'en-US')
 }
 
+/** Sentence form of an age, in the UI language: "5 分钟前" / "26 hours ago" / "3 days ago". */
+export function timeAgo(ts: number, now = Date.now()): string {
+    const min = Math.max(0, Math.floor((now - ts) / 60_000))
+    const zh = lang() === 'zh'
+    const rtf = new Intl.RelativeTimeFormat(zh ? 'zh-CN' : 'en-US', { numeric: 'always' })
+    const text = min < 60
+        ? rtf.format(-min, 'minute')
+        : min < 60 * 24
+            ? rtf.format(-Math.floor(min / 60), 'hour')
+            : rtf.format(-Math.floor(min / (60 * 24)), 'day')
+    // Intl writes "1天前"; the UI spaces numbers from CJK text ("1 天前").
+    return zh ? text.replace(/(\d)(?=[^\d\s])/g, '$1 ') : text
+}
+
 export function uid(): string {
     return crypto.randomUUID()
 }
@@ -88,4 +102,9 @@ export function readableError(text: string): string {
 /** "/Users/me/code/app" → "~/code/app" without needing the home dir from the main process. */
 export function shortPath(p: string): string {
     return homeShort(p)
+}
+
+/** An error from ipcMain.handle, without Electron's "Error invoking remote method" wrapper. */
+export function ipcMessage(error: any): string {
+    return String(error?.message ?? error).replace(/^Error invoking remote method '[^']+': (Error: )?/, '')
 }

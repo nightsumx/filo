@@ -55,6 +55,12 @@ export interface Platform {
     command: (file: string, args: readonly string[], searchPath?: string) => Command
     /** `env` with PATH set to `value`. */
     withPath: (env: Record<string, string>, value: string) => Record<string, string>
+    /**
+     * The binary that runs the app's Electron (`electron`, its main executable) as node, with
+     * ELECTRON_RUN_AS_NODE=1. macOS: the app's Helper, whose LSUIElement keeps it out of the Dock (the
+     * main executable gets a Dock icon that bounces forever); elsewhere `electron` itself.
+     */
+    nodeRuntime: (electron: string) => string
     /** A command named `name` that runs `argv` (and what it is given) with `env` (electron/acp/node.ts). */
     launcher: (name: string, env: Record<string, string>, argv: readonly string[]) => Launcher
 

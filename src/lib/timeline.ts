@@ -10,6 +10,7 @@ import type {
 } from '@shared/pi'
 import type { AutopilotAnswerEntry, AutopilotCard, AutopilotDecision, AutopilotMessageDetails, ReviewDetails, ReviewFeedbackDetails } from '@shared/capabilities'
 import { AUTOPILOT_TYPES, CAPABILITY_TOOLS, REVIEW_TYPES } from '@shared/capabilities'
+import { cacheMisses, type CacheMiss } from 'pi-capabilities/lib/promptCache.ts'
 import { readableError } from './utils'
 
 /** One message in display order. Snapshot items carry their session entry id. */
@@ -92,6 +93,8 @@ export interface TurnUsage {
     models: string[]
     /** Thinking levels the requests ran with, in order. */
     thinkingLevels: string[]
+    /** Requests that read their prefix again instead of from the prompt cache. */
+    cacheMisses: CacheMiss[]
 }
 
 export interface Turn {
@@ -104,9 +107,9 @@ export interface Turn {
     usage?: TurnUsage
 }
 
-const emptyUsage = (): TurnUsage => ({ requests: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, models: [], thinkingLevels: [] })
+const emptyUsage = (): TurnUsage => ({ requests: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, models: [], thinkingLevels: [], cacheMisses: [] })
 
-function addUsage(usage: TurnUsage, message: AssistantMessage) {
+function addUsage(usage: TurnUsage, message: AssistantMessage, miss: CacheMiss | null | undefined) {
     const u = message.usage
     if (!u)
         return
@@ -123,6 +126,8 @@ function addUsage(usage: TurnUsage, message: AssistantMessage) {
         usage.models.push(model)
     if (message.thinkingLevel && !usage.thinkingLevels.includes(message.thinkingLevel))
         usage.thinkingLevels.push(message.thinkingLevel)
+    if (miss)
+        usage.cacheMisses.push(miss)
 }
 
 /** Output size of a block in characters, used to share a message's duration between its blocks. */
@@ -214,6 +219,8 @@ export interface BuildOptions {
     running?: boolean
     /** Exact block times recorded while streaming (see blockTimeKey). */
     blockTimes?: ReadonlyMap<string, BlockTime>
+    /** How long the prompt cache lives (cacheTtlMs of the thread's model). */
+    cacheTtlMs?: number
 }
 
 export function buildTurns(messages: TimelineMessage[], options: BuildOptions = {}): Turn[] {
@@ -244,6 +251,10 @@ export function buildTurns(messages: TimelineMessage[], options: BuildOptions = 
     }
 
     const answers = cardAnswers(messages)
+
+    // Each finished request against the one before it, across turns.
+    const missOf = new Map<AgentMessage, CacheMiss | null>()
+    cacheMisses(messages.map(m => m.message), options.cacheTtlMs).forEach((miss, i) => missOf.set(messages[i].message, miss))
 
     const turns: Turn[] = []
     let current: Turn | undefined
@@ -293,7 +304,7 @@ export function buildTurns(messages: TimelineMessage[], options: BuildOptions = 
                 const streaming = message.stopReason === 'pending'
                 const spans = streaming ? [] : blockSpans(message, endedAt, options.blockTimes)
                 if (!streaming && turn.usage)
-                    addUsage(turn.usage, message)
+                    addUsage(turn.usage, message, missOf.get(message))
                 message.content.forEach((block, i) => {
                     const blockKey = `${key}:${i}`
                     const last = streaming && i === message.content.length - 1

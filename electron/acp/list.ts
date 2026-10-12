@@ -7,6 +7,7 @@ import { acpCaps } from '@shared/agents'
 import { spawn } from 'node:child_process'
 import { ACP_PROTOCOL_VERSION } from './agent'
 import { AcpConnection, methodNotFound } from './connection'
+import { CLAUDE_TUI_CAPS, listClaudeSessions } from '../native/claudeTui'
 import { CODEX_CAPS, deleteCodexThread, listCodexThreads } from '../native/codex'
 
 export interface ListedSession {
@@ -15,6 +16,8 @@ export interface ListedSession {
     title?: string
     /** ms; 0 when the agent gave none. */
     updatedAt: number
+    /** Read from the CLI's own files and not loadable over ACP: shown, continued only in a terminal. */
+    terminalOnly?: boolean
 }
 
 export interface SessionList {
@@ -65,6 +68,9 @@ export async function withAgent<T>(spec: AcpAgentSpec, launch: AcpLaunch, work: 
 export async function listAgentSessions(spec: AcpAgentSpec, launch: AcpLaunch, { maxPages = 8 } = {}): Promise<{ caps: AcpAgentCaps, list: SessionList | null }> {
     if (spec.protocol === 'codex-app-server')
         return { caps: CODEX_CAPS, list: await listCodexThreads(launch, maxPages) }
+    // Claude Code's session files, read directly.
+    if (spec.protocol === 'claude-tui')
+        return { caps: CLAUDE_TUI_CAPS, list: await listClaudeSessions(launch.env) }
     const { caps, result } = await withAgent(spec, launch, async (connection, caps) => {
         if (!caps.list)
             return null
@@ -95,6 +101,8 @@ export async function listAgentSessions(spec: AcpAgentSpec, launch: AcpLaunch, {
 export async function deleteAgentSession(spec: AcpAgentSpec, launch: AcpLaunch, sessionId: string): Promise<void> {
     if (spec.protocol === 'codex-app-server')
         return deleteCodexThread(launch, sessionId)
+    if (spec.protocol === 'claude-tui')
+        throw new Error(`${spec.label} cannot delete sessions`)
     await withAgent(spec, launch, async (connection, caps) => {
         if (!caps.delete)
             throw new Error(`${spec.label} cannot delete sessions`)

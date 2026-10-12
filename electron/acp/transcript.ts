@@ -14,6 +14,8 @@
 import type { SessionItem } from '@shared/ipc'
 import type { AgentMessage, AssistantMessage, ImageContent, PiEvent, TextContent, ToolCall, ToolResultMessage, Usage } from '@shared/pi'
 import type { AskAnswer, AskDetails, AskQuestion, PlanDetails, TodoItem } from '@shared/capabilities'
+import type { Price } from 'pi-capabilities/lib/prices.ts'
+import { costOf } from 'pi-capabilities/lib/prices.ts'
 
 /** ACP stop reasons → pi's. */
 const STOP_REASONS: Record<string, AssistantMessage['stopReason']> = {
@@ -78,6 +80,8 @@ export interface PromptUsage {
     cachedWriteTokens?: number
     thoughtTokens?: number
     totalTokens?: number
+    /** Of cachedWriteTokens: Anthropic's one-hour writes. */
+    cachedWrite1hTokens?: number
     /** USD, when the agent prices its turns (Grok Build). */
     cost?: number
 }
@@ -108,6 +112,8 @@ export interface TranscriptOptions {
     model?: () => { provider?: string, model?: string, thinkingLevel?: string }
     /** ACP inputTokens counts cache reads too (Codex) or not (Claude); undefined: judge by totalTokens. */
     inputIncludesCache?: boolean
+    /** The price of the model answering, from pi's list (electron/prices), for usage that comes without a cost. */
+    price?: () => Price | undefined
 }
 
 const text = (t: string): TextContent => ({ type: 'text', text: t })
@@ -371,6 +377,10 @@ export class AcpTranscript {
     private now: () => number
     private modelInfo: TranscriptOptions['model']
     private inputIncludesCache: boolean | undefined
+    private price: TranscriptOptions['price']
+    /** The reply each model request of this prompt went on (requestUsage), and the requests on each reply. */
+    private requests = new Map<string, AssistantMessage>()
+    private requestParts = new WeakMap<AssistantMessage, Map<string, PromptUsage>>()
     /**
      * Tool name override: maps an original tool name (e.g. 'collabAgentToolCall', 'AskUserQuestion')
      * to the pi name it should be shown as ('subagent', 'ask'). Used by native adapters.
@@ -382,6 +392,7 @@ export class AcpTranscript {
         this.now = options.now ?? Date.now
         this.modelInfo = options.model
         this.inputIncludesCache = options.inputIncludesCache
+        this.price = options.price
     }
 
     setEmitter(emit: (event: PiEvent) => void) {
@@ -432,6 +443,7 @@ export class AcpTranscript {
         this.userOpen = false
         this.deferred = null
         this.promptStart = Math.min(this.promptStart, this.messages.length)
+        this.requests.clear()
     }
 
     /** The user's prompt, sent by this client (ACP does not echo it live). */
@@ -441,6 +453,7 @@ export class AcpTranscript {
         const content: (TextContent | ImageContent)[] = [...(prompt ? [text(prompt)] : []), ...images]
         this.push({ role: 'user', content, timestamp: this.now() })
         this.promptStart = this.messages.length
+        this.requests.clear()
     }
 
     /** One `session/update` payload (`params.update`). */
@@ -760,29 +773,66 @@ export class AcpTranscript {
         this.emit({ type: 'message_end', message })
     }
 
-    private applyUsage(u: PromptUsage) {
+    /** The prompt's last reply. */
+    private lastReply(): AssistantMessage | undefined {
         for (let i = this.messages.length - 1; i >= this.promptStart; i--) {
             const m = this.messages[i].message
-            if (m.role !== 'assistant')
-                continue
-            const cacheRead = u.cachedReadTokens ?? 0
-            const cacheWrite = u.cachedWriteTokens ?? 0
-            const input = u.inputTokens ?? 0
-            // pi's input excludes cache reads. Anthropic-style totals add the cache on top of input.
-            const includes = this.inputIncludesCache ?? !(typeof u.totalTokens === 'number' && cacheRead > 0 && u.totalTokens >= input + cacheRead + (u.outputTokens ?? 0))
-            const usage: Usage = {
-                input: includes ? Math.max(0, input - cacheRead) : input,
-                output: u.outputTokens ?? 0,
-                cacheRead,
-                cacheWrite,
-                totalTokens: u.totalTokens ?? 0,
-                cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: u.cost ?? 0 },
-            }
-            if (typeof u.thoughtTokens === 'number')
-                usage.reasoning = u.thoughtTokens
-            m.usage = usage
-            return
+            if (m.role === 'assistant')
+                return m
         }
+        return undefined
+    }
+
+    private applyUsage(u: PromptUsage) {
+        const m = this.lastReply()
+        if (m)
+            m.usage = this.usageOf(u)
+    }
+
+    /**
+     * One model request's usage, as the agent reports it after each (Claude Code's records, Codex's
+     * token counts), so each reply carries its own, as in pi: on the reply being written, else the
+     * prompt's last. The same request (`id`) again replaces its part.
+     */
+    requestUsage(id: string, u: PromptUsage) {
+        const m = this.requests.get(id) ?? this.open ?? this.lastReply()
+        if (!m)
+            return
+        this.requests.set(id, m)
+        const parts = this.requestParts.get(m) ?? new Map<string, PromptUsage>()
+        this.requestParts.set(m, parts.set(id, u))
+        const all = [...parts.values()]
+        const add = (key: keyof PromptUsage) => all.reduce((n, part) => n + (part[key] ?? 0), 0)
+        m.usage = this.usageOf({
+            inputTokens: add('inputTokens'),
+            outputTokens: add('outputTokens'),
+            cachedReadTokens: add('cachedReadTokens'),
+            cachedWriteTokens: add('cachedWriteTokens'),
+            cachedWrite1hTokens: add('cachedWrite1hTokens'),
+            thoughtTokens: add('thoughtTokens'),
+            totalTokens: add('totalTokens'),
+            cost: all.every(part => part.cost !== undefined) ? add('cost') : undefined,
+        })
+    }
+
+    private usageOf(u: PromptUsage): Usage {
+        const cacheRead = u.cachedReadTokens ?? 0
+        const cacheWrite = u.cachedWriteTokens ?? 0
+        const input = u.inputTokens ?? 0
+        // pi's input excludes cache reads. Anthropic-style totals add the cache on top of input.
+        const includes = this.inputIncludesCache ?? !(typeof u.totalTokens === 'number' && cacheRead > 0 && u.totalTokens >= input + cacheRead + (u.outputTokens ?? 0))
+        const tokens = { input: includes ? Math.max(0, input - cacheRead) : input, output: u.outputTokens ?? 0, cacheRead, cacheWrite, cacheWrite1h: u.cachedWrite1hTokens }
+        const usage: Usage = {
+            input: tokens.input,
+            output: tokens.output,
+            cacheRead,
+            cacheWrite,
+            totalTokens: u.totalTokens ?? 0,
+            cost: u.cost !== undefined ? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: u.cost } : costOf(this.price?.(), tokens),
+        }
+        if (typeof u.thoughtTokens === 'number')
+            usage.reasoning = u.thoughtTokens
+        return usage
     }
 
     /** Token totals over the session, for get_session_stats. */

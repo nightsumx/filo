@@ -42,6 +42,22 @@ describe('estimateRow', () => {
         expect(estimateRow(group, WIDTH)).toBe(102)
     })
 
+    it('counts the last five lines of bash output, running or done', () => {
+        const output = Array.from({ length: 30 }, (_, i) => `line ${i + 1}`).join('\n')
+        const bash = (running: boolean): Step => ({ kind: 'tool', key: 'b', call: { type: 'toolCall', id: 'b', name: 'bash', arguments: { command: 'x' } }, running, result: { content: [{ type: 'text', text: output }], isError: false } })
+        // 58 for the call and result lines, then 2 + 5 × 18 (ToolRow's tail, measured 92px).
+        expect(estimateRow(item(bash(true)), WIDTH)).toBe(150)
+        expect(estimateRow(item(bash(false)), WIDTH)).toBe(150)
+    })
+
+    it('pulls a QR code the bash tail cuts into in whole, at its tighter line height', () => {
+        const qr = Array.from({ length: 12 }, () => '  █▀▀▀█ ▄▄ █▀▀▀█').join('\n')
+        const output = `logging in\n${qr}\n\x1B[93mScan with Lark\x1B[0m\nwaiting`
+        const bash: Step = { kind: 'tool', key: 'b', call: { type: 'toolCall', id: 'b', name: 'bash', arguments: { command: 'x' } }, running: true, result: { content: [{ type: 'text', text: output }], isError: false } }
+        // 58, then 2 + 12 QR rows × 12 + 2 text lines × 18.
+        expect(estimateRow(item(bash), WIDTH)).toBe(58 + 2 + 12 * 12 + 2 * 18)
+    })
+
     it('grows text with its content', () => {
         const text = (t: string) => item({ kind: 'text', key: 'k', text: t, streaming: false })
         expect(estimateRow(text('ok'), WIDTH)).toBe(34)

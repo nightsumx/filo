@@ -1,11 +1,14 @@
 // Per-thread status line under the composer, a port of pi-cc-tui's cc-statusline footer:
-//   ➜ pi-cc-tui █░░░░ 23% 238k/1000k ⚡ 1.2ktok 20/s $103.00 +7882 -15 Opus 5.5 (high) ⏱ 1m19s   74% until auto-compact
+//   ➜ pi-cc-tui █░░░░ 23% 238k/1000k cache 96% ⚡ 1.2ktok 20/s $103.00 +7882 -15 Opus 5.5 (high) ⏱ 1m19s   74% until auto-compact
 import type { CompactionInfo } from '@shared/ipc'
 import type { Thread } from '@/store/thread'
+import { cacheStats, EXPECTED_MISSES } from 'pi-capabilities/lib/promptCache.ts'
 import { basename } from '@/lib/utils'
 import { appStore } from '@/store/app'
 import { observer } from 'mobx-react-lite'
 import { useEffect, useState } from 'react'
+import { CacheFigure } from './CachePanel'
+import { SpendFigure } from './SpendPanel'
 import { tr } from '@/lib/i18n'
 
 // xterm-256 colours cc-statusline uses (108, 110, 141, 244, 179, 174); light theme gets darker twins in index.css.
@@ -21,15 +24,12 @@ const ago = (s: number) => (s < 60 ? `${s}s` : s < 3600 ? `${Math.floor(s / 60)}
 
 /** Session totals from the messages, the same way cc-statusline walks session entries. */
 function tally(thread: Thread, now: number) {
-    let cost = 0
     let add = 0
     let del = 0
     let recentOut = 0
-    let lastReply = 0
-    for (const { message: m } of [...thread.items, ...thread.live]) {
+    const messages = [...thread.items, ...thread.live].map(i => i.message)
+    for (const m of messages) {
         if (m.role === 'assistant') {
-            cost += m.usage?.cost?.total || 0
-            lastReply = m.timestamp
             if (now - m.timestamp < 60_000)
                 recentOut += m.usage?.output || 0
             for (const part of m.content) {
@@ -48,7 +48,8 @@ function tally(thread: Thread, now: number) {
             }
         }
     }
-    return { cost, add, del, recentOut, lastReply }
+    const cache = cacheStats(messages, thread.cacheTtl)
+    return { cost: cache.cost, add, del, recentOut, cache }
 }
 
 /** pi's resolved auto-compaction settings for this project and model (re-read when usage or settings change). */
@@ -78,7 +79,7 @@ export const StatusLine = observer(({ thread }: { thread: Thread }) => {
     }, [])
     const compaction = useCompaction(thread)
     const totals = tally(thread, now)
-    const { add, del, recentOut, lastReply } = totals
+    const { add, del, recentOut, cache } = totals
     // pi's own session total also covers abandoned branches, like cc-statusline's walk over every entry;
     // the loaded messages are only the active branch, so they are the fallback before pi has started.
     const cost = thread.stats?.cost ?? totals.cost
@@ -108,6 +109,15 @@ export const StatusLine = observer(({ thread }: { thread: Thread }) => {
         )
     }
 
+    // The conversation's prompt-cache hit rate; a turn's own is in its footer's card. A significant miss on the latest
+    // request turns it amber (the user caused it, or a re-billed tail) or red (the cache was lost for no
+    // visible reason); click for the list.
+    if (cache.rate !== null) {
+        const miss = cache.lastMiss?.significant ? cache.lastMiss : null
+        const color = miss ? (EXPECTED_MISSES.has(miss.reason) || miss.reason === 'partial' ? WARN : DANGER) : cache.rate >= 0.5 ? OK : MUTED
+        parts.push(<CacheFigure key="cache" thread={thread} stats={cache} className={color} />)
+    }
+
     if (recentOut) {
         parts.push(
             <span key="rate" title={tr('最近 60 秒输出', 'Output over the last 60s')}>
@@ -119,7 +129,7 @@ export const StatusLine = observer(({ thread }: { thread: Thread }) => {
     }
 
     if (cost)
-        parts.push(<span key="cost" className={cost >= 5 ? DANGER : cost >= 1 ? WARN : MUTED} title={tr('会话花费', 'Session cost')}>{`$${cost.toFixed(2)}`}</span>)
+        parts.push(<SpendFigure key="cost" cost={cost} className={cost >= 5 ? DANGER : cost >= 1 ? WARN : MUTED} />)
 
     if (add || del) {
         parts.push(
@@ -146,12 +156,13 @@ export const StatusLine = observer(({ thread }: { thread: Thread }) => {
             : <span key="model" className={MODEL} title={`${model.provider}/${model.id}`}>{name}</span>)
     }
 
-    if (lastReply) {
-        // Anthropic's prompt cache lives 5 minutes: amber from 4m, red once it has likely expired.
-        const s = Math.max(0, Math.floor((now - lastReply) / 1000))
+    if (cache.usedAt) {
+        // Since the cache was last used, by a reply or pi warming it: amber in its last minute, red once it has likely expired.
+        const ttl = thread.cacheTtl / 1000
+        const s = Math.max(0, Math.floor((now - cache.usedAt) / 1000))
         parts.push(
-            <span key="ago" className={s >= 300 ? DANGER : s >= 240 ? WARN : OK} title={tr('距上次回复（提示缓存约 5 分钟过期）', 'Since the last reply (the prompt cache expires after about 5 minutes)')}>
-                {`${s >= 300 ? '✗' : '⏱'} ${ago(s)}`}
+            <span key="ago" className={s >= ttl ? DANGER : s >= ttl - 60 ? WARN : OK} title={tr(`距上次用到提示缓存（回复或 pi 保温），约 ${ttl / 60} 分钟后过期`, `Since the prompt cache was last used (a reply or pi warming it); it expires after about ${ttl / 60} minutes`)}>
+                {`${s >= ttl ? '✗' : '⏱'} ${ago(s)}`}
             </span>,
         )
     }

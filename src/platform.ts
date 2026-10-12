@@ -141,6 +141,12 @@ export function parentPath(p: string): string {
     return isWindows ? p.replace(/[\\/][^\\/]+$/, '') : p.replace(/\/[^/]+$/, '')
 }
 
+/** An entry of the folder `dir`. */
+export function joinPath(dir: string, name: string): string {
+    const sep = isWindows ? '\\' : '/'
+    return dir.endsWith(sep) || (isWindows && dir.endsWith('/')) ? `${dir}${name}` : `${dir}${sep}${name}`
+}
+
 /** The home folder as ~: "/Users/me/code" → "~/code", "C:\\Users\\me\\code" → "~\\code". */
 export function homeShort(p: string): string {
     return isWindows

@@ -143,7 +143,7 @@ function host(pi: ExtensionAPI) {
             if (cancelled)
                 return
             const task = reviewerTask(facts, changes, focus)
-            const launch = childLaunch(pi, ctx, approvalMode(), ['--exclude-tools', 'edit,write', '-e', selfPath()])
+            const launch = childLaunch(pi, ctx, approvalMode(), ['--no-session', '--exclude-tools', 'edit,write', '-e', selfPath()])
             const details = newRun('Review', task, ctx)
             const proc = new Child(launch.args, ctx.cwd, { ...launch.env, [REVIEWER_ENV]: '1', [SUBAGENT_ENV]: '1' })
             child = proc

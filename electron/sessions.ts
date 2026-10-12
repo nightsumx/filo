@@ -1,6 +1,7 @@
 import type { SessionItem, SessionSnapshot, SessionSummary } from '@shared/ipc'
 import type { AgentMessage } from '@shared/pi'
 import { isShownEntry } from '@shared/entries'
+import { CACHE_WARM } from 'pi-capabilities/lib/promptCache.ts'
 import { open, readdir, readFile, stat } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
@@ -129,6 +130,11 @@ function toMessage(entry: any): AgentMessage | null {
         case 'custom':
             return isShownEntry(entry)
                 ? { role: 'custom', customType: entry.customType, content: '', display: true, details: entry.data, timestamp }
+                : null
+        // pi warming the prompt cache: not shown, but the cache's age counts from it.
+        case 'usage':
+            return entry.kind === CACHE_WARM
+                ? { role: 'custom', customType: CACHE_WARM, content: '', display: false, details: entry, timestamp }
                 : null
         default:
             return null

@@ -27,6 +27,7 @@
     "extensions": [
       "./extensions/cc-tui.ts",
       "./extensions/cc-statusline.ts",
+      "./extensions/cc-channel-test.ts",
       "./extensions/cc-compaction.ts",
       "./extensions/cc-transcript.ts",
       "./extensions/cc-input.ts",
@@ -34,13 +35,15 @@
       "./extensions/cc-header.ts",
       "./extensions/cc-presence.ts",
       "./extensions/cc-bridge.ts",
+      "./extensions/cc-capabilities.ts",
       "./extensions/capabilities/todo.ts",
       "./extensions/capabilities/ask.ts",
       "./extensions/capabilities/approval.ts",
       "./extensions/capabilities/plan.ts",
       "./extensions/capabilities/subagent.ts",
       "./extensions/capabilities/review.ts",
-      "./extensions/capabilities/autopilot.ts"
+      "./extensions/capabilities/autopilot.ts",
+      "./extensions/capabilities/budget.ts"
     ],
     "themes": [
       "./themes/claude-code.json",

@@ -2,12 +2,15 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { AssistantMessageComponent, CONFIG_DIR_NAME, getAgentDir, UserMessageComponent, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Editor, Loader, Markdown, Text, TuiAltScreen } from "@earendil-works/pi-tui";
+import { cacheMisses as cacheMissesOf, cacheTtlMs, entryMessages, EXPECTED_MISSES, isNotable, missLabel, type CacheMiss } from "pi-capabilities/lib/promptCache.ts";
 import { latestTodos } from "pi-capabilities/lib/todo.ts";
 import type { TodoDetails } from "pi-capabilities/protocol";
 import { COLOR, key, MODE_KEY, shared } from "./lib/shared.ts";
 
 const fg = (code: number, s: string) => `\x1b[38;5;${code}m${s}\x1b[39m`;
 const FRAMES = ["·", "✢", "✳", "✶", "✻", "✽"];
+// cc-statusline's amber, for a cache miss nothing explains.
+const WARN = 179;
 const VERBS = [
 	["Working", "Worked"],
 	["Churning", "Churned"],
@@ -160,9 +163,16 @@ export default function (pi: ExtensionAPI) {
 		ui?.setWorkingMessage([`${fg(COLOR.shimmer, `${label}…`)} ${fg(COLOR.muted, `(${meta.filter(Boolean).join(" · ")})`)}`, ...below].join("\n"));
 	};
 
-	pi.registerEntryRenderer("cc-done", (entry: any) =>
-		new Text(`${fg(COLOR.muted, "✻")} ${fg(COLOR.muted, `${entry.data.verb} for ${duration(entry.data.ms)} · done ${new Date(entry.data.at).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`)}`, 0, 0),
-	);
+	// "✻ Worked for 3s · done 7:11 PM · cache miss (idle 7m)": Filo's turn footer says the same, details on hover
+	// there and in /cache here. Amber unless the user caused it (idling, a model or thinking switch).
+	pi.registerEntryRenderer("cc-done", (entry: any) => {
+		const misses: CacheMiss[] = entry.data.cacheMisses ?? [];
+		const line = `${entry.data.verb} for ${duration(entry.data.ms)} · done ${new Date(entry.data.at).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`;
+		const extra = misses.reduce((sum, m) => sum + (m.extraCost ?? 0), 0);
+		const why = [...new Set(misses.map(missLabel))].join(", ") + (extra > 0 ? `, +$${extra.toFixed(2)}` : "");
+		const miss = misses.length ? fg(misses.some((m) => !EXPECTED_MISSES.has(m.reason)) ? WARN : COLOR.muted, ` · ${misses.length === 1 ? "cache miss" : `${misses.length} cache misses`} (${why})`) : "";
+		return new Text(`${fg(COLOR.muted, "✻")} ${fg(COLOR.muted, line)}${miss}`, 0, 0);
+	});
 
 	pi.on("session_start", (_e, ctx) => {
 		if (!ctx.hasUI) return;
@@ -223,7 +233,7 @@ export default function (pi: ExtensionAPI) {
 		thinking = false;
 	});
 
-	pi.on("agent_end", (e) => {
+	pi.on("agent_end", (e, ctx) => {
 		if (!ui) return;
 		clearInterval(timer);
 		ui.setWorkingMessage();
@@ -231,6 +241,9 @@ export default function (pi: ExtensionAPI) {
 		// Claude Code prints "Interrupted by user" instead of a summary line after esc.
 		const last = [...(e.messages ?? [])].reverse().find((m: any) => m.role === "assistant") as any;
 		if (last?.stopReason === "aborted") return;
-		pi.appendEntry("cc-done", { verb: verb[1], ms: Date.now() - start, at: Date.now() });
+		// The run's notable prompt-cache misses (the same rule as Filo's turn footer), judged against the branch before them.
+		const messages = entryMessages(ctx.sessionManager.getBranch());
+		const cacheMisses = cacheMissesOf(messages, cacheTtlMs(ctx.model)).filter((m, i): m is CacheMiss => !!m && isNotable(m) && messages[i].timestamp >= start);
+		pi.appendEntry("cc-done", { verb: verb[1], ms: Date.now() - start, at: Date.now(), cacheMisses });
 	});
 }

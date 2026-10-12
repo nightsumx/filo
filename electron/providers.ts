@@ -1,15 +1,19 @@
-// Settings → 模型供应商, main side. Sign-in and the provider list go through providerHelper.mts, a
+// Settings → 供应商, main side. Sign-in and the provider list go through providerHelper.mts, a
 // child process running the user's own pi (so they match the threads exactly); endpoints are edited
 // in pi's models.json here, then checked by loading them in that pi.
 import type { PiEnv } from '@shared/ipc'
-import type { AuthMethod, Endpoint, EndpointModel, EndpointSave, LoginUpdate, ProviderList, ProvidersState } from '@shared/providers'
+import type { AuthMethod, ChannelModel, ChannelSave, Endpoint, EndpointModel, EndpointSave, LoginUpdate, ProviderList, ProvidersState } from '@shared/providers'
+import type { RouteCatalog } from '@shared/routes'
+import type { ProbeReply, ProbeRequest } from 'pi-capabilities/lib/channelTest.ts'
+import type { PriceList } from 'pi-capabilities/lib/prices.ts'
 import type { ChildProcessWithoutNullStreams } from 'node:child_process'
 import { spawn } from 'node:child_process'
 import { existsSync, readFileSync, realpathSync } from 'node:fs'
 import { chmod, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import process from 'node:process'
-import { ENDPOINT_APIS, KEYLESS_API_KEY } from '@shared/providers'
+import { apiBaseUrl, ENDPOINT_APIS, KEYLESS_API_KEY } from '@shared/providers'
+import { ROUTES_PROVIDER } from '@shared/routes'
 import { tr } from './i18n'
 import { JsonlSplitter } from './jsonl'
 import { agentDir } from './piSettings'
@@ -173,6 +177,49 @@ export class ProviderHelper {
         return this.call({ op: 'apiKey', provider })
     }
 
+    /** The API of each model id pi knows from its maker. */
+    nativeApis(models: string[]): Promise<Record<string, string>> {
+        return this.call({ op: 'nativeApis', models })
+    }
+
+    /** Models the routing gateway can use (shared/routes RouteCatalog). */
+    routeCatalog(): Promise<RouteCatalog> {
+        return this.call({ op: 'routeCatalog' })
+    }
+
+    /** pi's endpoint and key for one model; the key stays in main (the gateway). */
+    routeTarget(provider: string, model: string): Promise<{ api: string, baseUrl: string, apiKey?: string, headers?: Record<string, string> }> {
+        return this.call({ op: 'routeTarget', provider, model })
+    }
+
+    /** pi's model list with prices, for what other agents' requests cost. */
+    prices(): Promise<PriceList> {
+        return this.call({ op: 'prices' })
+    }
+
+    /** A provider's usable models with prices, for the channel test. */
+    probeModels(provider: string): Promise<ChannelModel[]> {
+        return this.call({ op: 'probeModels', provider })
+    }
+
+    /** One channel-test request through the user's pi; aborting cancels it in the helper. */
+    async probe(provider: string, model: string, request: ProbeRequest, signal?: AbortSignal): Promise<ProbeReply> {
+        const id = `probe-${++this.seq}`
+        const onAbort = () => this.post({ op: 'probeCancel', probe: id })
+        signal?.addEventListener('abort', onAbort, { once: true })
+        try {
+            return await this.call<ProbeReply>({ op: 'probe', provider, model, request }, id)
+        }
+        catch (error) {
+            if (signal?.aborted)
+                throw Object.assign(new Error('Channel test cancelled'), { name: 'AbortError' })
+            throw error
+        }
+        finally {
+            signal?.removeEventListener('abort', onAbort)
+        }
+    }
+
     /** Starts a login; its prompts, notices and outcome arrive through onUpdate under the returned id. */
     login(provider: string, method: AuthMethod): string {
         const login = `login-${++this.seq}`
@@ -225,13 +272,15 @@ function endpointModelOf(raw: Record<string, any>): EndpointModel {
         maxTokens: count(raw.maxTokens),
         reasoning: typeof raw.reasoning === 'boolean' ? raw.reasoning : undefined,
         images: Array.isArray(raw.input) ? raw.input.includes('image') : undefined,
+        api: typeof raw.api === 'string' ? raw.api : undefined,
     }
 }
 
 /** The provider entries of models.json, without key values. */
 export function readEndpoints(json: Record<string, any>): Endpoint[] {
     const providers = isObject(json.providers) ? json.providers : {}
-    return Object.entries(providers).filter(([, entry]) => isObject(entry)).map(([id, entry]) => ({
+    // `filo` is routing's own entry (terminal sync), managed in Settings → 路由.
+    return Object.entries(providers).filter(([id, entry]) => isObject(entry) && id !== ROUTES_PROVIDER).map(([id, entry]) => ({
         id,
         name: typeof entry.name === 'string' ? entry.name : undefined,
         baseUrl: typeof entry.baseUrl === 'string' ? entry.baseUrl : undefined,
@@ -267,6 +316,7 @@ export function endpointSaveOf(value: unknown): EndpointSave {
                         maxTokens: tokens(m.maxTokens),
                         reasoning: flag(m.reasoning),
                         images: flag(m.images),
+                        api: text(m.api, 100),
                     }))
                 : undefined,
         },
@@ -277,10 +327,12 @@ export function endpointSaveOf(value: unknown): EndpointSave {
 }
 
 /** What is wrong with a save, in the UI language; undefined when it can be written. */
-export function checkEndpoint(save: EndpointSave, builtIn: boolean, currentApi?: string): string | undefined {
+export function checkEndpoint(save: EndpointSave, builtIn: boolean, current?: Endpoint): string | undefined {
     const { endpoint } = save
     if (!ID_PATTERN.test(endpoint.id))
         return tr('ID 只能用字母、数字、点、下划线和连字符，最多 64 个字符', 'The ID may use letters, digits, dots, underscores and hyphens, up to 64 characters')
+    if (endpoint.id === ROUTES_PROVIDER)
+        return tr('ID「filo」留给路由使用', 'The ID "filo" is kept for routing')
     if (endpoint.baseUrl !== undefined && endpoint.baseUrl !== '') {
         let url: URL
         try {
@@ -297,7 +349,8 @@ export function checkEndpoint(save: EndpointSave, builtIn: boolean, currentApi?:
     if (!endpoint.baseUrl)
         return tr('填写接口地址', 'Enter the API address')
     // An API models.json already names is kept even if the page does not offer it.
-    if (!endpoint.api || (!(ENDPOINT_APIS as readonly string[]).includes(endpoint.api) && endpoint.api !== currentApi))
+    const apis = new Set<string | undefined>([...ENDPOINT_APIS, current?.api, ...(current?.models ?? []).map(m => m.api)])
+    if (!endpoint.api || !apis.has(endpoint.api))
         return tr('选择接口类型', 'Choose the API type')
     const models = endpoint.models ?? []
     if (!models.length)
@@ -310,6 +363,8 @@ export function checkEndpoint(save: EndpointSave, builtIn: boolean, currentApi?:
         if (ids.has(id))
             return tr(`模型 ${id} 重复了`, `Model ${id} is listed twice`)
         ids.add(id)
+        if (model.api !== undefined && !apis.has(model.api))
+            return tr(`选择模型 ${id} 的接口类型`, `Choose the API type of model ${id}`)
         for (const n of [model.contextWindow, model.maxTokens]) {
             if (n !== undefined && (!Number.isSafeInteger(n) || n <= 0 || n > MAX_TOKENS))
                 return tr(`模型 ${id} 的 token 数无效`, `Model ${id} has an invalid token count`)
@@ -335,6 +390,7 @@ export function applyEndpoint(json: Record<string, any>, save: EndpointSave, bui
         else
             entry[key] = value
     }
+    const oldBase: unknown = entry.baseUrl
     set('baseUrl', endpoint.baseUrl?.trim().replace(/\/+$/, ''))
     if (!builtIn) {
         set('name', endpoint.name?.trim())
@@ -355,6 +411,14 @@ export function applyEndpoint(json: Record<string, any>, save: EndpointSave, bui
             put('contextWindow', model.contextWindow)
             put('maxTokens', model.maxTokens)
             put('reasoning', model.reasoning)
+            // A model on another API than the provider's gets the address in that API's shape; one
+            // the page wrote that way goes with it.
+            if (typeof oldBase === 'string' && typeof next.api === 'string' && next.baseUrl === apiBaseUrl(oldBase, next.api))
+                delete next.baseUrl
+            const api = model.api === endpoint.api ? undefined : model.api
+            put('api', api)
+            if (api && entry.baseUrl)
+                next.baseUrl = apiBaseUrl(entry.baseUrl, api)
             if (model.images !== undefined) {
                 const input: string[] = Array.isArray(next.input) ? next.input.filter((i: unknown) => i !== 'image') : ['text']
                 next.input = model.images ? [...new Set([...input, 'image'])] : input
@@ -493,7 +557,7 @@ export class ProviderService {
             throw new Error(tr(`ID「${save.endpoint.id}」已被 ${existing.name} 使用`, `The ID "${save.endpoint.id}" is taken by ${existing.name}`))
         const builtIn = !!existing?.builtIn
         const before = await readModelsJson()
-        const problem = checkEndpoint(save, builtIn, readEndpoints(before.json).find(e => e.id === save.endpoint.id)?.api)
+        const problem = checkEndpoint(save, builtIn, readEndpoints(before.json).find(e => e.id === save.endpoint.id))
         if (problem)
             throw new Error(problem)
         await writeModelsJson(applyEndpoint(before.json, save, builtIn))
@@ -516,6 +580,53 @@ export class ProviderService {
         const before = await readModelsJson()
         await writeModelsJson(removeEndpoint(before.json, id))
         this.onChanged()
+    }
+
+    /**
+     * A channel added from an agent's model picker: only its address and key. It joins the custom
+     * provider with the same address and key, or becomes one named after the host. Its models are
+     * the endpoint's own list (or `model` when it has none), each on the API it speaks at its maker,
+     * or else the agent's; the first one on the agent's API is what the agent then uses.
+     */
+    async addChannel(save: ChannelSave): Promise<{ provider: string, model: string } | { listError: string }> {
+        try {
+            new URL(save.baseUrl.trim())
+        }
+        catch {
+            throw new Error(tr('地址不是有效的 URL', 'The address is not a valid URL'))
+        }
+        const baseUrl = apiBaseUrl(save.baseUrl, save.api)
+        const listed = save.model ? [{ id: save.model }] : await fetchEndpointModels(this.fetcher, baseUrl, save.api, save.apiKey).catch((error: Error) => error)
+        if (listed instanceof Error || !listed.length)
+            return { listError: listed instanceof Error ? listed.message : tr('这个地址没有列出模型', 'The endpoint lists no models') }
+        const native = save.model ? {} : await this.helper.nativeApis(listed.map(m => m.id))
+        const { providers } = await this.helper.list()
+        let same: Endpoint | undefined
+        for (const endpoint of readEndpoints((await readModelsJson()).json)) {
+            if (same || providers.find(p => p.id === endpoint.id)?.builtIn !== false || !endpoint.baseUrl || apiBaseUrl(endpoint.baseUrl, save.api) !== baseUrl)
+                continue
+            const key = await this.helper.apiKey(endpoint.id).catch(() => null)
+            if ((key === KEYLESS_API_KEY ? '' : key ?? '') === save.apiKey)
+                same = endpoint
+        }
+        const kept = (same?.models ?? []).map(m => ({ ...m, api: m.api ?? same!.api }))
+        const models = [
+            ...kept.map(m => (m.id === save.model ? { ...m, api: save.api } : m)),
+            ...listed.filter(m => !kept.some(k => k.id === m.id)).map(m => ({ ...m, api: save.model ? save.api : native[m.id] ?? save.api })),
+        ]
+        const model = models.find(m => m.api === save.api && listed.some(l => l.id === m.id)) ?? models.find(m => m.api === save.api)
+        if (!model)
+            return { listError: tr(`${same?.name ?? same?.id ?? baseUrl} 里没有这个 agent 的接口能用的模型`, `${same?.name ?? same?.id ?? baseUrl} has no model on this agent's API`) }
+        if (same) {
+            await this.saveEndpoint({ endpoint: { ...same, models }, keyless: same.keyless })
+            return { provider: same.id, model: model.id }
+        }
+        const host = new URL(baseUrl).hostname.slice(0, 60)
+        let id = host
+        for (let n = 2; id === ROUTES_PROVIDER || providers.some(p => p.id === id); n++)
+            id = `${host}-${n}`
+        await this.saveEndpoint({ endpoint: { id, name: id, baseUrl, api: save.api, models }, apiKey: save.apiKey, create: true })
+        return { provider: id, model: model.id }
     }
 
     async endpointModels(baseUrl: string, api: string, apiKey: string | undefined, provider: string | undefined): Promise<EndpointModel[]> {

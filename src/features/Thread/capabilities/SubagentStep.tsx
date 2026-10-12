@@ -25,6 +25,7 @@ export const Transcript = observer(function Transcript({ details, running }: { d
     const turns = useMemo(() => childTurns(details, running), [details, running])
     const scrollRef = useRef<HTMLDivElement>(null)
     const stick = useRef(true)
+    const lastTop = useRef(0)
     // Follow the child's output like the main transcript, unless the user scrolled up.
     useLayoutEffect(() => {
         const el = scrollRef.current
@@ -34,9 +35,18 @@ export const Transcript = observer(function Transcript({ details, running }: { d
     return (
         <div
             ref={scrollRef}
+            // Scrolling up lets go even a few px short of the bottom (MessageList does the same);
+            // the wheel counts before its scroll, so new output can't pull the view back first.
+            onWheel={(e) => {
+                const el = e.currentTarget
+                if (e.deltaY < 0 && el.scrollHeight > el.clientHeight)
+                    stick.current = false
+            }}
             onScroll={(e) => {
                 const el = e.currentTarget
-                stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24
+                const distance = el.scrollHeight - el.scrollTop - el.clientHeight
+                stick.current = el.scrollTop < lastTop.current - 1 && distance > 1 ? false : distance < 24
+                lastTop.current = el.scrollTop
             }}
             className="max-h-[420px] overflow-y-auto pr-1"
         >

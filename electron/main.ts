@@ -1,9 +1,12 @@
-import type { AgentStartOptions, GlobalCompactionPatch, SearchResult, StateSave, TabMove, ThemePref, WindowBounds, WindowReport } from '@shared/ipc'
+import type { AgentStartOptions, CacheWarming, SearchResult, StateSave, TabMove, ThemePref, WindowBounds, WindowReport } from '@shared/ipc'
 import type { LoginUpdate } from '@shared/providers'
 import { acpAgent, agentOfKey, parseAcpSessionKey } from '@shared/agents'
+import { SETUP_TOOL_IDS, SETUP_VERSION } from '@shared/setup'
 import { APP_INFO } from '@shared/app'
 import { resolveLang } from '@shared/i18n'
+import { AGENT_APIS, TERMINAL_AGENTS } from '@shared/routes'
 import { stat } from 'node:fs/promises'
+import os from 'node:os'
 import path from 'node:path'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
@@ -18,16 +21,24 @@ import { AgentManager } from './agents'
 import { BACKGROUND, reveal } from './background'
 import { applySave, savedWindows, StateFile } from './appState'
 import { repoEdits } from './edits'
+import { FolderWatch, listDir, readText, writeText } from './files'
 import { gitBranch, gitCommit, gitDiscard, gitFileBytes, gitFileDiff, gitFileEntries, gitFileThumbs, gitStatus } from './git'
 import { mainLang, setMainLang, tr } from './i18n'
-import { compactionInfo, globalCompaction, setGlobalCompaction } from './piSettings'
+import { installPackage, WEB_ACCESS } from './piPackages'
+import { agentDir, compactionInfo, globalCompaction, migrateCapabilities, piSettingsState, setCacheWarming, setCapabilities, setGlobalCompaction, setWebAccess, watchSettings } from './piSettings'
+import { ChannelTests } from './channelTests'
+import { priceList, readPricesFrom, refreshPrices } from './prices'
 import { endpointSaveOf, helperLaunch, ProviderHelper, ProviderService } from './providers'
 import { resolvePiEnv, setBundledPi } from './pi-env'
-import { assertInSessionsDir, listSessions, readSession } from './sessions'
+import { installCommand, liveSetupDeps, probeSetup, SETUP_LABELS } from './setup'
+import { assertInSessionsDir, listSessions, readSession, sessionsDir } from './sessions'
+import { readLedger } from 'pi-capabilities/lib/ledger.ts'
 import { platform } from './platform'
+import { RoutesService } from './routes'
 import { windowPlatform } from './platform/window'
 import { TerminalTools } from './terminalTools'
 import { Terminals } from './terminals'
+import { useTerminals } from './native/claudeTui'
 import { Windows } from './windows'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -50,15 +61,19 @@ setBundledPi(app.isPackaged
     ? { cli: path.join(process.resourcesPath, 'pi', PI_CLI), launcher: path.join(process.resourcesPath, 'piLauncher.mjs') }
     : { cli: path.join(__dirname, '../..', PI_CLI), launcher: path.join(__dirname, '../../electron/piLauncher.mjs') })
 // node and npm for the agents the app installs when the Mac has no Node.js (electron/acp/node.ts):
-// this Electron, and the npm shipped next to the bundled pi.
+// this Electron (its Helper on macOS, platform.nodeRuntime), and the npm shipped next to the bundled pi.
 setAppNode({
     dir: path.join(app.getPath('userData'), 'node'),
-    electron: process.execPath,
+    electron: platform.nodeRuntime(process.execPath),
     npm: app.isPackaged ? path.join(process.resourcesPath, 'pi', 'node_modules', 'npm') : path.join(__dirname, '../../bundled-pi/node_modules/npm'),
 })
 
 const agents = new AgentManager({
-    onEvent: (agentId, event) => windows.deliver(agentId, IPC.agentEvent, event),
+    onEvent: (agentId, event) => {
+        if (event.type === 'agent_start' || event.type === 'agent_end')
+            routes.running(agentId, event.type === 'agent_start')
+        windows.deliver(agentId, IPC.agentEvent, event)
+    },
     onExit: (agentId, info) => windows.deliver(agentId, IPC.agentExit, info),
 }, extensionsDir, () => terminalTools.env())
 
@@ -91,6 +106,8 @@ const terminals = new Terminals({
     onChange: list => windows.broadcast(null, IPC.terminalsChanged, list),
     appVersion: app.getVersion(),
 })
+// Claude Code threads run its TUI in one of these.
+useTerminals(terminals, path.join(app.getPath('userData'), 'claude-tui.json'))
 
 /**
  * The agent's terminal tools (the terminal capability) reach the terminals through this socket. Named
@@ -110,7 +127,7 @@ function closeHiddenTerminals(shown: Set<string>) {
 }
 
 /**
- * Settings → 模型供应商. The helper runs with the user's node and pi, so it is a real file outside the
+ * Settings → 供应商. The helper runs with the user's node and pi, so it is a real file outside the
  * asar (Resources/providerHelper.mts). A login's updates go to the window that started it.
  */
 const providers = (() => {
@@ -122,8 +139,11 @@ const providers = (() => {
             owner.send(IPC.providerLoginUpdate, update)
         if ('done' in update || 'error' in update)
             owners.delete(update.login)
-        if ('done' in update)
+        if ('done' in update) {
+            void routes.providersChanged()
+            void refreshPrices()
             windows.broadcast(null, IPC.providersChanged)
+        }
     }
     const helper = new ProviderHelper(async () => {
         const env = await resolvePiEnv()
@@ -131,9 +151,15 @@ const providers = (() => {
             throw new Error(env.error)
         return helperLaunch(env.env, script)
     }, deliver)
-    const service = new ProviderService(helper, () => windows.broadcast(null, IPC.providersChanged), (input, init) => net.fetch(String(input), init))
+    const service = new ProviderService(helper, () => {
+        void routes.providersChanged()
+        void refreshPrices()
+        windows.broadcast(null, IPC.providersChanged)
+    }, (input, init) => net.fetch(String(input), init))
+    const channels = new ChannelTests({ helper, agentDir, sessionsDir, broadcast: update => windows.broadcast(null, IPC.channelTestUpdate, update) })
     return {
         service,
+        channels,
         login(owner: Electron.WebContents, provider: string, method: 'api_key' | 'oauth') {
             const login = helper.login(provider, method)
             owners.set(login, owner)
@@ -143,6 +169,30 @@ const providers = (() => {
         },
     }
 })()
+
+/** pi's `cacheWarming`, which the gateway follows too (gateway/warm.ts). */
+let cacheWarming: CacheWarming = 'streaming'
+
+/**
+ * Settings → 路由: routing groups and the local gateway agents reach their models through. Provider
+ * keys are pi's, looked up by the provider helper and kept in this process.
+ */
+const routes = new RoutesService({
+    file: path.join(app.getPath('userData'), 'routes.json'),
+    helper: {
+        routeCatalog: () => providers.service.helper.routeCatalog(),
+        routeTarget: (provider, model) => providers.service.helper.routeTarget(provider, model),
+    },
+    fetch: (input, init) => net.fetch(input instanceof Request ? input : String(input), init),
+    onChanged: state => windows.broadcast(null, IPC.routesChanged, state),
+    piExtension: path.join(extensionsDir, 'routes.ts'),
+    // A warm shows in the thread as pi's own does (entry_appended); the agents' logs do not have it.
+    warming: {
+        mode: () => cacheWarming,
+        prices: priceList,
+        warmed: (agentId, entry) => windows.deliver(agentId, IPC.agentEvent, { type: 'entry_appended', entry }),
+    },
+})
 
 /** Terminal pi sessions; every window gets the list when it changes. */
 const follower = new SessionFollower(IPC.sessionChanged)
@@ -300,6 +350,27 @@ function registerIpc() {
             throw new Error('unknown agent')
         return acp.install(spec.id)
     })
+    // The setup assistant. A probe asks the login shell again, so agents found after an install
+    // show up everywhere (the composer's picker, Settings → Agents).
+    ipcMain.handle(IPC.setupProbe, async () => {
+        const probe = await probeSetup(liveSetupDeps())
+        windows.broadcast(null, IPC.agentsChanged)
+        return probe
+    })
+    ipcMain.handle(IPC.setupInstall, async (_e, id: unknown, size: unknown) => {
+        const tool = SETUP_TOOL_IDS.find(t => t === id)
+        const command = tool && await installCommand(tool, liveSetupDeps())
+        if (!tool || !command)
+            throw new Error(tr('这台电脑上没有可用的安装方式', 'No installer for this computer'))
+        const s = (size ?? {}) as Record<string, unknown>
+        return terminals.create({
+            cwd: os.homedir(),
+            command,
+            label: SETUP_LABELS[tool],
+            cols: typeof s.cols === 'number' ? s.cols : undefined,
+            rows: typeof s.rows === 'number' ? s.rows : undefined,
+        }, 'setup')
+    })
     ipcMain.handle(IPC.listSessions, async () => {
         const pi = await listSessions()
         const known = new Set([...store.state.projects, ...pi.map(s => s.cwd)])
@@ -307,6 +378,7 @@ function registerIpc() {
         return [...pi, ...others].sort((a, b) => b.updatedAt - a.updatedAt)
     })
     ipcMain.handle(IPC.readSession, (_e, file: string) => (parseAcpSessionKey(file) ? acp.readSession(file) : readSession(file)))
+    ipcMain.handle(IPC.spendLedger, async (_e, days: unknown) => readLedger({ pi: await sessionsDir() }, Date.now() - Math.min(Math.max(Number(days) || 7, 1), 90) * 86_400_000, Object.keys(priceList()).length ? priceList() : await refreshPrices()))
     ipcMain.handle(IPC.presence, () => presence.current)
     ipcMain.handle(IPC.followSession, async (e, file: unknown, on: unknown) => {
         if (typeof file !== 'string')
@@ -329,7 +401,12 @@ function registerIpc() {
         await shell.trashItem(file)
     })
 
-    ipcMain.handle(IPC.loadState, e => windows.stateFor(e.sender, store.state))
+    // End-to-end runs skip the setup assistant unless they test it (test/app.ts launch).
+    const skipSetup = process.env.PI_GUI_SKIP_SETUP === '1'
+    ipcMain.handle(IPC.loadState, (e) => {
+        const state = windows.stateFor(e.sender, store.state)
+        return skipSetup && !state.setupDone ? { ...state, setupDone: SETUP_VERSION } : state
+    })
     ipcMain.handle(IPC.saveState, (e, save: StateSave) => {
         if (!save || typeof save !== 'object' || !save.prefs || !save.tabs || !save.activeTabs)
             return
@@ -386,7 +463,7 @@ function registerIpc() {
         if (kind !== 'pi') {
             if (!(await isDirectory(options.cwd)))
                 throw new Error(tr(`项目目录不存在：${options.cwd}`, `Project folder not found: ${options.cwd}`))
-            const agentId = await agents.startAcp(acp, kind, options)
+            const agentId = await agents.startAcp(acp, kind, options, (spec, launch) => routes.routeAcp(spec, launch, options.route))
             windows.addAgent(agentId, e.sender, options.cwd)
             return agentId
         }
@@ -409,10 +486,30 @@ function registerIpc() {
         // spawn reports a missing cwd as "spawn <node> ENOENT", which reads like node is missing.
         if (!(await isDirectory(options.cwd)))
             throw new Error(tr(`项目目录不存在：${options.cwd}`, `Project folder not found: ${options.cwd}`))
-        const agentId = agents.start(env.env, options)
+        const routed = await routes.routePi(options.route)
+        const agentId = agents.start(env.env, options, routed ?? {})
+        routed?.started(agentId)
         windows.addAgent(agentId, e.sender, options.cwd)
         return agentId
     })
+    ipcMain.handle(IPC.routes, () => routes.state())
+    ipcMain.handle(IPC.routesSave, (_e, config: unknown) => routes.save(config))
+    ipcMain.handle(IPC.routeCatalog, (_e, force: unknown) => routes.catalog(force === true))
+    ipcMain.handle(IPC.threadRoute, (_e, agentId: unknown) => routes.threadInfo(String(agentId)))
+    ipcMain.handle(IPC.setThreadRoute, (_e, agentId: unknown, route: unknown) => routes.setThread(String(agentId), route))
+    ipcMain.handle(IPC.sessionRoute, (_e, key: unknown) => routes.sessionGroup(String(key)))
+    ipcMain.handle(IPC.agentChannel, (_e, agent: unknown) => {
+        const terminal = TERMINAL_AGENTS.find(a => a === agent)
+        return terminal ? routes.channel(terminal) : {}
+    })
+    ipcMain.handle(IPC.useChannel, (_e, agent: unknown, pick: unknown) => {
+        const terminal = TERMINAL_AGENTS.find(a => a === agent)
+        const raw = pick && typeof pick === 'object' ? pick as Record<string, unknown> : undefined
+        if (!terminal || (raw && (typeof raw.provider !== 'string' || typeof raw.model !== 'string')))
+            throw new Error('bad channel')
+        return routes.useChannel(terminal, raw ? { provider: String(raw.provider), model: String(raw.model) } : null)
+    })
+    ipcMain.handle(IPC.setSessionRoute, (_e, key: unknown, group: unknown) => routes.setSessionGroup(String(key), typeof group === 'string' && group ? group : undefined))
     ipcMain.handle(IPC.agentRequest, (_e, agentId: string, command: Record<string, unknown>) => agents.request(agentId, command))
     ipcMain.handle(IPC.agentSend, (_e, agentId: string, record: Record<string, unknown>) => agents.send(agentId, record))
     ipcMain.handle(IPC.agentStop, (_e, agentId: string) => agents.stop(agentId))
@@ -420,10 +517,28 @@ function registerIpc() {
     ipcMain.handle(IPC.compactionInfo, (_e, cwd: unknown, modelKey: unknown) =>
         compactionInfo(typeof cwd === 'string' ? cwd : '', typeof modelKey === 'string' ? modelKey : undefined))
     ipcMain.handle(IPC.globalCompaction, (_e, cwd: unknown) => globalCompaction(typeof cwd === 'string' ? cwd : undefined))
-    ipcMain.handle(IPC.setGlobalCompaction, async (e, patch: unknown) => {
+    // Every window hears of the write from watchSettings, as of one by pi in a terminal; the writer
+    // gets the new state at once.
+    ipcMain.handle(IPC.setGlobalCompaction, async (_e, patch: unknown) => {
         await setGlobalCompaction(patch)
-        // pi reads settings.json at startup: the other windows restart their idle processes too.
-        windows.broadcast(e.sender, IPC.piSettingsChanged, patch as GlobalCompactionPatch)
+        return piSettingsState()
+    })
+    ipcMain.handle(IPC.piSettings, () => piSettingsState())
+    ipcMain.handle(IPC.setCapabilities, async (_e, patch: unknown) => {
+        await setCapabilities(patch)
+        return piSettingsState()
+    })
+    ipcMain.handle(IPC.installWebAccess, async () => {
+        await installPackage(WEB_ACCESS.source)
+        return piSettingsState()
+    })
+    ipcMain.handle(IPC.setWebAccess, async (_e, enabled: unknown) => {
+        await setWebAccess(enabled === true)
+        return piSettingsState()
+    })
+    ipcMain.handle(IPC.setCacheWarming, async (_e, mode: unknown) => {
+        await setCacheWarming(mode)
+        return piSettingsState()
     })
     ipcMain.handle(IPC.gitStatus, (_e, cwd: string) => gitStatus(cwd))
     ipcMain.handle(IPC.gitBranches, async (_e, cwds: unknown) => {
@@ -457,6 +572,29 @@ function registerIpc() {
         if (error)
             throw new Error(error)
     })
+    ipcMain.handle(IPC.revealPath, (_e, target: unknown) => shell.showItemInFolder(absolutePath(target)))
+    ipcMain.handle(IPC.listDir, (_e, dir: unknown) => listDir(absolutePath(dir)))
+    ipcMain.handle(IPC.readFile, (_e, file: unknown) => readText(absolutePath(file)))
+    ipcMain.handle(IPC.writeFile, (_e, file: unknown, text: unknown, options: { expected?: unknown, bom?: unknown } | undefined) => {
+        if (typeof text !== 'string')
+            throw new Error('expected text')
+        return writeText(absolutePath(file), text, { expected: typeof options?.expected === 'string' ? options.expected : null, bom: options?.bom === true })
+    })
+    // One set of folder watchers per window, gone with it.
+    const folderWatches = new Map<number, FolderWatch>()
+    ipcMain.on(IPC.watchDirs, (e, dirs: unknown) => {
+        const sender = e.sender
+        let watch = folderWatches.get(sender.id)
+        if (!watch) {
+            const created = new FolderWatch(changes => !sender.isDestroyed() && sender.send(IPC.dirsChanged, changes))
+            folderWatches.set(sender.id, watch = created)
+            sender.once('destroyed', () => {
+                created.close()
+                folderWatches.delete(sender.id)
+            })
+        }
+        watch.set(cwdList(dirs))
+    })
     ipcMain.handle(IPC.notify, (_e, notice: unknown) => showNotice(notice))
     ipcMain.handle(IPC.openExternal, async (_e, url: string) => {
         if (isSafeExternalUrl(url))
@@ -475,6 +613,25 @@ function registerIpc() {
     ipcMain.handle(IPC.removeEndpoint, (_e, endpoint: unknown) => providers.service.removeEndpoint(id(endpoint)))
     ipcMain.handle(IPC.endpointModels, (_e, baseUrl: unknown, api: unknown, apiKey: unknown, provider: unknown) =>
         providers.service.endpointModels(typeof baseUrl === 'string' ? baseUrl : '', typeof api === 'string' ? api : '', typeof apiKey === 'string' ? apiKey : undefined, id(provider) || undefined))
+    ipcMain.handle(IPC.addChannel, async (_e, agent: unknown, save: unknown) => {
+        const raw = save && typeof save === 'object' ? save as Record<string, unknown> : {}
+        const text = (v: unknown, max: number) => (typeof v === 'string' ? v.trim().slice(0, max) : '')
+        const terminal = TERMINAL_AGENTS.find(a => a === agent)
+        const apiKey = text(raw.apiKey, 4096)
+        if (!terminal || !apiKey)
+            throw new Error(tr('填写地址和 key', 'Enter the address and key'))
+        const added = await providers.service.addChannel({ baseUrl: text(raw.baseUrl, 2000), api: AGENT_APIS[terminal][0], apiKey, model: text(raw.model, 300) || undefined })
+        if ('listError' in added)
+            return added
+        // Saving re-read the providers' models; the catalog has the new ones once that is done.
+        await routes.catalog(true)
+        return routes.useChannel(terminal, added)
+    })
+        ipcMain.handle(IPC.channelModels, (_e, provider: unknown) => providers.channels.models(id(provider)))
+    ipcMain.handle(IPC.channelHealth, () => providers.channels.health())
+    ipcMain.handle(IPC.channelTest, (_e, provider: unknown, model: unknown, idleMs: unknown) =>
+        providers.channels.start(id(provider), id(model), typeof idleMs === 'number' && idleMs > 0 ? Math.min(idleMs, 270_000) : undefined))
+    ipcMain.handle(IPC.channelCancel, (_e, test: unknown) => providers.channels.cancel(id(test)))
 
     const terminalId = (v: unknown) => (typeof v === 'string' && v.length <= 100 ? v : '')
     ipcMain.handle(IPC.terminals, () => terminals.list())
@@ -553,12 +710,21 @@ app.whenReady().then(async () => {
     if (!app.isPackaged && !BACKGROUND)
         windowPlatform.devIcon(path.join(__dirname, '../../build/icon.png'))
     applyLang(state.lang)
+    // Before any window reads it: the capability choice moves from state.json into pi's settings.json.
+    await migrateCapabilities(state).catch(error => console.error('capability settings:', error))
+    void piSettingsState().then(settings => cacheWarming = settings.cacheWarming, () => {})
+    watchSettings((settings) => {
+        cacheWarming = settings.cacheWarming
+        windows.broadcast(null, IPC.piSettingsChanged, settings)
+    })
     registerIpc()
     // Before the first window, so the first threads' pi already gets the socket.
     await terminalTools.start().catch(error => console.error('terminal tools:', error))
     windows.restore(savedWindows(state))
     // Warm up env resolution so the first thread starts faster.
     void resolvePiEnv()
+    void readPricesFrom(() => providers.service.helper.prices())
+    void routes.init()
     void presence.start()
     app.on('activate', () => {
         if (!windows.count)
@@ -574,8 +740,9 @@ app.on('before-quit', (event) => {
     event.preventDefault()
     presence.stop()
     terminalTools.stop()
+    providers.channels.cancelAll()
     providers.service.helper.stop()
-    void Promise.all([windows.prepareQuit(), agents.stopAll(), terminals.closeAll()]).finally(() => app.quit())
+    void Promise.all([windows.prepareQuit(), agents.stopAll(), terminals.closeAll()]).finally(() => routes.shutdown().catch(() => {}).finally(() => app.quit()))
 })
 
 app.on('window-all-closed', () => {

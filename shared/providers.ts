@@ -1,5 +1,9 @@
-// Model providers as pi sees them (its ModelRuntime), for Settings → 模型供应商. Credentials live in
-// pi's auth.json and endpoints in its models.json, so the terminal pi uses the same setup.
+// Providers, for Settings → 供应商: an address and a key, shared by every agent whose API a model
+// speaks (pi all of them, Claude Code and Codex through their own config, routing groups). They are
+// kept in pi's auth.json and models.json, the one library on disk the terminal reads too; pi's
+// ModelRuntime reads them back.
+import type { ModelHistory } from 'pi-capabilities/lib/channelStore.ts'
+import type { ChannelResult, ProbeProgress } from 'pi-capabilities/lib/channelTest.ts'
 
 /** Where a configured provider's credential comes from (pi's AuthStatus.source). */
 export type ProviderAuthSource = 'stored' | 'runtime' | 'environment' | 'fallback' | 'models_json_key' | 'models_json_command'
@@ -20,6 +24,8 @@ export interface ProviderInfo {
     /** Credential saved in auth.json, which logout removes. */
     stored?: 'api_key' | 'oauth'
     models: number
+    /** The APIs its models speak: which agents can use it. */
+    apis: string[]
     /** Models usable now (configured providers only). */
     available: number
 }
@@ -30,7 +36,7 @@ export interface ProviderList {
     modelsError?: string
 }
 
-/** What Settings → 模型供应商 shows: pi's providers plus the models.json entries it edits. */
+/** What Settings → 供应商 shows: the providers plus the models.json entries it edits. */
 export interface ProvidersState extends ProviderList {
     endpoints: Endpoint[]
 }
@@ -86,6 +92,8 @@ export interface EndpointModel {
     reasoning?: boolean
     /** Accepts images (models.json input: ["text", "image"]). */
     images?: boolean
+    /** Its own API when not the provider's: one address can serve Claude models over Messages and GPT ones over Responses. */
+    api?: string
 }
 
 /**
@@ -120,5 +128,64 @@ export interface EndpointSave {
     keyless?: boolean
 }
 
+/** A channel added from an agent's model picker (ProviderService.addChannel): joins the provider with the same address and key. */
+export interface ChannelSave {
+    baseUrl: string
+    /** The agent's API (AGENT_APIS), one of ENDPOINT_APIS. */
+    api: string
+    apiKey: string
+    /** For an endpoint that does not list its models. */
+    model?: string
+}
+
+/**
+ * The base URL pi's client for `api` wants, from the address the user gave: Anthropic's SDK adds
+ * /v1 itself, the OpenAI ones expect it in the address.
+ */
+export function apiBaseUrl(address: string, api: string): string {
+    let base = address.trim()
+    while (base.endsWith('/'))
+        base = base.slice(0, -1)
+    if (api === 'anthropic-messages')
+        return base.endsWith('/v1') ? base.slice(0, -3) : base
+    let path = ''
+    try {
+        path = new URL(base).pathname
+    }
+    catch {}
+    return path && path !== '/' ? base : `${base}/v1`
+}
+
 /** Placeholder written for keyless endpoints; pi only needs some value. */
 export const KEYLESS_API_KEY = 'none'
+
+// ---------------------------------------------------------------- channel test
+
+/** A model the channel test can run on (pi-capabilities/lib/channelTest.ts), with pi's prices per million tokens. */
+export interface ChannelModel {
+    id: string
+    name: string
+    cost?: { input: number, output: number, cacheRead: number, cacheWrite: number }
+}
+
+/** A run under way; it goes on in main when Settings closes, so the page picks it up again. */
+export interface ChannelRun {
+    test: string
+    provider: string
+    model: string
+    progress?: ProbeProgress
+}
+
+/** A run's progress, then its outcome, to every window. */
+export type ChannelTestUpdate = ChannelRun & (
+    | { progress: ProbeProgress }
+    | { result: ChannelResult }
+    | { error: string, cancelled?: boolean }
+)
+
+/** What the provider page shows next to the test, per "provider/model": the last result, the past week, runs under way. */
+export interface ChannelHealth {
+    results: Record<string, ChannelResult>
+    history: Record<string, ModelHistory>
+    running: ChannelRun[]
+}

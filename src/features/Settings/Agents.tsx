@@ -3,11 +3,13 @@
 // Sign-in stays with each agent, so the page says how instead of holding credentials.
 import type { AgentAvailability } from '@shared/agents'
 import { Button } from '@/components/ui/button'
-import { Comment, SettingRow, SettingsPage } from '@/components/ui/form'
+import { Comment, Segmented, SettingRow, SettingsPage } from '@/components/ui/form'
 import { tr } from '@/lib/i18n'
 import { cn } from '@/lib/utils'
 import { agentsStore } from '@/store/agents'
-import { ACP_AGENTS } from '@shared/agents'
+import { appStore } from '@/store/app'
+import { ACP_AGENTS, agentLabel } from '@shared/agents'
+import { DEFAULT_AGENT_CHOICES } from '@shared/setup'
 import { Loader2 } from 'lucide-react'
 import { observer } from 'mobx-react-lite'
 import { useEffect } from 'react'
@@ -35,8 +37,25 @@ export const AgentsPage = observer(() => {
     return (
         <SettingsPage title={tr('Agent', 'Agents')}>
             <SettingRow
+                title={tr('新线程默认', 'New threads start with')}
+                description={tr('每个线程仍可在输入框左下角换 agent。', 'Each thread can still switch at the bottom left of the composer.')}
+                control={({ labelId }) => (
+                    <Segmented
+                        labelledBy={labelId}
+                        value={appStore.defaultAgent}
+                        options={DEFAULT_AGENT_CHOICES.map(id => ({ value: id, label: id === 'pi' ? 'Pi' : agentLabel(id).replace(/ Build$/, '') }))}
+                        onChange={v => appStore.setDefaultAgent(v)}
+                    />
+                )}
+            />
+            <SettingRow
+                title={tr('设置向导', 'Setup assistant')}
+                description={tr('检查并安装 Node.js、终端里的 pi、Claude Code、Codex、Grok，再选默认 agent。', 'Checks for and installs Node.js, pi for the terminal, Claude Code, Codex and Grok, then picks the default agent.')}
+                control={() => <Button variant="outline" size="sm" onClick={() => appStore.openSetup()}>{tr('打开', 'Open')}</Button>}
+            />
+            <SettingRow
                 title="pi"
-                description={tr('内置。模型和 API key 在「模型供应商」里设置。', 'Built in. Models and API keys are set in Model providers.')}
+                description={tr('内置。模型和 API key 在「供应商」里设置。', 'Built in. Models and API keys are set in Providers.')}
                 control={() => <Status label={tr('内置', 'Built in')} tone="ok" />}
             />
             {ACP_AGENTS.map((spec) => {

@@ -245,6 +245,21 @@ describe('Grok Build', () => {
         expect(shape(agent).map(m => m.content[0])).toEqual(['late', 'quick', 'one more', 'heard: one more', 'next', 'echo: next'])
     })
 
+    it('a turn Grok wakes for when a background task finishes ends with its turn_completed', async () => {
+        const { agent, events, send, next, settled } = start()
+        await agent.ready
+        await send({ type: 'prompt', message: 'bg' })
+        await settled()
+        const woke = next(e => e.type === 'agent_start')
+        const done = settled()
+        await woke
+        await done
+        expect(shape(agent).map(m => m.content[0])).toEqual(['bg', 'started', 'the task finished'])
+        expect(events.filter(e => e.type === 'agent_start')).toHaveLength(2)
+        expect(events.filter(e => e.type === 'agent_end')).toHaveLength(2)
+        expect((await send({ type: 'get_state' })).isStreaming).toBe(false)
+    })
+
     it('compacts, renames, forks and deletes through the x.ai methods', async () => {
         const { agent, events, send, settled } = start()
         await agent.ready

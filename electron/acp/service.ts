@@ -6,6 +6,7 @@ import type { AcpAgentCaps, AcpAgentId, AcpAgentSpec, AgentAvailability } from '
 import type { SessionItem, SessionSnapshot, SessionSummary } from '@shared/ipc'
 import type { AgentAdapter, AgentAdapterCallbacks } from '../acp/adapter'
 import type { AcpLaunch } from './agent'
+import type { ListedSession, SessionList } from './list'
 import { ACP_AGENTS, acpAgent, acpSessionKey, parseAcpSessionKey } from '@shared/agents'
 import { readFileSync } from 'node:fs'
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
@@ -15,10 +16,11 @@ import process from 'node:process'
 import { tr } from '../i18n'
 import { loginShellPath } from '../pi-env'
 import { platform } from '../platform'
-import { ClaudeAgent } from '../native/claude'
+import { ClaudeTuiAgent } from '../native/claudeTui'
 import { CodexAgent } from '../native/codex'
 import { agentDir } from '../piSettings'
 import { AcpAgent } from './agent'
+import { CursorChats, GeminiChats } from './cliSessions'
 import { installAgent, installedAgent, installSource } from './install'
 import { withAppNode } from './node'
 import { deleteAgentSession, listAgentSessions } from './list'
@@ -39,6 +41,8 @@ export interface AcpSessionRecord {
     updatedAt: number
     /** Found in the agent's own list (session/list), not started from the app. */
     imported?: boolean
+    /** A terminal chat read from the CLI's files (cliSessions.ts): shown here, continued in a terminal. */
+    terminalOnly?: boolean
 }
 
 /** An agent's own list is read again after this long (sessions from a terminal show up then). */
@@ -51,8 +55,8 @@ const MIRROR_DELAY_MS = 200
 function adapterClass(spec: AcpAgentSpec) {
     if (spec.protocol === 'codex-app-server')
         return CodexAgent
-    if (spec.protocol === 'claude-stream')
-        return ClaudeAgent
+    if (spec.protocol === 'claude-tui')
+        return ClaudeTuiAgent
     return AcpAgent
 }
 
@@ -142,6 +146,9 @@ export async function resolveLaunch(spec: AcpAgentSpec, appRoot?: string): Promi
     throw new AgentNotInstalled(spec, !!appRoot && !!installSource(spec))
 }
 
+/** Changes an agent's launch before it starts (service.start). */
+export type LaunchHook = (spec: AcpAgentSpec, launch: AcpLaunch) => Promise<{ launch: AcpLaunch, started: (agentId: string) => void, exited: () => void } | undefined>
+
 export class AcpService {
     private records = new Map<string, AcpSessionRecord>()
     /** Agents holding a session, by session key: their transcript is the freshest read. */
@@ -158,11 +165,14 @@ export class AcpService {
     private caps: Partial<Record<AcpAgentId, AcpAgentCaps>> = {}
 
     private installs = new Map<AcpAgentId, Promise<void>>()
+    private cursorChats: CursorChats
+    private geminiChats: GeminiChats
 
     /**
      * `mirrorDir`: where the pi-format copies go; none, no copies. `agentsDir`: where the app installs
      * agents; none, only the user's own installs run. `onAgentsChanged`: an install started or ended.
      * `download`: how installs fetch archives (main passes Electron's, which honours the system proxy).
+     * `home`: where the agents' CLIs keep their own files.
      */
     constructor(
         private file: () => string,
@@ -170,7 +180,10 @@ export class AcpService {
         private agentsDir?: () => string,
         private onAgentsChanged?: () => void,
         private download: (url: string) => Promise<Response> = url => fetch(url),
+        home: () => string = os.homedir,
     ) {
+        this.cursorChats = new CursorChats(home)
+        this.geminiChats = new GeminiChats(home)
         try {
             const saved = JSON.parse(readFileSync(file(), 'utf8'))
             for (const record of Array.isArray(saved?.sessions) ? saved.sessions : []) {
@@ -233,14 +246,20 @@ export class AcpService {
         return running
     }
 
-    /** Starts an agent process for a thread; `sessionKey` resumes that session. */
-    async start(agent: AcpAgentId, cwd: string, sessionKey: string | undefined, callbacks: AgentAdapterCallbacks): Promise<AgentAdapter> {
+    /**
+     * Starts an agent process for a thread; `sessionKey` resumes that session. `prepare` can change
+     * the launch (routing points the agent at the app's gateway) and hear the process's id and end.
+     */
+    async start(agent: AcpAgentId, cwd: string, sessionKey: string | undefined, callbacks: AgentAdapterCallbacks, prepare?: LaunchHook): Promise<AgentAdapter> {
         const spec = acpAgent(agent)
         if (!spec)
             throw new Error(`Unknown agent: ${agent}`)
         const resume = parseAcpSessionKey(sessionKey)
         const record = sessionKey ? this.records.get(sessionKey) : undefined
-        const launch = await this.launchOf(spec)
+        if (record?.terminalOnly)
+            throw new Error(tr(`${spec.label} 只能在终端里接着这个对话`, `${spec.label} continues this chat only in a terminal`))
+        const prepared = prepare ? await prepare(spec, await this.launchOf(spec)) : undefined
+        const launch = prepared?.launch ?? await this.launchOf(spec)
 
         const AdapterClass = adapterClass(spec)
         const instance = new AdapterClass(spec, launch, { cwd, sessionId: resume?.sessionId, replayTime: record?.updatedAt }, {
@@ -252,6 +271,7 @@ export class AcpService {
             onExit: (id, info) => {
                 if (this.live.get(instance.key) === instance)
                     this.live.delete(instance.key)
+                prepared?.exited()
                 callbacks.onExit(id, info)
             },
             onFork: (a, sessionId) => this.noteFork(a, sessionId),
@@ -274,6 +294,7 @@ export class AcpService {
                     callbacks.onEvent(a.id, { type: 'session_info_changed', name: change.title })
             },
         })
+        prepared?.started(instance.id)
         return instance
     }
 
@@ -333,7 +354,7 @@ export class AcpService {
             throw new Error(`Not an ACP session: ${key}`)
         const record = this.records.get(key)
         const live = this.live.get(key)
-        const header = { path: key, id: parsed.sessionId, cwd: record?.cwd ?? live?.cwd ?? '', name: record?.name ?? record?.title }
+        const header: Omit<SessionSnapshot, 'items'> = { path: key, id: parsed.sessionId, cwd: record?.cwd ?? live?.cwd ?? '', name: record?.name ?? record?.title }
         if (live)
             return { ...header, items: live.snapshot() }
         if (!record)
@@ -341,7 +362,9 @@ export class AcpService {
         const cached = this.replays.get(key)
         if (cached?.updatedAt === record.updatedAt)
             return cached.snapshot
-        const snapshot = this.replay(record).then((items) => {
+        if (record.terminalOnly)
+            header.terminalOnly = await this.resumeCommand(record)
+        const snapshot = (record.terminalOnly ? this.readTerminalChat(record) : this.replay(record)).then((items) => {
             void this.writeMirror(key, items)
             return { ...header, items }
         })
@@ -371,19 +394,28 @@ export class AcpService {
                 return
             }
             this.importedAt[spec.id] = now
+            // undefined: the agent failed to list; null: it cannot.
+            let list: SessionList | null | undefined
             try {
-                const { caps, list } = await listAgentSessions(spec, launch)
-                this.noteCaps(spec.id, caps)
-                if (list)
-                    this.merge(spec.id, list.sessions, list.complete)
+                const listed = await listAgentSessions(spec, launch)
+                this.noteCaps(spec.id, listed.caps)
+                list = listed.list
             }
             catch {}
+            const local = await this.terminalChats(spec.id).catch(() => undefined)
+            if (!list && !local)
+                return
+            const sessions = [...list?.sessions ?? []]
+            const seen = new Set(sessions.map(s => s.sessionId))
+            sessions.push(...local?.sessions.filter(s => !seen.has(s.sessionId)) ?? [])
+            // A list that failed says nothing of what is gone.
+            this.merge(spec.id, sessions, list !== undefined && (list?.complete ?? true) && (local?.complete ?? true))
         }))
         this.save()
     }
 
     /** Folds an agent's list into the index; with the whole list, imported sessions it no longer has go. */
-    merge(agent: AcpAgentId, listed: { sessionId: string, cwd: string, title?: string, updatedAt: number }[], complete: boolean) {
+    merge(agent: AcpAgentId, listed: ListedSession[], complete: boolean) {
         const seen = new Set<string>()
         for (const s of listed) {
             const key = acpSessionKey(agent, s.sessionId)
@@ -393,12 +425,13 @@ export class AcpService {
             const existing = this.records.get(key)
             if (existing) {
                 existing.title ??= s.title
+                existing.terminalOnly = s.terminalOnly || undefined
                 if (s.updatedAt > existing.updatedAt)
                     existing.updatedAt = s.updatedAt
                 continue
             }
             const at = s.updatedAt || Date.now()
-            this.records.set(key, { key, agent, sessionId: s.sessionId, cwd: s.cwd, title: s.title, createdAt: at, updatedAt: at, imported: true })
+            this.records.set(key, { key, agent, sessionId: s.sessionId, cwd: s.cwd, title: s.title, createdAt: at, updatedAt: at, imported: true, ...(s.terminalOnly ? { terminalOnly: true } : {}) })
         }
         if (complete) {
             for (const record of [...this.records.values()]) {
@@ -455,6 +488,31 @@ export class AcpService {
         const file = this.mirrorDir && mirrorFile(this.mirrorDir(), key)
         if (file)
             void rm(file, { force: true }).catch(() => {})
+    }
+
+    /** Sessions the agent's CLI keeps in files its ACP list does not read (cliSessions.ts). */
+    private terminalChats(agent: AcpAgentId): Promise<SessionList | undefined> {
+        if (agent === 'cursor')
+            return this.cursorChats.list()
+        if (agent === 'gemini')
+            return this.geminiChats.list()
+        return Promise.resolve(undefined)
+    }
+
+    private async readTerminalChat(record: AcpSessionRecord): Promise<SessionItem[]> {
+        const items = record.agent === 'cursor' ? await this.cursorChats.read(record.sessionId) : undefined
+        if (!items)
+            throw new Error(tr('这个对话的记录已经不在了', 'This chat\'s record is gone'))
+        return items
+    }
+
+    /** The command that continues a terminal chat, with the agent the app would run. */
+    private async resumeCommand(record: AcpSessionRecord): Promise<string> {
+        const spec = acpAgent(record.agent)!
+        const bin = await this.launchOf(spec).then(l => l.bin ?? l.file, () => spec.bin)
+        const quoted = /[\s'"]/.test(bin) ? `"${bin}"` : bin
+        // PowerShell runs a quoted path only through its call operator.
+        return `${platform.id === 'win32' && quoted !== bin ? '& ' : ''}${quoted} --resume ${record.sessionId}`
     }
 
     /** Opens the session in a throwaway process; session/load streams the history back. */

@@ -236,9 +236,12 @@ export class TermView {
 
 const views = new Map<string, TermView>()
 
-api().onTerminalData((id, seq, data) => views.get(id)?.receive(seq, data))
+/** Views of the terminals agents' TUIs run in (Claude Code): not the project's, kept per thread. */
+const agentViews = new Map<string, TermView>()
+
+api().onTerminalData((id, seq, data) => (views.get(id) ?? agentViews.get(id))?.receive(seq, data))
 // Colours follow the appearance; --ide-panel changes with it, so read it after the class flips.
-reaction(() => theme.dark, () => requestAnimationFrame(() => views.forEach(v => v.applyTheme())))
+reaction(() => theme.dark, () => requestAnimationFrame(() => [...views.values(), ...agentViews.values()].forEach(v => v.applyTheme())))
 
 export function viewOf(id: string): TermView {
     let view = views.get(id)
@@ -261,4 +264,20 @@ export function pruneViews(keep: (id: string) => boolean) {
             views.delete(id)
         }
     }
+}
+
+/** The view of an agent's TUI terminal (Thread's TUI mode). */
+export function agentViewOf(id: string): TermView {
+    let view = agentViews.get(id)
+    if (!view) {
+        view = new TermView(id)
+        agentViews.set(id, view)
+    }
+    return view
+}
+
+/** The agent's process ended or the thread closed: its view goes. */
+export function dropAgentView(id: string) {
+    agentViews.get(id)?.dispose()
+    agentViews.delete(id)
 }

@@ -1,12 +1,21 @@
-// Compaction settings as pi resolves them (core/settings-manager.js getCompactionSettings):
-// global ~/.pi/agent/settings.json deep-merged with <cwd>/.pi/settings.json, then
-// compaction.modelOverrides["provider/id"] over compaction.*, then pi's defaults.
-import type { CompactionInfo, GlobalCompaction, GlobalCompactionPatch } from '@shared/ipc'
-import { mkdir, readFile, rename, rmdir, stat, writeFile } from 'node:fs/promises'
+// pi's settings.json as the app reads and writes it. Compaction as pi resolves it
+// (core/settings-manager.js getCompactionSettings): global ~/.pi/agent/settings.json deep-merged with
+// <cwd>/.pi/settings.json, then compaction.modelOverrides["provider/id"] over compaction.*, then pi's
+// defaults. The capability choice (SETTINGS_KEY), shared with pi-cc-tui. And a watch on the file, which
+// pi in a terminal writes too.
+import type { ApprovalMode, CapabilityChoice, CapabilityState } from '@shared/capabilities'
+import type { CompactionInfo, GlobalCompaction, GlobalCompactionPatch, PiSettingsState } from '@shared/ipc'
+import { CACHE_WARMING } from '@shared/ipc'
+import type { FSWatcher } from 'node:fs'
+import { APPROVAL_MODES, capabilityChoice, capabilityState, resolveCapabilities } from '@shared/capabilities'
+import { watch } from 'node:fs'
+import { readFile } from 'node:fs/promises'
+import { SettingsWriteError, updateSettings, writeCapabilityChoice } from 'pi-capabilities/lib/settings.ts'
 import os from 'node:os'
 import path from 'node:path'
 import process from 'node:process'
 import { tr } from './i18n'
+import { packageState, withPackageEnabled } from './piPackages'
 
 export const DEFAULT_RESERVE_TOKENS = 16384
 export const DEFAULT_KEEP_RECENT_TOKENS = 20000
@@ -117,38 +126,6 @@ export function patchCompaction(settings: Record<string, any>, patch: GlobalComp
     return next
 }
 
-const LOCK_STALE_MS = 10_000
-
-/**
- * The lock pi takes around settings writes (proper-lockfile: a `<file>.lock` directory, stale after
- * 10s), so a write here never interleaves with pi's own read-merge-write.
- */
-async function withSettingsLock<T>(file: string, fn: () => Promise<T>): Promise<T> {
-    const lock = `${file}.lock`
-    await mkdir(path.dirname(file), { recursive: true })
-    for (let attempt = 0; ; attempt++) {
-        try {
-            await mkdir(lock)
-            break
-        }
-        catch (error: any) {
-            if (error?.code !== 'EEXIST' || attempt >= 100)
-                throw new Error(tr('pi 的 settings.json 正被占用，稍后再试', 'pi\'s settings.json is in use; try again in a moment'))
-            const age = await stat(lock).then(s => Date.now() - s.mtimeMs, () => 0)
-            if (age > LOCK_STALE_MS)
-                await rmdir(lock).catch(() => {})
-            else
-                await new Promise(r => setTimeout(r, 20))
-        }
-    }
-    try {
-        return await fn()
-    }
-    finally {
-        await rmdir(lock).catch(() => {})
-    }
-}
-
 const TOKEN_LIMIT = 10_000_000
 
 function validPatch(patch: unknown): GlobalCompactionPatch {
@@ -178,27 +155,139 @@ export async function globalCompaction(cwd?: string): Promise<GlobalCompaction> 
 
 /** Writes the patch into ~/.pi/agent/settings.json, leaving every other setting untouched. */
 export async function setGlobalCompaction(patch: unknown): Promise<void> {
-    const file = globalSettingsPath()
     const valid = validPatch(patch)
-    await withSettingsLock(file, async () => {
-        let current: Record<string, any> = {}
-        const text = await readFile(file, 'utf8').catch((error: any) => {
-            if (error?.code === 'ENOENT')
-                return ''
-            throw error
+    await updateGlobalSettings(current => patchCompaction(current, valid))
+}
+
+/** updateSettings on ~/.pi/agent/settings.json, its refusals in the app's words. */
+async function updateGlobalSettings(change: (current: Record<string, any>) => Record<string, any>): Promise<void> {
+    await updateSettings(globalSettingsPath(), change).catch(rephrase)
+}
+
+function rephrase(error: unknown): never {
+    if (!(error instanceof SettingsWriteError))
+        throw error
+    throw new Error({
+        'busy': tr('pi 的 settings.json 正被占用，稍后再试', 'pi\'s settings.json is in use; try again in a moment'),
+        'invalid-json': tr('settings.json 不是有效的 JSON，没有修改', 'settings.json is not valid JSON; nothing was changed'),
+        'not-object': tr('settings.json 不是一个对象，没有修改', 'settings.json is not an object; nothing was changed'),
+    }[error.reason])
+}
+
+// ---------------------------------------------------------------- capabilities (Settings page, composer)
+
+/** Which capabilities load and the approval mode new sessions start in, shared with pi-cc-tui. */
+export async function readCapabilities(): Promise<CapabilityState> {
+    return capabilityState(capabilityChoice(await readJson(globalSettingsPath())))
+}
+
+/** Merges the patch into settings.json's SETTINGS_KEY; fields it leaves out keep their value. */
+export async function setCapabilities(patch: unknown): Promise<void> {
+    await writeCapabilityChoice(agentDir(), patch).catch(rephrase)
+}
+
+/** Web access (piPackages.ts) on or off; pi loads the change at its next start. */
+export async function setWebAccess(enabled: boolean): Promise<void> {
+    await updateGlobalSettings(current => withPackageEnabled(current, enabled === true))
+}
+
+/** pi's own `cacheWarming`, the setting its /settings changes in a terminal. */
+export async function setCacheWarming(mode: unknown): Promise<void> {
+    const valid = CACHE_WARMING.find(m => m === mode)
+    if (!valid)
+        throw new Error(`Unknown cache warming mode: ${String(mode)}`)
+    await updateGlobalSettings(current => ({ ...current, cacheWarming: valid }))
+}
+
+/** The part of an older state.json that held the choice. */
+export interface OldCapabilityState {
+    capabilities?: unknown
+    approvalMode?: unknown
+    /** Older still: per project cwd, like `capabilities` as a map. */
+    approvalModes?: Record<string, unknown>
+    activeProject?: string | null
+}
+
+/**
+ * The choice an older state.json held, undefined when it held none. Per-project maps (older still)
+ * give the active project's entry, else the last saved one.
+ */
+export function oldCapabilityChoice(old: OldCapabilityState): CapabilityChoice | undefined {
+    const perProject = (map: unknown) => isObject(map) ? (old.activeProject && map[old.activeProject]) || Object.values(map).at(-1) : undefined
+    const enabled = isObject(old.capabilities) ? perProject(old.capabilities) : old.capabilities
+    const mode = old.approvalMode ?? perProject(old.approvalModes)
+    if (enabled === undefined && mode === undefined)
+        return undefined
+    const { ids, preset } = resolveCapabilities(enabled)
+    return { enabled: preset ?? ids, approvalMode: APPROVAL_MODES.includes(mode as ApprovalMode) ? mode as ApprovalMode : 'auto' }
+}
+
+/**
+ * Older builds kept the choice in the app's state.json. Moved once, when settings.json has none:
+ * from then on pi in a terminal follows it too.
+ */
+export async function migrateCapabilities(old: OldCapabilityState): Promise<void> {
+    const choice = oldCapabilityChoice(old)
+    if (choice && !(await readCapabilities()).saved)
+        await setCapabilities(choice)
+}
+
+// ---------------------------------------------------------------- watching (the terminal changes it too)
+
+/**
+ * What in settings.json a running pi read at startup and keeps using: the resources it loaded,
+ * compaction and cache warming. pi writes other keys as it runs (the last model, the changelog it
+ * showed), which need no restart. Per-model compaction is apart (only threads on that model restart), and the capability
+ * choice too (threads compare the capabilities themselves).
+ */
+const STARTUP_KEYS = ['packages', 'extensions', 'skills', 'prompts', 'themes', 'compaction', 'cacheWarming']
+
+export function piSettingsOf(settings: Record<string, any>): PiSettingsState {
+    const { modelOverrides, ...compaction } = isObject(settings.compaction) ? settings.compaction : {} as Record<string, any>
+    const startup = STARTUP_KEYS.map(key => key === 'compaction' ? compaction : settings[key] ?? null)
+    return {
+        fingerprint: JSON.stringify(startup),
+        modelOverrides: isObject(modelOverrides) ? modelOverrides : {},
+        capabilities: capabilityState(capabilityChoice(settings)),
+        webAccess: packageState(settings),
+        cacheWarming: CACHE_WARMING.includes(settings.cacheWarming) ? settings.cacheWarming : 'streaming',
+    }
+}
+
+export async function piSettingsState(): Promise<PiSettingsState> {
+    return piSettingsOf(await readJson(globalSettingsPath()))
+}
+
+/**
+ * Calls `changed` whenever settings.json changes what pi processes use or the capability choice,
+ * whoever wrote it (this app, pi in a terminal, an editor). Returns the stop function.
+ */
+export function watchSettings(changed: (state: PiSettingsState) => void): () => void {
+    let last: string | undefined
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const check = () => {
+        timer = undefined
+        void piSettingsState().then((state) => {
+            const key = JSON.stringify(state)
+            if (last !== undefined && key !== last)
+                changed(state)
+            last = key
         })
-        if (text.trim()) {
-            try {
-                current = JSON.parse(text.replace(/^\uFEFF/, ''))
-            }
-            catch {
-                throw new Error(tr('settings.json 不是有效的 JSON，没有修改', 'settings.json is not valid JSON; nothing was changed'))
-            }
-            if (!isObject(current))
-                throw new Error(tr('settings.json 不是一个对象，没有修改', 'settings.json is not an object; nothing was changed'))
-        }
-        const tmp = `${file}.${process.pid}.tmp`
-        await writeFile(tmp, `${JSON.stringify(patchCompaction(current, valid), null, 2)}\n`, 'utf8')
-        await rename(tmp, file)
-    })
+    }
+    check()
+    let watcher: FSWatcher | undefined
+    try {
+        // The folder, not the file: pi and this app replace the file by renaming over it.
+        watcher = watch(agentDir(), (_event, name) => {
+            if (name === 'settings.json' && !timer)
+                timer = setTimeout(check, 150)
+        })
+        watcher.on('error', () => {})
+    }
+    catch {}
+    return () => {
+        watcher?.close()
+        if (timer)
+            clearTimeout(timer)
+    }
 }

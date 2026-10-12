@@ -1,4 +1,4 @@
-// End-to-end check of Settings → 模型供应商 in the built app, with real pi, an empty agent dir and a
+// End-to-end check of Settings → 供应商 in the built app, with real pi, an empty agent dir and a
 // scripted model (no tokens spent):
 //   - with no provider, the composer says so and links to the page
 //   - an API-key sign-in runs through pi's own prompt and lands in auth.json
@@ -71,8 +71,8 @@ async function main() {
         if (SHOTS)
             await page.screenshot(path.join(SHOTS, 'no-model.png'))
         check(await clickButton('Set up a provider'), 'the notice offers the provider page')
-        await until('providers page', () => js(`!!document.querySelector('[role="dialog"] section[aria-label="Model providers"]') && !!(${row('DeepSeek')})`), 15_000)
-        check(await js(`window.__app.settingsPage`) === 'providers', 'Settings opens on Model providers')
+        await until('providers page', () => js(`!!document.querySelector('[role="dialog"] section[aria-label="Providers"]') && !!(${row('DeepSeek')})`), 15_000)
+        check(await js(`window.__app.settingsPage`) === 'providers', 'Settings opens on Providers')
 
         // ---------------------------------------------------------------- subscription terms
         const anthropic = 'Anthropic'
@@ -140,12 +140,12 @@ async function main() {
             await page.screenshot(path.join(SHOTS, 'endpoint-form.png'))
         }
         check(await clickButton('Save'), 'the endpoint is saved')
-        await until('Mock LLM listed', () => js(`!!${row('Mock LLM')}?.textContent.includes('No key needed · 1 model available')`), 15_000)
+        await until('Mock LLM listed', () => js(`!!${row('Mock LLM')}?.textContent.includes('No key needed · Used by pi · 1 model available')`), 15_000)
         const models = JSON.parse(await readFile(path.join(agentDir, 'models.json'), 'utf8'))
         const entry = models.providers?.['mock-llm']
         check(Object.keys(models.providers).length === 1 && entry.name === 'Mock LLM' && entry.baseUrl === llm.baseUrl && entry.api === 'openai-completions' && entry.apiKey === 'none' && JSON.stringify(entry.models) === '[{"id":"mock-1"}]', 'models.json holds just the new endpoint')
         if (SHOTS) {
-            await js(`document.querySelector('[role="dialog"] section[aria-label="Model providers"]').scrollIntoView()`)
+            await js(`document.querySelector('[role="dialog"] section[aria-label="Providers"]').scrollIntoView()`)
             await page.screenshot(path.join(SHOTS, 'providers.png'))
         }
 
@@ -175,7 +175,7 @@ async function main() {
         check(await clickButton('Remove endpoint', row('Mock LLM')), 'the endpoint can be removed from its row')
         await until('Mock LLM gone', () => js(`!${row('Mock LLM')}`), 15_000)
         check(JSON.stringify(JSON.parse(await readFile(path.join(agentDir, 'models.json'), 'utf8'))) === '{"providers":{}}', 'removing the endpoint empties models.json')
-        check(!(await js(`!!document.querySelector('[role="dialog"] section[aria-label="Model providers"]')?.textContent.includes('could not load models.json')`)), 'pi still loads the emptied models.json')
+        check(!(await js(`!!document.querySelector('[role="dialog"] section[aria-label="Providers"]')?.textContent.includes('could not load models.json')`)), 'pi still loads the emptied models.json')
         check(!existsSync(path.join(agentDir, 'settings.json')) || !(await readFile(path.join(agentDir, 'settings.json'), 'utf8')).includes('sk-'), 'no key leaks into settings.json')
     }
     finally {

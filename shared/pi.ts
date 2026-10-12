@@ -72,6 +72,10 @@ export interface PiModel {
     input?: string[]
     contextWindow?: number
     maxTokens?: number
+    /** US dollars per million tokens. */
+    cost?: { input: number, output: number, cacheRead: number, cacheWrite: number }
+    /** Prompt cache lifetime per retention tier, in seconds; unset when the provider's is unknown. */
+    promptCache?: { short?: number, long?: number }
 }
 
 export type ThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
@@ -92,6 +96,10 @@ export interface RpcSessionState {
     agentCaps?: AcpAgentCaps
     /** Not pi's: a terminal pi joined over pi-cc-tui's bridge reports its pid. */
     terminalPid?: number
+    /** Not pi's: the terminal a TUI-driven agent (Claude Code) runs in; the thread can show it. */
+    tuiTerminal?: string
+    /** Not pi's: why that agent's hooks will not come (electron/native/claudeTui.ts HooksIssue). */
+    tuiHooks?: { cause: 'disabled' | 'policy' | 'silent', files: string[], tried?: boolean }
 }
 
 export interface SessionStats {

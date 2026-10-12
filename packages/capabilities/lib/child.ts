@@ -1,4 +1,4 @@
-// A second pi process driven over RPC (`pi --mode rpc --no-session`), shared by subagent and review.
+// A second pi process driven over RPC (`pi --mode rpc`), shared by subagent, review and autopilot.
 // It owns the wire (JSON lines, request ids), the child's command line (this process's runtime, its
 // `-e` capabilities minus the parent-only ones, the same model, thinking level and approval mode),
 // and folding the child's events into a SubagentDetails transcript the hosts render. Dialogs the
@@ -67,11 +67,11 @@ export function followApprovalMode(pi: ExtensionAPI): () => string | undefined {
 }
 
 /**
- * The child's command line and environment: RPC without a session file, the parent's capabilities,
- * model, thinking level and approval mode, then `extra`.
+ * The child's command line and environment: RPC, the parent's capabilities, model, thinking level
+ * and approval mode, then `extra`, which also says where its session goes (`--no-session` or `--session`).
  */
 export function childLaunch(pi: ExtensionAPI, ctx: ExtensionContext, approvalMode: string | undefined, extra: string[] = []): { args: string[], env: Record<string, string> } {
-    const args = ['--mode', 'rpc', '--no-session', ...childExtensionArgs(process.argv)]
+    const args = ['--mode', 'rpc', ...childExtensionArgs(process.argv)]
     const model = ctx.model
     if (model)
         args.push('--provider', model.provider, '--model', model.id)

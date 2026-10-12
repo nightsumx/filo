@@ -3,16 +3,20 @@ import { ConflictMark } from '@/components/ConflictMark'
 import { StatusDot } from '@/components/StatusIcons'
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from '@/components/ui/context-menu'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
-import { cn, relativeTime } from '@/lib/utils'
-import type { TabDrag } from '@/store/app'
-import { appStore } from '@/store/app'
+import { basename, cn, relativeTime } from '@/lib/utils'
+import type { FileTab } from '@/store/fileTab'
+import type { Tab as TabItem, TabDrag } from '@/store/app'
+import { FileIcon } from '@/components/FileIcon'
+import { appStore, isFileTab } from '@/store/app'
+import { isFileKey } from '@/store/fileTab'
 import { Check, ChevronDown, MoreHorizontal, Plus, X } from 'lucide-react'
 import { runInAction } from 'mobx'
 import { observer } from 'mobx-react-lite'
 import { useEffect, useRef, useState } from 'react'
+import { FileActions } from './FileActions'
 import { closeTabWithConfirm, renaming, ThreadActions } from './ThreadActions'
 import { newThreadLabel, tr } from '@/lib/i18n'
-import { keys } from '@/platform'
+import { keys, parentPath } from '@/platform'
 
 const iconBtn = 'flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-gray-500 hover:bg-black/[0.06] hover:text-gray-800 outline-none data-[state=open]:bg-black/[0.08]'
 
@@ -35,10 +39,12 @@ function readDrag(e: React.DragEvent): TabDrag | null {
 /** A drop at `index` of the active project's tabs: reorder, or pull the tab in from its window. */
 function dropTab(drag: TabDrag, index: number) {
     if (drag.window !== appStore.windowId) {
-        void appStore.pullTab(drag, index)
+        // Editor tabs stay in their window; the file can be opened from this window's tree.
+        if (!isFileKey(drag.key))
+            void appStore.pullTab(drag, index)
         return
     }
-    const from = appStore.tabs.findIndex(t => t.key === drag.key)
+    const from = appStore.tabItems.findIndex(t => t.key === drag.key)
     appStore.moveTab(drag.key, from !== -1 && from < index ? index - 1 : index)
 }
 
@@ -47,11 +53,14 @@ function dropTab(drag: TabDrag, index: number) {
  * on another window of the app pulls it there instead (that window's drop handler), so wait a moment
  * and only tear off if it is still here.
  */
-function tearOff(thread: Thread, e: React.DragEvent) {
+function tearOff(tab: TabItem, e: React.DragEvent) {
+    if (isFileTab(tab))
+        return
+    const thread = tab
     const { screenX: x, screenY: y } = e
     const inside = x >= window.screenX && x <= window.screenX + window.outerWidth && y >= window.screenY && y <= window.screenY + window.outerHeight
     // The only tab of the window's only project: tearing it off would just move the window.
-    const alone = appStore.windowProjects.length === 1 && appStore.tabsOf(thread.cwd).length === 1
+    const alone = appStore.windowProjects.length === 1 && appStore.tabItemsOf(thread.cwd).length === 1
     if (e.dataTransfer.dropEffect !== 'none' || inside || alone)
         return
     setTimeout(() => {
@@ -102,11 +111,20 @@ const TitleEditor = observer(function TitleEditor({ thread }: { thread: Thread }
     )
 })
 
-const Tab = observer(({ thread, index, visible }: { thread: Thread, index: number, visible: boolean }) => {
-    const active = appStore.activeKey === thread.key
+/** Two open files with one name: the folder tells them apart, as in WebStorm. */
+function fileLabel(tab: FileTab, tabs: TabItem[]): string | null {
+    const twin = tabs.some(t => t !== tab && isFileTab(t) && t.name === tab.name)
+    return twin ? basename(parentPath(tab.path)) : null
+}
+
+const TabView = observer(({ tab, index, visible }: { tab: TabItem, index: number, visible: boolean }) => {
+    const active = appStore.activeKey === tab.key
     const ref = useRef<HTMLDivElement>(null)
     const [dropSide, setDropSide] = useState<'left' | 'right' | null>(null)
-    const editing = renaming.key === thread.key
+    const file = isFileTab(tab) ? tab : null
+    const thread = file ? null : tab as Thread
+    const editing = !!thread && renaming.key === tab.key
+    const title = file ? file.path : thread!.title
 
     useEffect(() => {
         if (active)
@@ -114,20 +132,20 @@ const Tab = observer(({ thread, index, visible }: { thread: Thread, index: numbe
     }, [active])
 
     return (
-        <ContextMenu onOpenChange={o => o && appStore.focus(thread.key)}>
+        <ContextMenu onOpenChange={o => o && appStore.focus(tab.key)}>
             <ContextMenuTrigger asChild>
         <div
             ref={ref}
             role="tab"
             tabIndex={0}
             aria-selected={active}
-            title={thread.title}
+            title={title}
             draggable={!editing}
             onDragStart={(e) => {
                 e.dataTransfer.effectAllowed = 'move'
-                e.dataTransfer.setData(TAB_MIME, JSON.stringify({ window: appStore.windowId, key: thread.key, cwd: thread.cwd } satisfies TabDrag))
+                e.dataTransfer.setData(TAB_MIME, JSON.stringify({ window: appStore.windowId, key: tab.key, cwd: tab.cwd } satisfies TabDrag))
             }}
-            onDragEnd={e => tearOff(thread, e)}
+            onDragEnd={e => tearOff(tab, e)}
             onDragOver={(e) => {
                 if (!e.dataTransfer.types.includes(TAB_MIME))
                     return
@@ -143,7 +161,7 @@ const Tab = observer(({ thread, index, visible }: { thread: Thread, index: numbe
                 const side = dropSide
                 setDropSide(null)
                 e.stopPropagation()
-                if (!drag || drag.key === thread.key)
+                if (!drag || drag.key === tab.key)
                     return
                 e.preventDefault()
                 dropTab(drag, index + (side === 'right' ? 1 : 0))
@@ -152,11 +170,11 @@ const Tab = observer(({ thread, index, visible }: { thread: Thread, index: numbe
                 // Middle click closes, like a browser tab.
                 if (e.button === 1) {
                     e.preventDefault()
-                    void closeTabWithConfirm(thread)
+                    void closeTabWithConfirm(tab)
                 }
             }}
-            onClick={() => appStore.focus(thread.key, true)}
-            onKeyDown={e => e.key === 'Enter' && appStore.focus(thread.key, true)}
+            onClick={() => appStore.focus(tab.key, true)}
+            onKeyDown={e => e.key === 'Enter' && appStore.focus(tab.key, true)}
             className={cn(
                 // WebStorm Islands tabs: the selected one is a raised chip; tabs shown in another split
                 // pane get a faint fill so it is clear which tabs are on screen. Every tab has the same
@@ -171,48 +189,69 @@ const Tab = observer(({ thread, index, visible }: { thread: Thread, index: numbe
             )}
         >
             {dropSide && <span className={cn('absolute top-0.5 bottom-0.5 w-0.5 rounded bg-ide-accent', dropSide === 'left' ? '-left-[3px]' : '-right-[3px]')} />}
-            <StatusDot thread={thread} />
+            {file
+                ? <FileIcon name={file.name} />
+                : <StatusDot thread={thread!} />}
             {editing
-                ? <TitleEditor thread={thread} />
-                : (
-                        <span className="min-w-0 flex-1 truncate">
-                            {thread.isEmpty && !thread.persisted ? newThreadLabel() : thread.title}
-                        </span>
-                    )}
-            <ConflictMark cwd={thread.cwd} session={thread.sessionPath} />
+                ? <TitleEditor thread={thread!} />
+                : file
+                    ? (
+                            <span className={cn('flex min-w-0 flex-1 items-baseline gap-1.5', file.deleted && 'text-gray-400 line-through')}>
+                                <span className="min-w-0 truncate">{file.name}</span>
+                                {fileLabel(file, appStore.tabItems) && <span className="min-w-0 shrink truncate text-[11.5px] text-gray-400">{fileLabel(file, appStore.tabItems)}</span>}
+                            </span>
+                        )
+                    : (
+                            <span className="min-w-0 flex-1 truncate">
+                                {thread!.isEmpty && !thread!.persisted ? newThreadLabel() : thread!.title}
+                            </span>
+                        )}
+            {thread && <ConflictMark cwd={thread.cwd} session={thread.sessionPath} />}
             <button
                 type="button"
-                aria-label={tr(`关闭 ${thread.title}`, `Close ${thread.title}`)}
+                aria-label={tr(`关闭 ${file?.name ?? thread!.title}`, `Close ${file?.name ?? thread!.title}`)}
                 title={index < 9 ? tr(`关闭（${keys('⌘W')}）`, `Close (${keys('⌘W')})`) : tr('关闭', 'Close')}
                 onClick={(e) => {
                     e.stopPropagation()
-                    void closeTabWithConfirm(thread)
+                    void closeTabWithConfirm(tab)
                 }}
-                className={cn('flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded text-gray-500 hover:bg-black/[0.08] hover:text-gray-900', active ? 'visible' : 'invisible group-hover:visible')}
+                className={cn(
+                    'group/close flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded text-gray-500 hover:bg-black/[0.08] hover:text-gray-900',
+                    active || file?.unsaved || file?.conflict ? 'visible' : 'invisible group-hover:visible',
+                )}
             >
-                <X size={13} />
+                {/* Edits the disk does not have (conflict, deleted file): a dot until hovered, as in VS Code. */}
+                {file && (file.conflict || file.unsaved)
+                    ? (
+                            <>
+                                <span className="h-2 w-2 rounded-full bg-amber-500 group-hover/close:hidden" aria-hidden />
+                                <X size={13} className="hidden group-hover/close:block" />
+                            </>
+                        )
+                    : <X size={13} />}
             </button>
         </div>
             </ContextMenuTrigger>
-            <ContextMenuContent className="w-48" onCloseAutoFocus={e => renaming.key && e.preventDefault()}>
-                <ThreadActions thread={thread} parts={contextParts} />
+            <ContextMenuContent className="w-52" onCloseAutoFocus={e => renaming.key && e.preventDefault()}>
+                {file ? <FileActions tab={file} parts={contextParts} /> : <ThreadActions thread={thread!} parts={contextParts} />}
             </ContextMenuContent>
         </ContextMenu>
     )
 })
 
 /** ⋯ at the end of the tab bar: the same actions for the focused tab. */
-const ActiveThreadMenu = observer(() => {
-    const thread = appStore.active
-    if (!thread)
+const ActiveTabMenu = observer(() => {
+    const tab = appStore.activeTab
+    if (!tab)
         return null
+    const file = isFileTab(tab)
     return (
         <DropdownMenu>
-            <DropdownMenuTrigger className={iconBtn} aria-label={tr('线程操作', 'Thread actions')} title={tr('线程操作（也可右键标签）', 'Thread actions (or right-click a tab)')}>
+            <DropdownMenuTrigger className={iconBtn} aria-label={file ? tr('文件操作', 'File actions') : tr('线程操作', 'Thread actions')} title={file ? tr('文件操作（也可右键标签）', 'File actions (or right-click a tab)') : tr('线程操作（也可右键标签）', 'Thread actions (or right-click a tab)')}>
                 <MoreHorizontal size={15} />
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-48" onCloseAutoFocus={e => renaming.key && e.preventDefault()}>
-                <ThreadActions thread={thread} parts={dropdownParts} />
+            <DropdownMenuContent align="end" className="w-52" onCloseAutoFocus={e => renaming.key && e.preventDefault()}>
+                {isFileTab(tab) ? <FileActions tab={tab} parts={dropdownParts} /> : <ThreadActions thread={tab} parts={dropdownParts} />}
             </DropdownMenuContent>
         </DropdownMenu>
     )
@@ -268,7 +307,7 @@ export const TabBar = observer(() => {
             <div
                 ref={listRef}
                 role="tablist"
-                aria-label={tr('线程标签', 'Thread tabs')}
+                aria-label={tr('标签', 'Tabs')}
                 // Space after the last tab: drops land at the end.
                 onDragOver={(e) => {
                     if (!e.dataTransfer.types.includes(TAB_MIME))
@@ -281,11 +320,11 @@ export const TabBar = observer(() => {
                     if (!drag)
                         return
                     e.preventDefault()
-                    dropTab(drag, appStore.tabs.length)
+                    dropTab(drag, appStore.tabItems.length)
                 }}
                 className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto px-px py-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-                {appStore.tabs.map((thread, i) => (
-                    <Tab key={thread.id} thread={thread} index={i} visible={visible.has(thread.key) && appStore.tabs.length > 1} />
+                {appStore.tabItems.map((tab, i) => (
+                    <TabView key={tab.id} tab={tab} index={i} visible={visible.has(tab.key) && appStore.tabItems.length > 1} />
                 ))}
             </div>
             {appStore.project && (
@@ -294,7 +333,7 @@ export const TabBar = observer(() => {
                 </button>
             )}
             <HistoryMenu />
-            <ActiveThreadMenu />
+            <ActiveTabMenu />
         </div>
     )
 })

@@ -1,9 +1,10 @@
 // Thread actions (rename, compact, reveal, close, delete). Rendered both in the tab's right-click
 // menu and the tab bar's ⋯ menu, so the item components are passed in.
+import type { Tab } from '@/store/app'
 import type { Thread } from '@/store/thread'
 import type { SessionSummary } from '@shared/ipc'
 import { confirm } from '@/lib/confirm'
-import { appStore } from '@/store/app'
+import { appStore, isFileTab } from '@/store/app'
 import { AppWindow, Archive, ArrowRightToLine, EyeOff, FolderOpen, GitFork, Pencil, Trash2, X, XCircle } from 'lucide-react'
 import { observable, runInAction } from 'mobx'
 import { observer } from 'mobx-react-lite'
@@ -18,7 +19,18 @@ interface MenuParts {
 /** Tab currently showing its inline title editor (set by the 重命名 action, read by the tab). */
 export const renaming = observable({ key: null as string | null })
 
-export async function closeTabWithConfirm(thread: Thread) {
+/** Closes any tab: a running thread or an editor with edits autosave cannot write asks first. */
+export async function closeTabWithConfirm(tab: Tab) {
+    if (isFileTab(tab)) {
+        if (tab.unsaved) {
+            const ok = await confirm({ title: tr('关闭标签', 'Close tab'), description: tr(`「${tab.name}」有没保存的修改（${tab.deleted ? '文件已删除' : '和磁盘上的版本冲突'}），关闭会丢掉它们。`, `“${tab.name}” has edits that are not saved (${tab.deleted ? 'the file was deleted' : 'they conflict with the disk'}); closing drops them.`), confirmText: tr('放弃修改并关闭', 'Discard and close') })
+            if (!ok)
+                return
+        }
+        await appStore.closeTab(tab.key)
+        return
+    }
+    const thread = tab
     if (thread.running) {
         const ok = await confirm({ title: tr('关闭标签', 'Close tab'), description: tr(`「${thread.title}」还在运行，关闭会中断它。`, `“${thread.title}” is still running; closing stops it.`), confirmText: tr('中断并关闭', 'Stop and close') })
         if (!ok)
@@ -46,9 +58,16 @@ async function deleteThread(thread: Thread, session: SessionSummary, history: bo
         await appStore.deleteSession(session, { history })
 }
 
-async function closeOthers(thread: Thread) {
-    const others = appStore.tabsOf(thread.cwd).filter(t => t !== thread)
-    const running = others.filter(t => t.running).length
+/** Every other tab of the project, threads and files. */
+export async function closeOthers(tab: Tab) {
+    const others = appStore.tabItemsOf(tab.cwd).filter(t => t !== tab)
+    const running = others.filter(t => !isFileTab(t) && t.running).length
+    const unsaved = others.filter(t => isFileTab(t) && t.unsaved).length
+    if (unsaved) {
+        const ok = await confirm({ title: tr('关闭其他标签', 'Close other tabs'), description: tr(`有 ${unsaved} 个文件的修改没法保存（冲突或已删除），关闭会丢掉它们。`, `${unsaved} ${unsaved === 1 ? 'file has' : 'files have'} edits that cannot be saved (conflict or deleted); closing drops them.`), confirmText: tr('放弃修改并关闭', 'Discard and close') })
+        if (!ok)
+            return
+    }
     if (running) {
         const ok = await confirm({ title: tr('关闭其他标签', 'Close other tabs'), description: tr(`有 ${running} 个线程还在运行，关闭会中断它们。`, `${running} ${running === 1 ? 'thread is' : 'threads are'} still running; closing stops them.`), confirmText: tr('中断并关闭', 'Stop and close') })
         if (!ok)
@@ -60,7 +79,7 @@ async function closeOthers(thread: Thread) {
 
 export const ThreadActions = observer(({ thread, parts: { Item, Separator } }: { thread: Thread, parts: MenuParts }) => {
     const session = thread.sessionPath ? appStore.sessions.find(s => s.path === thread.sessionPath) : undefined
-    const hasOthers = appStore.tabsOf(thread.cwd).length > 1
+    const hasOthers = appStore.tabItemsOf(thread.cwd).length > 1
     // The window's only tab would just take the window along.
     const canTearOff = hasOthers || appStore.windowProjects.length > 1
     const caps = thread.state?.agentCaps ?? session?.agentCaps

@@ -52,7 +52,7 @@ Try it once without installing: `pi -e npm:pi-cc-tui`
 
 **Exit** — the first ctrl+c shows `Press ctrl+c again to exit` in the second status row; a second press within 800ms exits (pi's own window is 500ms, with no hint).
 
-**Permission modes** — option+m (alt+m off macOS) cycles Claude Code's modes; pi keeps shift+tab for thinking levels. `/permissions` picks one, `--gui-approval ask|edits|auto` sets the starting approval mode (`auto` by default).
+**Permission modes** — option+m (alt+m off macOS) cycles Claude Code's modes; pi keeps shift+tab for thinking levels. `/permissions` picks one, `--gui-approval ask|edits|auto` sets the starting approval mode. A mode you pick is saved in `~/.pi/agent/settings.json` (`pi-capabilities.approvalMode`, `auto` by default) as the start mode for new sessions, shared with the Filo desktop app.
 
 | Mode | Edits (`edit`, `write`) | Commands (`bash`, `powershell`) |
 |---|---|---|
@@ -75,11 +75,13 @@ The prompt is Claude Code's rounded box: ↑/↓ and enter, or press 1–3 direc
 
 **Autopilot** — `/autopilot` toggles it. When on, after every run a separate read-only pi checks the result against your rulebook (`~/.pi/agent/autopilot/rules.md`) and answers the agent for you: go on, verify, commit, or stop. Pushing, deploying, publishing, paid generation, deleting uncommitted work, sudo and printing secrets are held as cards, and so are calls only you make (taste, direction, spending). `/inbox` decides the cards waiting in every session. What you type while it is on is recorded, and `/autopilot learn` proposes rule changes from it.
 
-Approval, plan mode, questions, todos, subagents, review and autopilot come from `pi-capabilities`, the same extensions the Filo desktop app uses, bundled in this package. Inside the desktop app they stay off here, since it loads its own.
+Approval, plan mode, questions, todos, subagents, review and autopilot come from `pi-capabilities`, the same extensions the Filo desktop app uses, bundled in this package. Inside the desktop app they stay off here, since it loads its own. Which ones load is `pi-capabilities.enabled` in `~/.pi/agent/settings.json` (a preset id, `lean`, `standard` or `full`, or a list; `full` when unset), the same choice as the desktop app's Settings → Capabilities. `/capabilities` changes it and reloads pi.
 
 **Compaction** — `· Compacting conversation… (1m 37s · ↓ 2.1k tokens · esc to cancel)` with a `▰▰▰▱▱▱ 60%` bar underneath, for both `/compact` and auto-compaction. pi's default summarizer still runs; the bar is an estimate from streamed summary tokens (the final length isn't known up front), so it eases toward 99% instead of tracking exact completion.
 
-**Status line** — two lines. The first is a trimmed version of a popular Claude Code `statusLine` script. The second is Claude Code's mode row: the permission mode (`? for shortcuts` in `default`, `! for bash mode` while typing a command) and the auto-compact estimate on the right.
+**Status line** — two lines. The first is a trimmed version of a popular Claude Code `statusLine` script. The second is Claude Code's mode row: the permission mode (`? for shortcuts` in `default`, `! for bash mode` while typing a command) and the auto-compact estimate on the right. `cache 83%` is the conversation's prompt-cache hit rate, weighted by prompt size. Misses are counted as pi's `/session` counts its cache waste; a significant one turns the figure amber (idle past the cache's lifetime, a model or thinking switch, or only the tail re-billed) or red (the cache was lost for no visible reason). A turn that lost the cache says so in its footer: `✻ Worked for 3s · done 7:11 PM · cache miss (dropped mid-run, +$0.16)`. `/cache` says what the session spent against what it would at best (every request reading the cache, nothing spent warming it), lists the misses by reason, newest first, with what each read and its prompt, and says when most requests lose the cache with nothing changed (the channel, often a relay). `/cost [days]` totals every pi, Claude Code and Codex session over the last days (7 by default) by day, agent, project and model, with what cache misses re-billed and what cache warming cost, at pi's list prices (subscriptions too).
+
+**Cache test** — `/channel-test [provider/model]` checks whether a channel (often a relay) really caches prompts: after showing what it may cost, it sends a scripted 7-request conversation (8 with a 4-minute idle check) and compares each reply's cache reads with what a working cache must read. A never-sent prompt that "reads" from the cache, or a read beyond what was sent, means the figures are made up (relays that bill by a fixed ratio). The report lists each request, timings, and the model's past 7 days from your sessions. `/channel-test last` shows the saved result, `/channel-test stop` ends a run. Results go to `~/.pi/agent/channel-tests.json`, which the Filo app shows too.
 
 | Segment | Meaning | Color |
 |---|---|---|
@@ -87,7 +89,7 @@ Approval, plan mode, questions, todos, subagents, review and autopilot come from
 | `██░░░ 410k/1000k` | context used | green → amber at 50% → coral at 80% |
 | `$3.20` | session cost | gray → amber at $1 → coral at $5 |
 | `Opus 5.5 (high)` | model, thinking level when high / xhigh / max | lavender / amber |
-| `⏱ 12s` | time since last reply | amber at 4 min, `✗` coral at 5 min (prompt cache expired) |
+| `⏱ 12s` | time since the prompt cache was last used (a reply, or pi warming it) | amber in the cache's last minute, `✗` coral once it has expired (the model's `promptCache` lifetime, else 5 min) |
 | `55% until auto-compact` | second line, right-aligned, from pi's `compaction.reserveTokens` | gray |
 
 **Themes `claude-code` and `claude-code-light`** — Claude Code's dark and light palettes. Body text uses the terminal's default foreground and inline code / links use the same 256-color indexes as Claude Code (153 / 12), so both apps render identically in the same terminal. Code blocks use the 16-color ANSI palette and diffs use Monokai, like Claude Code dark. The light theme uses Claude Code's light colors.

@@ -1,4 +1,6 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { resolveCapabilities } from '@shared/capabilities'
+import { SETUP_VERSION } from '@shared/setup'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AGENT_IDLE_MS, appStore, MIN_PANE_WIDTH } from './app'
 
 function reset() {
@@ -80,18 +82,35 @@ describe('tabs and auto split', () => {
 })
 
 describe('capabilities', () => {
+    /** settings.json as the main process would report it after each write. */
+    let written: any[]
+    const state = (enabled: any, approvalMode = 'auto', more: object = {}) => ({
+        fingerprint: '[]',
+        modelOverrides: {},
+        capabilities: { ...resolveCapabilities(enabled), approvalMode, saved: true },
+        ...more,
+    })
     beforeEach(() => {
         reset()
-        appStore.setCapabilities(['todo', 'ask', 'approval', 'plan', 'review', 'autopilot'])
+        written = []
+        let saved: any = {}
+        vi.stubGlobal('window', { pi: {
+            setCapabilities: async (patch: any) => {
+                written.push(patch)
+                saved = { ...saved, ...patch }
+                return state(saved.enabled, saved.approvalMode)
+            },
+            piSettings: async () => state(saved.enabled, saved.approvalMode),
+        } })
+        ;(appStore as any).applyPiSettings(state('standard'))
     })
-    const restore = (state: object) => {
-        ;(appStore as any).restoreState(state)
+    afterEach(() => vi.unstubAllGlobals())
+    const apply = (s: object) => {
+        ;(appStore as any).applyPiSettings(s)
         return appStore.enabledCapabilities
     }
-    const saved = () => (appStore as any).prefsSnapshot().capabilities
 
-    it('defaults to the standard preset and returns plain, cloneable arrays', () => {
-        expect(appStore.enabledCapabilities).toEqual(['todo', 'ask', 'approval', 'plan', 'review', 'autopilot'])
+    it('returns plain, cloneable arrays', () => {
         appStore.setCapabilities(['ask', 'bogus' as any, 'todo'])
         const ids = appStore.enabledCapabilities
         expect(ids).toEqual(['todo', 'ask'])
@@ -101,67 +120,76 @@ describe('capabilities', () => {
         expect(appStore.enabledCapabilities).toEqual([])
     })
 
-    it('saves a preset by its id, so later additions to it reach users who chose it', () => {
-        appStore.setCapabilities(['todo', 'ask', 'approval', 'plan', 'review', 'autopilot', 'terminal'])
-        expect(saved()).toBe('standard')
+    it('saves into pi\'s settings.json, a preset by its id so later additions to it reach users who chose it', async () => {
+        appStore.setCapabilities(['todo', 'ask', 'approval', 'plan', 'review', 'autopilot', 'budget', 'terminal'])
         expect(appStore.capabilityPreset).toBe('standard')
         appStore.setCapabilities(['todo', 'plan'])
-        expect(saved()).toEqual(['todo', 'plan'])
         expect(appStore.capabilityPreset).toBeUndefined()
-        expect(restore({ capabilities: 'full' })).toEqual(['todo', 'ask', 'approval', 'plan', 'subagent', 'review', 'autopilot', 'terminal'])
+        await vi.waitFor(() => expect(written).toEqual([{ enabled: 'standard' }, { enabled: ['todo', 'plan'] }]))
+        // No longer in the app's own state.json.
+        expect((appStore as any).prefsSnapshot()).not.toHaveProperty('capabilities')
+        expect((appStore as any).prefsSnapshot()).not.toHaveProperty('approvalMode')
+    })
+
+    /** What a pi thread's process was started with; a different one restarts it once idle. */
+    const launchKey = (thread: any) => thread.configKey()
+
+    it('follows settings.json, whoever wrote it; a process restarts only when what it loaded changed', () => {
+        appStore.newThread('/p')
+        const thread = appStore.active!
+        let key = launchKey(thread)
+        expect(apply(state('full'))).toEqual(['todo', 'ask', 'approval', 'plan', 'subagent', 'review', 'autopilot', 'budget', 'terminal'])
         expect(appStore.capabilityPreset).toBe('full')
-        expect(restore({ capabilities: 'lean' })).toEqual([])
-        expect(restore({ capabilities: 'gone' })).toEqual(['todo', 'ask', 'approval', 'plan', 'review', 'autopilot', 'terminal'])
+        expect(launchKey(thread)).not.toBe(key)
+        key = launchKey(thread)
+        // Only the approval mode changed: nothing to restart.
+        apply(state('full', 'edits'))
+        expect(appStore.approvalMode).toBe('edits')
+        expect(launchKey(thread)).toBe(key)
+        // Resources pi loads at startup (a package installed in the terminal): every process.
+        apply(state('full', 'edits', { fingerprint: '["npm:pi-web-access"]' }))
+        expect(launchKey(thread)).not.toBe(key)
     })
 
-    it('nothing saved is the standard preset', () => {
-        expect(restore({})).toEqual(['todo', 'ask', 'approval', 'plan', 'review', 'autopilot', 'terminal'])
-        expect(appStore.capabilityPreset).toBe('standard')
+    it('a model\'s own compaction restarts only the threads on that model', () => {
+        appStore.newThread('/p')
+        const thread = appStore.active!
+        thread.state = { model: { provider: 'a', id: 'b' } } as any
+        const key = launchKey(thread)
+        apply(state('standard', 'auto', { modelOverrides: { 'c/d': { reserveTokens: 1 } } }))
+        expect(launchKey(thread)).toBe(key)
+        apply(state('standard', 'auto', { modelOverrides: { 'c/d': { reserveTokens: 1 }, 'a/b': { reserveTokens: 2 } } }))
+        expect(launchKey(thread)).not.toBe(key)
     })
 
-    it('a list saved before presets were saved by id becomes the preset it was', () => {
-        // Those builds could not offer review, autopilot or terminal, so a list without them still matches.
-        expect(restore({ capabilities: ['todo', 'ask', 'approval', 'plan', 'subagent'] })).toEqual(['todo', 'ask', 'approval', 'plan', 'subagent', 'review', 'autopilot', 'terminal'])
-        expect(appStore.capabilityPreset).toBe('full')
-        expect(restore({ capabilities: ['todo', 'ask', 'approval', 'plan'] })).toEqual(['todo', 'ask', 'approval', 'plan', 'review', 'autopilot', 'terminal'])
-        expect(restore({ capabilities: ['todo', 'ask', 'approval', 'plan', 'review', 'autopilot'] })).toEqual(['todo', 'ask', 'approval', 'plan', 'review', 'autopilot', 'terminal'])
-        // Lean stays lean, and other lists stay as they are.
-        expect(restore({ capabilities: [] })).toEqual([])
-        expect(appStore.capabilityPreset).toBe('lean')
-        expect(restore({ capabilities: ['plan', 'todo'] })).toEqual(['todo', 'plan'])
-        expect(appStore.capabilityPreset).toBeUndefined()
-    })
-
-    it('restores the active project\'s set from the old per-project state', () => {
-        const old = { capabilities: { '/a': ['todo'], '/b': ['todo', 'ask', 'subagent'] } }
-        expect(restore({ ...old, activeProject: '/a' })).toEqual(['todo'])
-        expect(restore({ ...old, activeProject: '/c' })).toEqual(['todo', 'ask', 'subagent'])
-    })
-
-    it('another window\'s choice applies here, by id or as a list', () => {
-        ;(appStore as any).applyPrefs({ capabilities: 'lean' }, true)
+    it('a failed write puts the saved choice back', async () => {
+        const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+        ;(window as any).pi.setCapabilities = async () => {
+            throw new Error('settings.json is not valid JSON; nothing was changed')
+        }
+        ;(window as any).pi.piSettings = async () => state('standard')
+        appStore.setCapabilities([])
         expect(appStore.enabledCapabilities).toEqual([])
-        ;(appStore as any).applyPrefs({ capabilities: ['todo'] }, true)
-        expect(appStore.enabledCapabilities).toEqual(['todo'])
+        await vi.waitFor(() => expect(appStore.capabilityPreset).toBe('standard'))
+        error.mockRestore()
     })
 })
 
 describe('approval mode', () => {
     beforeEach(reset)
+    afterEach(() => vi.unstubAllGlobals())
 
-    it('keeps one approval mode for all projects, reading the old per-project map once', () => {
-        const restore = (state: object) => {
-            ;(appStore as any).restoreState(state)
-            return appStore.approvalMode
-        }
-        expect(restore({})).toBe('auto')
-        expect(restore({ approvalMode: 'edits' })).toBe('edits')
-        expect(restore({ approvalMode: 'bogus' })).toBe('auto')
-        const old = { approvalModes: { '/a': 'auto', '/b': 'edits' } }
-        expect(restore({ ...old, activeProject: '/a' })).toBe('auto')
-        expect(restore({ ...old, activeProject: '/c' })).toBe('edits')
+    it('is saved with the capabilities, once per change', async () => {
+        const written: any[] = []
+        vi.stubGlobal('window', { pi: { setCapabilities: async (patch: any) => {
+            written.push(patch)
+            return { fingerprint: '[]', modelOverrides: {}, capabilities: { ...resolveCapabilities('standard'), approvalMode: patch.approvalMode, saved: true } }
+        } } })
+        ;(appStore as any).approvalMode = 'auto'
+        appStore.setApprovalMode('ask')
         appStore.setApprovalMode('ask')
         expect(appStore.approvalMode).toBe('ask')
+        await vi.waitFor(() => expect(written).toEqual([{ approvalMode: 'ask' }]))
     })
 })
 
@@ -281,5 +309,58 @@ describe('moving projects between windows', () => {
         finally {
             vi.unstubAllGlobals()
         }
+    })
+})
+
+describe('setup assistant and the default agent', () => {
+    let saves: any[]
+    beforeEach(() => {
+        reset()
+        saves = []
+        vi.stubGlobal('window', { pi: {
+            saveState: async (save: any) => void saves.push(save),
+            agentStart: async () => {
+                throw new Error('not in this test')
+            },
+        } })
+        ;(appStore as any).applyPrefs({ projects: [], hiddenProjects: [], layout: 'split' }, false)
+    })
+    afterEach(() => {
+        ;(appStore as any).ready = false
+        appStore.setupRequested = false
+        vi.unstubAllGlobals()
+    })
+
+    it('shows until this version was gone through, and again when opened from Settings', () => {
+        expect(appStore.setupOpen).toBe(true)
+        ;(appStore as any).applyPrefs({ setupDone: SETUP_VERSION - 1 }, true)
+        expect(appStore.setupOpen).toBe(true)
+        ;(appStore as any).applyPrefs({ setupDone: SETUP_VERSION }, true)
+        expect(appStore.setupOpen).toBe(false)
+        appStore.openSetup()
+        expect(appStore.setupOpen).toBe(true)
+    })
+
+    it('new threads start with the default agent; an unknown one falls back to pi', () => {
+        ;(appStore as any).applyPrefs({ defaultAgent: 'codex' }, true)
+        appStore.newThread('/p')
+        expect(appStore.active!.agent).toBe('codex')
+        ;(appStore as any).applyPrefs({ defaultAgent: 'nonsense' }, true)
+        expect(appStore.defaultAgent).toBe('pi')
+        appStore.active!.pendingPrompt = { text: 'x', images: [], timestamp: 1 }
+        appStore.newThread('/p')
+        expect(appStore.active!.agent).toBe('pi')
+    })
+
+    it('finishing saves the choice for every window and moves an untouched new tab to it', async () => {
+        ;(appStore as any).ready = true
+        appStore.newThread('/p')
+        const blank = appStore.active!
+        appStore.openSetup()
+        appStore.finishSetup('grok')
+        expect(appStore.setupOpen).toBe(false)
+        expect(appStore.defaultAgent).toBe('grok')
+        await vi.waitFor(() => expect(blank.agent).toBe('grok'))
+        expect(saves.at(-1).prefs).toMatchObject({ defaultAgent: 'grok', setupDone: SETUP_VERSION })
     })
 })

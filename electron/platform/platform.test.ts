@@ -1,10 +1,11 @@
 import { spawnSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { platform } from '.'
-import { darwin } from './darwin'
+import { darwin, macNodeRuntime } from './darwin'
 import { linux } from './linux'
 import { cmdArgument, shimScript, win32 } from './win32'
 import { below, foregroundOf, parseRows } from './win32-processes'
@@ -160,6 +161,27 @@ describe('win32', () => {
             '"C:\\Program Files\\Filo\\Filo.exe" "--require" "C:\\100%%\\preload.cjs" %*',
             '',
         ])
+    })
+})
+
+describe('darwin', () => {
+    it('runs Electron as node through its Helper, which stays out of the Dock', () => {
+        const app = '/Applications/Filo.app/Contents'
+        const helper = `${app}/Frameworks/Filo Helper.app/Contents/MacOS/Filo Helper`
+        expect(macNodeRuntime(`${app}/MacOS/Filo`, file => file === helper)).toBe(helper)
+        // No Helper, or not an app bundle: the binary itself.
+        expect(macNodeRuntime(`${app}/MacOS/Filo`, () => false)).toBe(`${app}/MacOS/Filo`)
+        expect(macNodeRuntime('/usr/local/bin/node', () => true)).toBe('/usr/local/bin/node')
+        expect(linux.nodeRuntime('/opt/Filo/filo')).toBe('/opt/Filo/filo')
+        expect(win32.nodeRuntime('C:\\Filo\\Filo.exe')).toBe('C:\\Filo\\Filo.exe')
+    })
+
+    it.runIf(platform.id === 'darwin')('the electron package\'s Helper runs as node', () => {
+        const electron = createRequire(import.meta.url)('electron') as unknown as string
+        const helper = darwin.nodeRuntime(electron)
+        expect(helper).toMatch(/\/Electron Helper\.app\/Contents\/MacOS\/Electron Helper$/)
+        const run = spawnSync(helper, ['-p', 'process.versions.node'], { env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' } })
+        expect(run.stdout.toString().trim()).toMatch(/^\d+\.\d+\.\d+$/)
     })
 })
 
