@@ -1,12 +1,13 @@
 import type { AgentAvailability, AgentKind } from '@shared/agents'
 import type { PiModel, ThinkingLevel } from '@shared/pi'
+import { modelKey } from '@shared/pi'
 import type { KeyboardEvent } from 'react'
 import type { Thread, ThreadMode } from '@/store/thread'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { cn, formatTokens, ipcMessage } from '@/lib/utils'
 import { AgentIcon } from '@/components/AgentIcon'
-import { Brain, Check, ChevronDown, ClipboardList, Cpu, Download, FilePen, KeyRound, Loader2, Plane, Plus, Route, Settings2, ShieldCheck, SlidersHorizontal, Undo2, Zap } from 'lucide-react'
+import { Brain, Check, ChevronDown, ClipboardList, Cpu, Download, FilePen, KeyRound, Loader2, Pin, Plane, Plus, Route, Settings2, ShieldCheck, SlidersHorizontal, Undo2, Zap } from 'lucide-react'
 import { observable, runInAction } from 'mobx'
 import { observer } from 'mobx-react-lite'
 import { useEffect, useRef, useState } from 'react'
@@ -134,12 +135,20 @@ export const ModelPicker = observer(({ thread }: { thread: Thread }) => {
                             {models.map(model => (
                                 <DropdownMenuItem key={`${provider}/${model.id}`} disabled={busy && !!group} onSelect={() => void thread.setModel(model)}>
                                     <span className="flex-1 truncate">{model.name}</span>
+                                    {thread.agent === 'pi' && modelKey(model) === appStore.piDefaultModel && <span className="text-[11px] text-gray-400">{tr('默认', 'default')}</span>}
                                     {model.contextWindow ? <span className="text-[11px] text-gray-400">{formatTokens(model.contextWindow)}</span> : null}
                                     {!group && current?.provider === model.provider && current.id === model.id && <Check size={14} className="text-ide-accent" />}
                                 </DropdownMenuItem>
                             ))}
                         </div>
                     ))}
+                    {/* As in pi's TUI: picking switches this session; new ones start on the default in settings.json. */}
+                    {thread.agent === 'pi' && current && modelKey(current) !== appStore.piDefaultModel && (
+                        <DropdownMenuItem onSelect={() => void appStore.setPiDefaultModel(current)}>
+                            <Pin size={13} />
+                            <span className="flex-1 truncate">{tr(`把 ${current.name} 设为新会话的默认`, `Start new sessions on ${current.name}`)}</span>
+                        </DropdownMenuItem>
+                    )}
                     {!!channelAgent && (
                         <>
                             {!!byProvider.size && <DropdownMenuSeparator />}

@@ -78,6 +78,9 @@ export interface PiModel {
     promptCache?: { short?: number, long?: number }
 }
 
+/** "provider/id", as pi's settings.json and --model name a model. */
+export const modelKey = (m: { provider: string, id: string }) => `${m.provider}/${m.id}`
+
 export type ThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 
 export interface RpcSessionState {

@@ -193,17 +193,13 @@ export interface GlobalPrefs {
     capabilities?: string | CapabilityId[] | Record<string, CapabilityId[]>
     /** Older state: the approval mode new threads start in, now in pi's settings.json. */
     approvalMode?: ApprovalMode
-    /** Tokens at which every model compacts (see lib/compactAt); null: none, absent: not decided yet. */
-    compactAt?: number | null
-    /** Per agent, the model (provider/id) new threads start on: the last one chosen in any of its threads. */
-    models?: Partial<Record<AgentKind, string>>
     /** The agent a new thread starts with; absent: pi. */
     defaultAgent?: AgentKind
     /** The setup assistant's version the user went through (shared/setup.ts SETUP_VERSION); absent: never. */
     setupDone?: number
 }
 
-export const GLOBAL_PREF_KEYS = ['projects', 'hiddenProjects', 'layout', 'theme', 'lang', 'transcriptLang', 'reviewView', 'compactAt', 'models', 'defaultAgent', 'setupDone'] as const satisfies readonly (keyof GlobalPrefs)[]
+export const GLOBAL_PREF_KEYS = ['projects', 'hiddenProjects', 'layout', 'theme', 'lang', 'transcriptLang', 'reviewView', 'defaultAgent', 'setupDone'] as const satisfies readonly (keyof GlobalPrefs)[]
 
 /** settings.json as running pi processes see it (piSettings.ts). */
 export interface PiSettingsState {
@@ -216,6 +212,8 @@ export interface PiSettingsState {
     webAccess: PiPackageState
     /** pi's `cacheWarming`. */
     cacheWarming: CacheWarming
+    /** pi's `defaultProvider` + `defaultModel` (modelKey). */
+    defaultModel?: string
 }
 
 /** pi's cache warming: off; while the agent runs; also between runs while a reply stays likely enough to pay for it. */
@@ -503,6 +501,8 @@ export interface PiBridge {
     installWebAccess: () => Promise<PiSettingsState>
     setWebAccess: (enabled: boolean) => Promise<PiSettingsState>
     setCacheWarming: (mode: CacheWarming) => Promise<PiSettingsState>
+    /** pi's `defaultProvider` + `defaultModel`. */
+    setDefaultModel: (provider: string, model: string) => Promise<PiSettingsState>
     /** settings.json changed (this app, pi in a terminal, an editor). */
     onPiSettingsChanged: (listener: (state: PiSettingsState) => void) => () => void
     /** App menu → 设置… (⌘,). */
@@ -655,6 +655,7 @@ export const IPC = {
     installWebAccess: 'pi:install-web-access',
     setWebAccess: 'pi:set-web-access',
     setCacheWarming: 'pi:set-cache-warming',
+    setDefaultModel: 'pi:set-default-model',
     gitStatus: 'git:status',
     gitBranches: 'git:branches',
     gitFileDiff: 'git:file-diff',

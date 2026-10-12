@@ -199,6 +199,13 @@ export async function setCacheWarming(mode: unknown): Promise<void> {
     await updateGlobalSettings(current => ({ ...current, cacheWarming: valid }))
 }
 
+/** What pi's TUI writes when a model is set as the default: new sessions, here and in a terminal, start on it. */
+export async function setDefaultModel(provider: unknown, model: unknown): Promise<void> {
+    if (typeof provider !== 'string' || !provider || typeof model !== 'string' || !model)
+        throw new Error(`Invalid model: ${String(provider)}/${String(model)}`)
+    await updateGlobalSettings(current => ({ ...current, defaultProvider: provider, defaultModel: model }))
+}
+
 /** The part of an older state.json that held the choice. */
 export interface OldCapabilityState {
     capabilities?: unknown
@@ -251,6 +258,7 @@ export function piSettingsOf(settings: Record<string, any>): PiSettingsState {
         capabilities: capabilityState(capabilityChoice(settings)),
         webAccess: packageState(settings),
         cacheWarming: CACHE_WARMING.includes(settings.cacheWarming) ? settings.cacheWarming : 'streaming',
+        defaultModel: typeof settings.defaultProvider === 'string' && typeof settings.defaultModel === 'string' ? `${settings.defaultProvider}/${settings.defaultModel}` : undefined,
     }
 }
 

@@ -93,6 +93,7 @@ const bridge: PiBridge = {
     installWebAccess: () => ipcRenderer.invoke(IPC.installWebAccess),
     setWebAccess: enabled => ipcRenderer.invoke(IPC.setWebAccess, enabled),
     setCacheWarming: mode => ipcRenderer.invoke(IPC.setCacheWarming, mode),
+    setDefaultModel: (provider, model) => ipcRenderer.invoke(IPC.setDefaultModel, provider, model),
     onPiSettingsChanged: listener => listen(IPC.piSettingsChanged, listener),
     gitStatus: cwd => ipcRenderer.invoke(IPC.gitStatus, cwd),
     gitBranches: cwds => ipcRenderer.invoke(IPC.gitBranches, cwds),

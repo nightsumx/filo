@@ -16,12 +16,12 @@ import type {
     SlashCommand,
     ThinkingLevel,
 } from '@shared/pi'
+import { modelKey } from '@shared/pi'
 import type { SubagentRun } from '@/lib/subagents'
 import type { ThreadActivity } from '@/lib/threadActivity'
 import type { BlockTime, Step, TimelineMessage, ToolExecState, ToolResultView } from '@/lib/timeline'
 import { newThreadLabel, tr } from '@/lib/i18n'
 import { parsePartialJson } from '@/lib/partialJson'
-import { modelKey, startModel } from '@/lib/startModel'
 import { childToolCallIds, subagentsIn } from '@/lib/subagents'
 import { threadActivity } from '@/lib/threadActivity'
 import { blockTimeKey, buildTurns, contentImages, contentText, pendingCards } from '@/lib/timeline'
@@ -81,9 +81,6 @@ export interface ThreadHost {
     readonly routeLaunchKeys: Partial<Record<string, string>>
     /** The groups an agent can pick (pickableGroups); undefined until routing and the provider models are known. */
     routeGroups: (agent: RoutedAgent) => RouteGroup[] | undefined
-    /** Per agent, the model (modelKey) last chosen in any thread: fresh threads start on it. */
-    readonly lastModels: Partial<Record<AgentKind, string>>
-    rememberModel: (agent: AgentKind, key: string) => void
     /** The budget capability's limit per prompt, in US dollars. */
     readonly budget: number
 }
@@ -154,7 +151,7 @@ export class Thread {
     channel: AgentChannel | null = null
     /** Bumps when a channel is picked in this thread: only this one restarts onto it. */
     private channelEpoch = 0
-    /** The model picked in this thread (modelKey), put back when its process restarts before pi saved the session. */
+    /** The model picked in this thread (modelKey), put back when its process restarts before the agent saved the session. */
     private chosenModel: string | undefined = undefined
     queue: { steering: string[], followUp: string[] } = { steering: [], followUp: [] }
     /** Images sent with queued messages, by text: the queue pi reports carries text only. */
@@ -695,7 +692,7 @@ export class Thread {
             this.refreshChannel(),
         ])
         if (!this.persisted)
-            await this.pickStartModel()
+            await this.restoreModel()
         await this.alignRouteModel()
         runInAction(() => {
             this.agentStatus = 'ready'
@@ -819,13 +816,16 @@ export class Thread {
         })
     }
 
-    /** A fresh thread's model (startModel): its own pick, else its agent's last, else Opus 5.5. */
-    private async pickStartModel() {
+    /**
+     * A fresh thread restarted before its agent saved the session: the model picked in it comes back.
+     * Otherwise the agent starts on its own default, as in its terminal.
+     */
+    private async restoreModel() {
         // On a group, the agent's own model is not what answers; on an endpoint of its config, its config names the model.
-        if (this.agent !== 'pi' && (this.route.group || this.channel?.current || this.channel?.other))
+        if (this.route.group || this.channel?.current || this.channel?.other)
             return
-        const model = startModel(this.models, this.state?.model, this.chosenModel ?? this.host.lastModels[this.agent])
-        if (!model || !this.agentId)
+        const model = this.models.find(m => modelKey(m) === this.chosenModel)
+        if (!model || !this.agentId || (this.state?.model && modelKey(this.state.model) === this.chosenModel))
             return
         const response = await api().agentRequest(this.agentId, { type: 'set_model', provider: model.provider, modelId: model.id }).catch(() => undefined)
         if (response?.success)
@@ -1019,9 +1019,8 @@ export class Thread {
             group = await api().sessionRoute(resumable).catch(() => undefined)
         }
         else {
-            const remembered = this.chosenModel ?? this.host.lastModels[this.agent]
-            if (remembered?.startsWith(`${ROUTES_PROVIDER}/`))
-                group = remembered.slice(ROUTES_PROVIDER.length + 1)
+            if (this.chosenModel?.startsWith(`${ROUTES_PROVIDER}/`))
+                group = this.chosenModel.slice(ROUTES_PROVIDER.length + 1)
         }
         runInAction(() => {
             this.routeKnown = true
@@ -1084,13 +1083,11 @@ export class Thread {
         }
         if (this.route.group === id)
             return
-        const key = `${ROUTES_PROVIDER}/${id}`
         runInAction(() => {
             this.route = { group: id }
             this.routeKnown = true
-            this.chosenModel = key
+            this.chosenModel = `${ROUTES_PROVIDER}/${id}`
         })
-        this.host.rememberModel(this.agent, key)
         await this.restartForRoute()
     }
 
@@ -1125,8 +1122,6 @@ export class Thread {
             this.chosenModel = undefined
             this.channelEpoch++
         })
-        if (this.host.lastModels[this.agent]?.startsWith(`${ROUTES_PROVIDER}/`))
-            this.host.rememberModel(this.agent, '')
         await this.restartForRoute()
     }
 
@@ -1160,7 +1155,6 @@ export class Thread {
             }
             await this.request({ type: 'set_model', provider: model.provider, modelId: model.id })
             this.chosenModel = modelKey(model)
-            this.host.rememberModel(this.agent, this.chosenModel)
             await Promise.all([this.syncState(), this.refreshModels(), this.refreshStats()])
         }
         catch (error: any) {

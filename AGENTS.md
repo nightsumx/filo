@@ -11,6 +11,7 @@ Filo 不是另一个 agent，而是 pi 的第二张脸。终端里的 pi（配 p
 - **会话**：只有 pi 自己的 JSONL（`~/.pi/agent/sessions`）。Filo 不另存对话，终端里跑的会话会出现在项目树里，也能被搜索。
 - **配置**：模型、供应商、登录写进 pi 自己的 `~/.pi/agent`（`settings.json`、`models.json`、`auth.json`），扩展用它们自己的配置文件（比如 `web-search.json`），两边读的是同一份。
 - **能力**：`packages/capabilities` 是一份实现、两个宿主。Filo 用 `-e` 按线程加载，pi-cc-tui 在终端里加载同一份代码。扩展按 `ctx.mode` 分渲染方式：`rpc` 时发状态、等隐藏的 `/gui-…` 命令；`tui` 时画 Claude Code 风格的对话框。
+- **新会话用哪个模型**：每个 agent 都从它自己配置里的默认开始，Filo 不另记。在线程里选模型，效果和在那个 agent 的 TUI 里选一样：pi 只换这个会话，要改默认用模型菜单里的「设为新会话的默认」，写的是 `settings.json` 的 `defaultProvider`、`defaultModel`；Codex 的 `/model` 会写回 `config.toml`，Filo 也通过 app-server 的 `config/batchWrite` 写回 `model` 和 `model_reasoning_effort`；ACP agent 交给它自己的 `session/set_model`。线程里选的只在这个线程重启时恢复（会话还没存下来的时候）。
 - **开哪些能力、新会话的确认模式**：存在 `~/.pi/agent/settings.json` 的 `"pi-capabilities"` 键（`packages/capabilities/lib/catalog.ts` 的 `SETTINGS_KEY`，读写在 `lib/settings.ts`）。Filo 的设置页和 pi-cc-tui 的 `/capabilities` 改的是同一份；Filo 监视这个文件，终端里改了，Filo 的空闲线程会重启。
 - **契约**：`packages/capabilities/protocol.ts` 是两边唯一的约定，包括命令名、状态 key、事件名、环境变量，以及工具结果里 `details` 的类型。`details` 会写进会话文件，所以两边读到的是同一份结构。
 - **同一个进程**：装了 pi-cc-tui 时，Filo 通过 bridge socket 加入终端里正在跑的那个 pi，而不是另起一个。approval、ask、plan 会在两边同时弹出，先答的一边会关掉另一边（`DIALOG_EVENTS`）。

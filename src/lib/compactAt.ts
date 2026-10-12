@@ -46,8 +46,8 @@ export function syncReserves(models: ModelWindow[], reserves: Record<string, num
 }
 
 /**
- * The point most existing overrides share (settings made by hand or by an older version), so
- * they read as the global point rather than as a list of exceptions. Rounded points only.
+ * The global point, which is not stored anywhere: the point most overrides share, so they read as
+ * one setting rather than as a list of exceptions. Rounded points only.
  */
 export function inferCompactAt(models: ModelWindow[], reserves: Record<string, number>): number | null {
     const counts = new Map<number, number>()

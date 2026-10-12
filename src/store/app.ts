@@ -8,6 +8,7 @@ import { LANG_PREFS } from '@shared/i18n'
 import { SETUP_VERSION } from '@shared/setup'
 import { DEFAULT_THEME, GLOBAL_PREF_KEYS, REVIEW_VIEWS, THEME_PREFS, TRANSCRIPT_LANGS } from '@shared/ipc'
 import type { PiEvent, PiModel } from '@shared/pi'
+import { modelKey } from '@shared/pi'
 import type { RouteGroup, RoutedAgent, RoutesConfig, RoutesState } from '@shared/routes'
 import { pickableGroups } from '@shared/routes'
 import type { ThreadHost } from './thread'
@@ -125,8 +126,6 @@ class AppStore implements ThreadHost {
     approvalMode: ApprovalMode = 'auto'
     /** The budget capability's limit per prompt, in US dollars. */
     budget = DEFAULT_BUDGET
-    /** See ThreadHost.lastModels. */
-    lastModels: NonNullable<GlobalPrefs['models']> = {}
     /** The agent a new thread starts with (the setup assistant, Settings → Agents). */
     defaultAgent: AgentKind = 'pi'
     /** The setup assistant's version the user went through; undefined: never. */
@@ -145,14 +144,14 @@ class AppStore implements ThreadHost {
     /** pi-web-access in settings.json; `installing` while `pi install` runs. */
     webAccess: PiPackageState & { installing?: boolean } = { installed: false, enabled: false }
     cacheWarming: CacheWarming = 'streaming'
+    /** pi's default model (modelKey), what its new sessions start on. */
+    piDefaultModel: string | undefined = undefined
     /** Bumps on every compaction write, including ones no running thread needs a restart for. */
     compactionRevision = 0
     /** Bumps when credentials or endpoints change in any window (Settings → 供应商 reloads). */
     providersRevision = 0
     /** Settings → 路由 and the gateway's live status; null until main answers. */
     routes: RoutesState | null = null
-    /** Tokens at which every model compacts (lib/compactAt); null: none, undefined: not decided yet. */
-    compactAt: number | null | undefined = undefined
     private reconciling = false
     /** How many panes fit side by side; measured by the pane container. */
     paneCapacity = 1
@@ -323,6 +322,17 @@ class AppStore implements ThreadHost {
         const current = this.active?.state?.model
         const models = this.active?.models.length ? this.active.models : [...this.threads.values()].find(t => t.models.length)?.models ?? []
         return { models, current }
+    }
+
+    /** Tokens at which every model compacts (lib/compactAt), read off the reserves in settings.json; null: none. */
+    get compactAt(): number | null {
+        const reserves: Record<string, number> = {}
+        for (const [key, o] of Object.entries(this.modelOverrides)) {
+            const reserve = o && typeof o === 'object' && 'reserveTokens' in o ? o.reserveTokens : undefined
+            if (typeof reserve === 'number')
+                reserves[key] = reserve
+        }
+        return inferCompactAt(this.modelWindows, reserves)
     }
 
     /** Context windows of the models pi offers, plus the focused thread's model. */
@@ -618,10 +628,6 @@ class AppStore implements ThreadHost {
             this.transcriptLang = TRANSCRIPT_LANGS.includes(prefs.transcriptLang as TranscriptLang) ? prefs.transcriptLang! : 'en'
         if (has('reviewView'))
             this.reviewView = REVIEW_VIEWS.includes(prefs.reviewView as ReviewView) ? prefs.reviewView! : 'tree'
-        if (has('compactAt'))
-            this.compactAt = prefs.compactAt === null || (typeof prefs.compactAt === 'number' && prefs.compactAt > 0) ? prefs.compactAt : undefined
-        if (has('models'))
-            this.lastModels = prefs.models && typeof prefs.models === 'object' ? prefs.models : {}
         if (has('defaultAgent'))
             this.defaultAgent = prefs.defaultAgent && (prefs.defaultAgent === 'pi' || acpAgent(prefs.defaultAgent)) ? prefs.defaultAgent : 'pi'
         if (has('setupDone'))
@@ -658,6 +664,7 @@ class AppStore implements ThreadHost {
         this.budget = budget
         this.webAccess = { ...state.webAccess, installing: this.webAccess.installing }
         this.cacheWarming = state.cacheWarming
+        this.piDefaultModel = state.defaultModel
         if (capabilities || affected) {
             for (const thread of this.threads.values())
                 void thread.applyConfig()
@@ -714,8 +721,6 @@ class AppStore implements ThreadHost {
             lang: this.langPref,
             transcriptLang: this.transcriptLang,
             reviewView: this.reviewView,
-            compactAt: this.compactAt,
-            models: this.lastModels,
             defaultAgent: this.defaultAgent === 'pi' ? undefined : this.defaultAgent,
             setupDone: this.setupDone,
         }
@@ -824,13 +829,6 @@ class AppStore implements ThreadHost {
             return
         this.approvalMode = mode
         void this.writeCapabilities({ approvalMode: mode })
-    }
-
-    rememberModel(agent: AgentKind, key: string) {
-        if (this.lastModels[agent] === key)
-            return
-        this.lastModels = { ...this.lastModels, [agent]: key }
-        this.persist()
     }
 
     registerAgent(agentId: string, thread: Thread) {
@@ -1163,6 +1161,12 @@ class AppStore implements ThreadHost {
         return this.writePiSettings(() => api().setCacheWarming(mode), tr('缓存保温设置没有保存', 'Cache warming setting not saved'))
     }
 
+    /** What pi's TUI does with a model set as the default. */
+    setPiDefaultModel(model: PiModel) {
+        this.piDefaultModel = modelKey(model)
+        return this.writePiSettings(() => api().setDefaultModel(model.provider, model.id), tr('默认模型没有保存', 'Default model not saved'))
+    }
+
     setWebAccess(enabled: boolean) {
         this.webAccess.enabled = enabled
         return this.writePiSettings(() => api().setWebAccess(enabled), tr('联网搜索设置没有保存', 'Web access setting not saved'))
@@ -1197,19 +1201,14 @@ class AppStore implements ThreadHost {
 
     /** Moves every model that follows the global point to `at` (null: back to pi's reserve). */
     async setCompactAt(at: number | null) {
-        const from = this.compactAt ?? null
         const info = await api().globalCompaction()
-        const patch = syncReserves(this.modelWindows, info.modelReserves, from, at)
-        runInAction(() => {
-            this.compactAt = at
-            this.persist()
-        })
-        await this.writeReserves(patch)
+        const models = this.modelWindows
+        await this.writeReserves(syncReserves(models, info.modelReserves, inferCompactAt(models, info.modelReserves), at))
     }
 
     /** A per-model exception; null puts the model back on the global point. */
     async setModelCompactAt(key: string, contextWindow: number, at: number | null) {
-        const global = this.compactAt ?? null
+        const global = this.compactAt
         const reserve = at !== null ? contextWindow - at : global !== null ? autoReserve(contextWindow, global) : null
         await this.writeReserves({ [key]: reserve })
     }
@@ -1223,13 +1222,7 @@ class AppStore implements ThreadHost {
         this.reconciling = true
         try {
             const info = await api().globalCompaction()
-            if (this.compactAt === undefined) {
-                runInAction(() => {
-                    this.compactAt = inferCompactAt(models, info.modelReserves)
-                    this.persist()
-                })
-            }
-            const at = this.compactAt ?? null
+            const at = inferCompactAt(models, info.modelReserves)
             if (at !== null)
                 await this.writeReserves(syncReserves(models, info.modelReserves, at, at))
         }

@@ -787,6 +787,14 @@ export class CodexAgent implements AgentAdapter {
         return options
     }
 
+    /** As the Codex TUI's /model does: new sessions, here and in a terminal, start on the pick. */
+    private async saveModel() {
+        const edits = [{ keyPath: 'model', value: this.model, mergeStrategy: 'replace' }]
+        if (this.effort)
+            edits.push({ keyPath: 'model_reasoning_effort', value: this.effort, mergeStrategy: 'replace' })
+        await this.rpc('config/batchWrite', { edits })
+    }
+
     private configChanged() {
         this.emit({ type: 'acp_config_changed', configOptions: this.configOptions() })
     }
@@ -1797,9 +1805,11 @@ export class CodexAgent implements AgentAdapter {
                 }
                 case 'set_model':
                     this.setConfig('model', String(command.modelId ?? ''))
+                    await this.saveModel()
                     return ok()
                 case 'set_thinking_level':
                     this.setConfig('reasoning_effort', String(command.level ?? ''))
+                    await this.saveModel()
                     return ok()
                 case 'set_config_option':
                     this.setConfig(String(command.configId ?? ''), String(command.value ?? ''))

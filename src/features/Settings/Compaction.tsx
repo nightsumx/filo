@@ -68,7 +68,7 @@ export const CompactionPage = observer(() => {
         })
     }
     const keepStep = stepOf(KEEP_STEPS, info.keepRecentTokens)
-    const at = appStore.compactAt ?? null
+    const at = appStore.compactAt
     const minK = minPointK(info.keepRecentTokens)
 
     return (

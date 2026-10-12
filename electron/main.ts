@@ -25,7 +25,7 @@ import { FolderWatch, listDir, readText, writeText } from './files'
 import { gitBranch, gitCommit, gitDiscard, gitFileBytes, gitFileDiff, gitFileEntries, gitFileThumbs, gitStatus } from './git'
 import { mainLang, setMainLang, tr } from './i18n'
 import { installPackage, WEB_ACCESS } from './piPackages'
-import { agentDir, compactionInfo, globalCompaction, migrateCapabilities, piSettingsState, setCacheWarming, setCapabilities, setGlobalCompaction, setWebAccess, watchSettings } from './piSettings'
+import { agentDir, compactionInfo, globalCompaction, migrateCapabilities, piSettingsState, setCacheWarming, setCapabilities, setDefaultModel, setGlobalCompaction, setWebAccess, watchSettings } from './piSettings'
 import { ChannelTests } from './channelTests'
 import { priceList, readPricesFrom, refreshPrices } from './prices'
 import { endpointSaveOf, helperLaunch, ProviderHelper, ProviderService } from './providers'
@@ -538,6 +538,10 @@ function registerIpc() {
     })
     ipcMain.handle(IPC.setCacheWarming, async (_e, mode: unknown) => {
         await setCacheWarming(mode)
+        return piSettingsState()
+    })
+    ipcMain.handle(IPC.setDefaultModel, async (_e, provider: unknown, model: unknown) => {
+        await setDefaultModel(provider, model)
         return piSettingsState()
     })
     ipcMain.handle(IPC.gitStatus, (_e, cwd: string) => gitStatus(cwd))

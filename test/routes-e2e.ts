@@ -244,7 +244,6 @@ async function main() {
             console.error(await js(`JSON.stringify({ status: ${T}.agentStatus, id: ${T}.agentId, before: ${JSON.stringify(codexPid)}, route: ${T}.route, info: ${T}.routeInfo, error: ${T}.agentError, restartPending: ${T}.restartPending })`))
             throw error
         })
-        check(await js<boolean>(`window.__app.lastModels.codex === 'filo/resp'`), 'the pick is remembered for new Codex threads')
         seen.length = 0
         await send('hello codex')
         await until('Codex reply', () => reply('answered by good'), 60_000)
@@ -316,14 +315,12 @@ async function main() {
             console.log('  (skipped: Codex lists no models of its own without an account)')
         }
 
-        // A new Codex thread starts on the group last picked for Codex, as on the last model.
-        await js(`${T}.chooseGroup('resp')`)
-        await until('back on Responses', () => js<boolean>(`${T}.agentStatus === 'ready' && ${T}.routeInfo?.group?.id === 'resp'`), 30_000)
+        // A new Codex thread starts on what its config names, not on the group picked in another thread.
         await js(`(() => { window.__app.newThread(${R}); return true })()`)
         await until('a new thread', () => js<boolean>(`!!${T} && ${T}.isEmpty`))
         await js(`${T}.setAgent('codex')`)
-        await until('new Codex thread on the group', () => js<boolean>(`${T}.agent === 'codex' && ${T}.agentStatus === 'ready' && ${T}.routeInfo?.group?.id === 'resp' && ${T}.route.group === 'resp'`), 30_000)
-        check(true, 'a new Codex thread starts on the group last picked')
+        await until('new Codex thread ready', () => js<boolean>(`${T}.agent === 'codex' && ${T}.agentStatus === 'ready'`), 30_000)
+        check(await js<boolean>(`${T}.routeInfo === null && !${T}.route.group`), 'a new Codex thread starts off the group')
 
         // ---- terminal sync
         const files = () => Promise.all([
@@ -379,7 +376,6 @@ async function main() {
         check(seen[0]?.path === '/v1/models' && seen[0].auth === 'Bearer chan-key', 'the channel\'s models come from the endpoint, with its key')
         const added = JSON.parse(await readFile(path.join(agentDir, 'models.json'), 'utf8')).providers['127.0.0.1']
         check(added?.api === 'openai-responses' && added.baseUrl === `${base}/chan/v1` && added.models[0].id === 'chan-m', `the channel is a pi provider with Codex's API (${JSON.stringify(added)})`)
-        check(await js<boolean>(`!window.__app.lastModels.codex?.startsWith('filo/')`), 'new Codex threads start on what its config names, not on a group')
         seen.length = 0
         await send('via the channel')
         await until('channel reply', () => reply('answered by chan'), 60_000)
