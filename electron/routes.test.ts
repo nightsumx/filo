@@ -5,6 +5,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { BLOCK_END, BLOCK_START } from './gateway/agentConfig'
+import { platform } from './platform'
 import { RoutesService } from './routes'
 
 const catalog: RouteCatalog = {
@@ -198,7 +199,9 @@ describe('routesService', () => {
         const port = routes.state().status.port
         await routes.shutdown()
         const file = path.join(home, 'data', 'routes.json')
-        expect((await stat(file)).mode & 0o777).toBe(0o600)
+        // Windows has no POSIX modes.
+        if (platform.id !== 'win32')
+            expect((await stat(file)).mode & 0o777).toBe(0o600)
         const saved = JSON.parse(await readFile(file, 'utf8'))
         expect(saved.port).toBe(port)
         expect(saved.config.groups[0].id).toBe('g1')

@@ -37,8 +37,9 @@ export async function startTerminalPi(options: { agentDir: string, cwd: string, 
     const extensions = options.extensions.flatMap(e => ['-e', path.join(CC_EXTENSIONS, e)])
     // No --no-mcp: the pi the app ships (1.0.3) has no such option, and the agent dir is a throwaway.
     const command = piCommand(pi, ['--no-extensions', ...extensions, ...options.args ?? []])
-    // The bundled pi runs on Electron as node, as the app starts it (electron/pi-env.ts).
-    const vars = { PI_CODING_AGENT_DIR: options.agentDir, ...pi.bundled ? { ELECTRON_RUN_AS_NODE: '1' } : {}, ...options.env }
+    // The bundled pi runs on Electron as node, as the app starts it (electron/pi-env.ts). Offline: no
+    // fd/rg download at startup (CI runners have neither), which would swallow the first keys typed.
+    const vars = { PI_CODING_AGENT_DIR: options.agentDir, PI_OFFLINE: '1', ...pi.bundled ? { ELECTRON_RUN_AS_NODE: '1' } : {}, ...options.env }
     const line = ['env', ...Object.entries(vars).map(([k, v]) => `${k}=${quote(v)}`), quote(command.file), ...command.args.map(quote)].join(' ')
     const session = `pi-term-${process.pid}-${Math.random().toString(36).slice(2, 8)}`
     await run('tmux', ['new-session', '-d', '-s', session, '-x', '140', '-y', '40', '-c', options.cwd, line])

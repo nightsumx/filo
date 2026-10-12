@@ -121,7 +121,7 @@ describe('terminal chats in the agents\' own files', () => {
                 ['acp:gemini:g1', 'gemini prompt'],
             ]))
             const cursor = await service.readSession('acp:cursor:c1')
-            expect(cursor.terminalOnly).toMatch(/cursor-agent"? --resume c1$/)
+            expect(cursor.terminalOnly).toMatch(/cursor-agent(\.cmd)?"? --resume c1$/)
             expect(cursor.items.map(i => i.message.role)).toEqual(['user', 'assistant', 'toolResult', 'assistant'])
             await expect(service.start('cursor', '/work/app', 'acp:cursor:c1', { onEvent: () => {}, onExit: () => {} } as any)).rejects.toThrow(/terminal|终端/)
             // The next pass, with the ACP list failing again: what it listed before stays.

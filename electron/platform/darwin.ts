@@ -17,11 +17,11 @@ const execFileAsync = promisify(execFile)
  * Helper (LSUIElement=true) runs as node the same way, without one. Not in a bundle: `electron` itself.
  */
 export function macNodeRuntime(electron: string, exists: (file: string) => boolean = existsSync): string {
-    const macos = path.dirname(electron)
-    if (path.basename(macos) !== 'MacOS')
+    const macos = path.posix.dirname(electron)
+    if (path.posix.basename(macos) !== 'MacOS')
         return electron
-    const name = `${path.basename(electron)} Helper`
-    const helper = path.join(macos, '..', 'Frameworks', `${name}.app`, 'Contents', 'MacOS', name)
+    const name = `${path.posix.basename(electron)} Helper`
+    const helper = path.posix.join(macos, '..', 'Frameworks', `${name}.app`, 'Contents', 'MacOS', name)
     return exists(helper) ? helper : electron
 }
 
