@@ -1,9 +1,9 @@
-// End-to-end check of taking queued messages back, in the built app with real pi and a scripted
+// End-to-end check of the queue as pi's TUI keeps it, in the built app with real pi and a scripted
 // model (no tokens spent):
-//   - a message typed mid-run shows queued; its row's button puts it (and its image) back in the
-//     editor, and the others stay queued in order
-//   - Alt+Up (Alt+Q on Windows), as in the terminal's pi, takes the whole queue back
-//   - what stays queued still reaches the model; what was taken back never does
+//   - a message typed mid-run shows queued; a row's button, or Alt+Up (Alt+Q on Windows), takes the
+//     whole queue (with its images) back into the editor, and the run goes on
+//   - Alt+Enter queues a follow-up; what was taken back never reaches the model
+//   - a message typed during a compaction is held, then sent once it ends
 //
 //   bun run build && bun run e2e:queue
 import { mkdir, rm, writeFile } from 'node:fs/promises'
@@ -22,16 +22,20 @@ async function main() {
     const agentDir = path.join(WORK, 'agent')
     await Promise.all([repo, userData, agentDir].map(d => mkdir(d, { recursive: true })))
 
-    // "slow" holds its answer back long enough to queue behind it; anything else is echoed.
+    // "slow" holds its answer back long enough to queue behind it, and so does the compaction summary
+    // once asked to; anything else is echoed.
+    let compactSlowly = false
     const llm = await startMockLlm((request) => {
         const last = request.messages.at(-1)
         const prompt = String(typeof last?.content === 'string' ? last.content : last?.content?.map((p: any) => p.text ?? '').join('') ?? '')
+        if (compactSlowly && prompt.includes('<conversation>'))
+            return { text: '## Goal\nsummary', delayMs: 3000 }
         return prompt.startsWith('slow') ? { text: 'slow done', delayMs: 4000 } : { text: `echo: ${prompt}` }
     })
     await writeFile(path.join(agentDir, 'models.json'), JSON.stringify({
         providers: { mock: { baseUrl: llm.baseUrl, api: 'openai-completions', apiKey: 'mock', models: [{ id: 'mock-1', input: ['text', 'image'], contextWindow: 100_000, maxTokens: 1000 }] } },
     }))
-    await writeFile(path.join(agentDir, 'settings.json'), JSON.stringify({ defaultProvider: 'mock', defaultModel: 'mock-1', defaultThinkingLevel: 'off' }))
+    await writeFile(path.join(agentDir, 'settings.json'), JSON.stringify({ defaultProvider: 'mock', defaultModel: 'mock-1', defaultThinkingLevel: 'off', compaction: { keepRecentTokens: 1 } }))
     await writeFile(path.join(userData, 'state.json'), JSON.stringify({
         projects: [repo],
         hiddenProjects: [],
@@ -60,7 +64,7 @@ async function main() {
         const draft = () => page.evaluate<string>(`${T}.draft`)
         const seen = () => llm.requests.map(r => JSON.stringify(r.messages)).join('\n')
 
-        // ---------------------------------------------------------------- one message back
+        // ---------------------------------------------------------------- taking the queue back
         await send('slow first')
         // Queued behind a model call under way, as typed while pi works.
         await until('the model is answering', async () => llm.requests.length === 1)
@@ -68,42 +72,46 @@ async function main() {
         await until('one queued', async () => (await steering()) === 'one')
         await send('two', true)
         await until('two queued', async () => (await steering()) === 'one|two')
-        await send('three')
-        await until('three queued', async () => (await steering()) === 'one|two|three')
-        const buttons = 'document.querySelectorAll(\'button[aria-label="Take back this queued message"]\')'
-        check(await page.evaluate<number>(`${buttons}.length`) === 3, 'each queued message has a take-back button')
-
+        const buttons = 'document.querySelectorAll(\'button[aria-label="Take back the queued messages"]\')'
+        check(await page.evaluate<number>(`${buttons}.length`) === 2, 'each queued message has a take-back button')
         await page.evaluate(`${buttons}[1].click()`)
-        await until('two taken back', async () => (await draft()) === 'two' && (await steering()) === 'one|three')
-        check(true, 'the button puts its message in the editor; the others stay queued, in order')
+        await until('all taken back', async () => (await draft()) === 'one\ntwo' && (await steering()) === '')
+        check(true, 'it takes the whole queue back, as pi takes it')
         check(await page.evaluate<number>(`${T}.images.length`) === 1, 'with the image it was sent with')
 
-        // ---------------------------------------------------------------- Alt+Up takes all
-        const altUp = process.platform === 'win32' ? { key: 'q', code: 'KeyQ' } : { key: 'ArrowUp', code: 'ArrowUp' }
-        await page.evaluate(`(() => {
+        await page.evaluate(`(() => { ${T}.draft = ''; ${T}.images = []; return true })()`)
+        await send('three')
+        await until('three queued', async () => (await steering()) === 'three')
+        const key = (init: Record<string, unknown>) => page.evaluate(`(() => {
             const el = document.querySelector('textarea')
             el.focus()
-            el.dispatchEvent(new KeyboardEvent('keydown', { key: ${JSON.stringify(altUp.key)}, code: ${JSON.stringify(altUp.code)}, altKey: true, bubbles: true }))
+            el.dispatchEvent(new KeyboardEvent('keydown', ${JSON.stringify({ ...init, bubbles: true })}))
             return true
         })()`)
-        await until('all taken back', async () => (await draft()) === 'one\nthree\ntwo' && (await steering()) === '')
-        check(true, 'Alt+Up takes the whole queue back, in front of what is typed')
+        await key(process.platform === 'win32' ? { key: 'q', code: 'KeyQ', altKey: true } : { key: 'ArrowUp', code: 'ArrowUp', altKey: true })
+        await until('Alt+Up takes it back', async () => (await draft()) === 'three' && (await steering()) === '')
+        check(true, 'Alt+Up (Alt+Q on Windows) takes the queue back, as in the terminal\'s pi')
         check(await page.evaluate<boolean>(`${T}.running`), 'and the run goes on')
 
-        await until('first run done', () => page.evaluate<boolean>(`!${T}.running`), 20_000)
-        check(!seen().includes('"one"') && !seen().includes('"three"') && !seen().includes('"two"'), 'taken-back messages never reach the model')
+        // ---------------------------------------------------------------- Alt+Enter: a follow-up
+        await page.evaluate(`(() => { ${T}.draft = 'later'; return true })()`)
+        await key({ key: 'Enter', code: 'Enter', altKey: true })
+        await until('later queued as a follow-up', () => page.evaluate<boolean>(`${T}.queue.followUp.join('|') === 'later' && ${T}.queue.steering.length === 0`))
+        check(true, 'Alt+Enter queues a follow-up, as pi\'s app.message.followUp')
 
-        // ---------------------------------------------------------------- the rest still goes
-        await page.evaluate(`(() => { ${T}.draft = ''; ${T}.images = []; return true })()`)
-        await send('slow second')
-        await until('the model is answering again', async () => llm.requests.length === 2)
-        await send('four')
-        await send('five')
-        await until('four and five queued', async () => (await steering()) === 'four|five')
-        await page.evaluate(`${buttons}[0].click()`)
-        await until('four taken back', async () => (await draft()) === 'four' && (await steering()) === 'five')
-        await until('second run done', () => page.evaluate<boolean>(`!${T}.running && ${T}.queue.steering.length === 0`), 20_000)
-        check(seen().includes('five') && !seen().includes('four'), 'the message queued again after one was taken back still reaches the model')
+        await until('first run done', () => page.evaluate<boolean>(`!${T}.running && ${T}.queue.followUp.length === 0`), 20_000)
+        check(!seen().includes('"one"') && !seen().includes('"two"') && !seen().includes('"three"'), 'taken-back messages never reach the model')
+        check(seen().includes('later'), 'the follow-up does')
+
+        // ---------------------------------------------------------------- typed during a compaction
+        compactSlowly = true
+        await page.evaluate(`(() => { void ${T}.compact(); return true })()`)
+        await until('compacting', () => page.evaluate<boolean>(`${T}.compacting`))
+        await send('after compaction', true)
+        check(await page.evaluate<string>(`${T}.compactionQueue.map(q => q.text).join('|')`) === 'after compaction', 'a message typed while pi compacts is held, as its TUI holds it')
+        await until('sent once compaction ends', () => page.evaluate<boolean>(`!${T}.compacting && ${T}.compactionQueue.length === 0`), 20_000)
+        await until('it reaches the model', async () => seen().includes('after compaction'), 20_000)
+        check(JSON.stringify(llm.requests.find(r => JSON.stringify(r.messages).includes('after compaction'))?.messages.at(-1)).includes('image_url'), 'and goes in once compaction ends, with its image')
 
         console.log('\nall queue checks passed')
     }

@@ -16,6 +16,7 @@ import {
 	type DialogAnswer,
 	type DialogRequest,
 } from "pi-capabilities/protocol";
+import { thinkingLevels } from "pi-capabilities/lib/thinking.ts";
 
 // Lets the Filo desktop app join this terminal pi instead of starting a second one on the same session
 // file (two processes appending to one file fork the conversation). It listens on a unix socket next
@@ -28,7 +29,6 @@ import {
 // Built on the extension API, so some RPC commands have no equivalent here (fork, queue editing);
 // they answer with an error and the app keeps those for its own pi.
 
-const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 /** Unix socket paths are limited (104 bytes on macOS); a longer agent dir goes without a bridge. */
 const MAX_SOCKET_PATH = 100;
 
@@ -72,17 +72,6 @@ export function replayMessage(message: any): Json[] {
 		}
 	});
 	return out;
-}
-
-/** pi-ai's getSupportedThinkingLevels (not importable from here: pi-cc-tui does not depend on pi-ai). */
-function thinkingLevels(model: any): string[] {
-	if (!model) return THINKING_LEVELS;
-	if (!model.reasoning) return ["off"];
-	return THINKING_LEVELS.filter((level) => {
-		const mapped = model.thinkingLevelMap?.[level];
-		if (mapped === null) return false;
-		return level === "xhigh" || level === "max" ? mapped !== undefined : true;
-	});
 }
 
 /** pi's get_session_stats, from the session file this process writes. */

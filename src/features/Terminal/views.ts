@@ -253,7 +253,7 @@ export function viewOf(id: string): TermView {
 }
 
 export function existingView(id: string): TermView | undefined {
-    return views.get(id)
+    return views.get(id) ?? agentViews.get(id)
 }
 
 /** Drops the views of terminals that ended or whose project left this window. */

@@ -29,7 +29,7 @@ export interface GuiCommands {
     reviewApply: 'gui-review-apply'
     /** `/gui-review-cancel` */
     reviewCancel: 'gui-review-cancel'
-    /** `/gui-rewind <entryId>`: back to before that user prompt, in the same session (extensions/rewind.ts, always loaded). */
+    /** `/gui-rewind <entryId>`: back to before that user prompt, in the same session (extensions/builtins.ts, always loaded). */
     rewind: 'gui-rewind'
     /** `/gui-autopilot on|off`: the supervisor answers for the user in this thread. */
     autopilot: 'gui-autopilot'

@@ -25,19 +25,27 @@ const RequestForm = observer(function RequestForm({ request, onRespond }: { requ
     }
 
     if (request.method === 'select') {
+        const options = request.options ?? []
+        // A few short choices read as a row; a long list (pi's /tree, /fork, /model) as a scrolling column.
+        const list = options.length > 6 || options.some(o => o.length > 40)
         return (
-            <div role="group" aria-label={request.title || tr('选择', 'Choose')} onKeyDown={onKeyDown} className="flex flex-wrap items-center gap-1.5">
-                {(request.options ?? []).map(option => (
-                    <button
-                        key={option}
-                        type="button"
-                        onClick={() => onRespond({ value: option })}
-                        className="inline-flex min-h-8 max-w-full items-center rounded-[6px] bg-[var(--jb-fill)] px-3 py-1 text-left text-[13px] text-gray-900 outline-none transition-colors hover:bg-[var(--jb-fill-hover)] focus-visible:ring-2 focus-visible:ring-ide-accent/50 [overflow-wrap:anywhere]"
-                    >
-                        {option}
-                    </button>
-                ))}
-                <Button type="button" variant="ghost" onClick={cancel}>{tr('取消', 'Cancel')}</Button>
+            <div role="group" aria-label={request.title || tr('选择', 'Choose')} onKeyDown={onKeyDown} className={list ? 'flex flex-col gap-1.5' : 'flex flex-wrap items-center gap-1.5'}>
+                <div className={list ? 'flex max-h-72 max-w-3xl flex-col gap-0.5 overflow-y-auto' : 'contents'}>
+                    {options.map(option => (
+                        <button
+                            key={option}
+                            type="button"
+                            onClick={() => onRespond({ value: option })}
+                            className={cn(
+                                'text-left text-[13px] text-gray-900 outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ide-accent/50 [overflow-wrap:anywhere]',
+                                list ? 'shrink-0 truncate rounded-md px-2.5 py-1 hover:bg-ide-hover' : 'inline-flex min-h-8 max-w-full items-center rounded-[6px] bg-[var(--jb-fill)] px-3 py-1 hover:bg-[var(--jb-fill-hover)]',
+                            )}
+                        >
+                            {option}
+                        </button>
+                    ))}
+                </div>
+                <Button type="button" variant="ghost" className={list ? 'self-start' : undefined} onClick={cancel}>{tr('取消', 'Cancel')}</Button>
             </div>
         )
     }

@@ -1,10 +1,10 @@
 import { existsSync } from 'node:fs'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import process from 'node:process'
 import { describe, expect, it } from 'vitest'
-import { globalCompaction, migrateCapabilities, oldCapabilityChoice, patchCompaction, piSettingsOf, piSettingsState, readCapabilities, readGlobalCompaction, resolveCompaction, setCapabilities, setGlobalCompaction, watchSettings } from './piSettings'
+import { globalCompaction, patchCompaction, piDefaults, piSettingsOf, piSettingsState, readCapabilities, readGlobalCompaction, resolveCompaction, setCapabilities, setDefaultModel, setDefaultThinkingLevel, setGlobalCompaction, watchSettings } from './piSettings'
 
 describe('resolveCompaction', () => {
     it('prefers the model override, then the ordinary setting, then the default', () => {
@@ -99,6 +99,30 @@ async function inAgentDir(body: (dir: string, file: string) => Promise<void>) {
 
 const FULL = ['todo', 'ask', 'approval', 'plan', 'subagent', 'review', 'autopilot', 'budget', 'terminal']
 
+describe('new-session defaults', () => {
+    it('reads them as pi merges them for a project, and writes them as its TUI saves them', () => inAgentDir(async (dir, file) => {
+        const project = path.join(dir, 'project')
+        expect(await piDefaults(project)).toEqual({ model: undefined, thinkingLevel: 'medium' })
+
+        await writeFile(file, JSON.stringify({ theme: 'dark', defaultProvider: 'a', defaultModel: 'one', enabledModels: ['a/one', 'b/*'] }))
+        await mkdir(path.join(project, '.pi'), { recursive: true })
+        await writeFile(path.join(project, '.pi', 'settings.json'), JSON.stringify({ defaultModel: 'two', defaultThinkingLevel: 'high' }))
+        expect(await piDefaults(project)).toEqual({ model: 'a/two', thinkingLevel: 'high' })
+        expect(await piDefaults('relative')).toEqual({ model: 'a/one', thinkingLevel: 'medium' })
+
+        // A model the scope does not name joins it; one it names leaves it as it is.
+        await setDefaultModel(project, 'c', 'three')
+        expect(JSON.parse(await readFile(file, 'utf8'))).toEqual({ theme: 'dark', defaultProvider: 'c', defaultModel: 'three', enabledModels: ['a/one', 'b/*', 'c/three'] })
+        await setDefaultModel(project, 'A', 'ONE')
+        expect(JSON.parse(await readFile(file, 'utf8')).enabledModels).toEqual(['a/one', 'b/*', 'c/three'])
+
+        await setDefaultThinkingLevel('low')
+        expect(JSON.parse(await readFile(file, 'utf8')).defaultThinkingLevel).toBe('low')
+        await expect(setDefaultThinkingLevel('huge')).rejects.toThrow()
+        await expect(setDefaultModel(project, '', 'x')).rejects.toThrow()
+    }))
+})
+
 describe('capability settings', () => {
     it('nothing saved (no file, no key, a broken key) is the full preset in auto mode', async () => {
         await inAgentDir(async (_dir, file) => {
@@ -123,31 +147,6 @@ describe('capability settings', () => {
             expect(await readCapabilities()).toEqual({ ids: ['todo', 'plan'], approvalMode: 'edits', budget: 5, saved: true })
             await setCapabilities({ budget: 2.5 })
             expect(await readCapabilities()).toMatchObject({ ids: ['todo', 'plan'], budget: 2.5 })
-        })
-    })
-
-    it('reads an older state.json\'s choice, per-project maps included', () => {
-        expect(oldCapabilityChoice({})).toBeUndefined()
-        expect(oldCapabilityChoice({ capabilities: 'standard' })).toEqual({ enabled: 'standard', approvalMode: 'auto' })
-        // A list from before presets were saved by id is the preset it was.
-        expect(oldCapabilityChoice({ capabilities: ['todo', 'ask', 'approval', 'plan'] })).toEqual({ enabled: 'standard', approvalMode: 'auto' })
-        expect(oldCapabilityChoice({ capabilities: ['plan', 'todo'], approvalMode: 'ask' })).toEqual({ enabled: ['todo', 'plan'], approvalMode: 'ask' })
-        const old = { capabilities: { '/a': ['todo'], '/b': [] }, approvalModes: { '/a': 'edits', '/b': 'ask' } }
-        expect(oldCapabilityChoice({ ...old, activeProject: '/a' })).toEqual({ enabled: ['todo'], approvalMode: 'edits' })
-        expect(oldCapabilityChoice({ ...old, activeProject: '/c' })).toEqual({ enabled: 'lean', approvalMode: 'ask' })
-        expect(oldCapabilityChoice({ approvalMode: 'bogus' })).toEqual({ enabled: 'full', approvalMode: 'auto' })
-    })
-
-    it('moves the old choice once, and never over one already in settings.json', async () => {
-        await inAgentDir(async (_dir, file) => {
-            await migrateCapabilities({})
-            expect(existsSync(file)).toBe(false)
-            await migrateCapabilities({ capabilities: 'standard', approvalMode: 'edits' })
-            expect(await readCapabilities()).toMatchObject({ preset: 'standard', approvalMode: 'edits', saved: true })
-            // pi-cc-tui (or this app on another Mac) chose since: that choice stays.
-            await setCapabilities({ enabled: 'lean' })
-            await migrateCapabilities({ capabilities: 'standard', approvalMode: 'edits' })
-            expect(await readCapabilities()).toMatchObject({ preset: 'lean', approvalMode: 'edits' })
         })
     })
 })

@@ -28,8 +28,8 @@ export interface AcpAgentSpec {
      * like Codex and Claude Code need an ACP adapter on top of it; `dirs` are extra folders to look in.
      */
     cli?: { bin: string, env: string, dirs?: string[] }
-    /** An API key the agent takes from pi's auth.json (Providers) when the environment has none. */
-    apiKey?: { provider: string, env: string }
+    /** The variable the agent reads an API key from; set (by the user, or routing's gateway), a sign-in request picks the API-key method. */
+    apiKeyEnv?: string
     /** What to do when the agent says it is not signed in. */
     signIn: { zh: string, en: string }
     /**
@@ -109,10 +109,10 @@ export const ACP_AGENTS: readonly AcpAgentSpec[] = [
         bin: 'gemini',
         args: ['--acp'],
         npm: '@google/gemini-cli@0.63.0',
-        apiKey: { provider: 'google', env: 'GEMINI_API_KEY' },
+        apiKeyEnv: 'GEMINI_API_KEY',
         inputIncludesCache: true,
         lateHistory: true,
-        signIn: { zh: '在终端里运行 gemini 登录，或在 设置 → 供应商 里填 Google 的 API key', en: 'run gemini in a terminal and sign in, or enter a Google API key in Settings → Providers' },
+        signIn: { zh: '在终端里运行 gemini 登录', en: 'run gemini in a terminal and sign in' },
     },
     {
         id: 'copilot',
@@ -216,6 +216,8 @@ export interface AgentFeatures {
     configOptions: boolean
     /** Fork the whole session into a new thread (ACP session/fork). */
     forkSession: boolean
+    /** Name the session, in the agent's own history. */
+    rename: boolean
     images: boolean
 }
 
@@ -228,6 +230,7 @@ export function agentFeatures(kind: AgentKind, caps?: AcpAgentCaps, commands: re
         autoCompaction: pi,
         fork: pi || !!caps?.forkAt,
         forkSession: !pi && !!caps?.fork,
+        rename: pi || !!caps?.rename,
         images: pi || caps?.images !== false,
         piPickers: pi,
         configOptions: !pi,
@@ -247,6 +250,8 @@ export interface AcpAgentCaps {
     delete: boolean
     /** session/list. */
     list: boolean
+    /** The agent keeps a name the user gives the session (Grok x.ai/session/rename, Codex thread/name/set, Claude /rename). */
+    rename: boolean
     /**
      * Grok Build's `x.ai/…` extensions (initialize `_meta.grokShell`): steering is `x.ai/interject`,
      * fork / delete / rename are `x.ai/session/…`, and it asks the client questions and plan approvals.
@@ -274,6 +279,7 @@ export function acpCaps(init: any): AcpAgentCaps {
         fork: xai || !!session.fork,
         delete: xai || !!session.delete,
         list: !!session.list,
+        rename: xai,
         xai,
     }
 }

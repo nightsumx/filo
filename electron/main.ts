@@ -22,10 +22,11 @@ import { BACKGROUND, reveal } from './background'
 import { applySave, savedWindows, StateFile } from './appState'
 import { repoEdits } from './edits'
 import { FolderWatch, listDir, readText, writeText } from './files'
-import { gitBranch, gitCommit, gitDiscard, gitFileBytes, gitFileDiff, gitFileEntries, gitFileThumbs, gitStatus } from './git'
+import { applyWorktree, createWorktree, gitBranch, gitCommit, gitDiscard, gitFileBytes, gitFileDiff, gitFileEntries, gitFileThumbs, gitStatus, removeWorktree, threadTask, worktreeParent } from './git'
 import { mainLang, setMainLang, tr } from './i18n'
 import { installPackage, WEB_ACCESS } from './piPackages'
-import { agentDir, compactionInfo, globalCompaction, migrateCapabilities, piSettingsState, setCacheWarming, setCapabilities, setDefaultModel, setGlobalCompaction, setWebAccess, watchSettings } from './piSettings'
+import { listSkills, shareSkills } from './skills'
+import { agentDir, compactionInfo, globalCompaction, piDefaults, piSettingsState, setCacheWarming, setCapabilities, setDefaultModel, setDefaultThinkingLevel, setGlobalCompaction, setWebAccess, watchSettings } from './piSettings'
 import { ChannelTests } from './channelTests'
 import { priceList, readPricesFrom, refreshPrices } from './prices'
 import { endpointSaveOf, helperLaunch, ProviderHelper, ProviderService } from './providers'
@@ -540,9 +541,14 @@ function registerIpc() {
         await setCacheWarming(mode)
         return piSettingsState()
     })
-    ipcMain.handle(IPC.setDefaultModel, async (_e, provider: unknown, model: unknown) => {
-        await setDefaultModel(provider, model)
-        return piSettingsState()
+    ipcMain.handle(IPC.piDefaults, (_e, cwd: unknown) => piDefaults(cwd))
+    ipcMain.handle(IPC.setDefaultModel, async (_e, cwd: unknown, provider: unknown, model: unknown) => {
+        await setDefaultModel(cwd, provider, model)
+        return piDefaults(cwd)
+    })
+    ipcMain.handle(IPC.setDefaultThinkingLevel, async (_e, cwd: unknown, level: unknown) => {
+        await setDefaultThinkingLevel(level)
+        return piDefaults(cwd)
     })
     ipcMain.handle(IPC.gitStatus, (_e, cwd: string) => gitStatus(cwd))
     ipcMain.handle(IPC.gitBranches, async (_e, cwds: unknown) => {
@@ -563,6 +569,18 @@ function registerIpc() {
     })
     ipcMain.handle(IPC.gitCommit, (_e, cwd: unknown, message: unknown, paths: unknown) =>
         gitCommit(absolutePath(cwd), typeof message === 'string' ? message : '', Array.isArray(paths) ? paths : []))
+    ipcMain.handle(IPC.skills, () => listSkills())
+    ipcMain.handle(IPC.shareSkills, (_e, names: unknown) => shareSkills(Array.isArray(names) ? names.filter(n => typeof n === 'string') : []))
+    ipcMain.handle(IPC.worktreeParents, async (_e, cwds: unknown) => {
+        const list = cwdList(cwds).slice(0, 500)
+        const parents = await Promise.all(list.map(worktreeParent))
+        return Object.fromEntries(list.flatMap((cwd, i) => parents[i] ? [[cwd, parents[i]]] : []))
+    })
+    ipcMain.handle(IPC.createWorktree, (_e, cwd: unknown) => createWorktree(absolutePath(cwd)))
+    ipcMain.handle(IPC.applyWorktree, (_e, cwd: unknown) => applyWorktree(absolutePath(cwd)))
+    ipcMain.handle(IPC.removeWorktree, (_e, cwd: unknown) => removeWorktree(absolutePath(cwd)))
+    ipcMain.handle(IPC.threadTask, (_e, cwd: unknown, messages: unknown, kind: unknown, from: unknown) =>
+        threadTask(absolutePath(cwd), Array.isArray(messages) ? messages : [], kind === 'handoff' ? 'handoff' : 'review', String(from ?? '')))
 
     ipcMain.handle(IPC.setTheme, (_e, theme: unknown) => applyTheme(theme))
     ipcMain.handle(IPC.setLang, (_e, lang: unknown) => applyLang(lang))
@@ -714,8 +732,6 @@ app.whenReady().then(async () => {
     if (!app.isPackaged && !BACKGROUND)
         windowPlatform.devIcon(path.join(__dirname, '../../build/icon.png'))
     applyLang(state.lang)
-    // Before any window reads it: the capability choice moves from state.json into pi's settings.json.
-    await migrateCapabilities(state).catch(error => console.error('capability settings:', error))
     void piSettingsState().then(settings => cacheWarming = settings.cacheWarming, () => {})
     watchSettings((settings) => {
         cacheWarming = settings.cacheWarming

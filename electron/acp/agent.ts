@@ -159,7 +159,7 @@ export class AcpAgent implements AgentAdapter {
     private hasApiKey: boolean
 
     constructor(readonly spec: AcpAgentSpec, launch: AcpLaunch, private options: AgentAdapterOptions, private callbacks: AgentAdapterCallbacks) {
-        this.hasApiKey = !!(spec.apiKey && launch.env[spec.apiKey.env])
+        this.hasApiKey = !!(spec.apiKeyEnv && launch.env[spec.apiKeyEnv])
         this.transcript = new AcpTranscript('', { model: () => this.modelStamp(), inputIncludesCache: spec.inputIncludesCache, now: () => (this.loading ? this.clock ?? options.replayTime ?? Date.now() : Date.now()) })
         this.child = spawn(launch.file, launch.args, { cwd: options.cwd, env: launch.env, stdio: ['pipe', 'pipe', 'pipe'], windowsVerbatimArguments: launch.windowsVerbatimArguments })
         this.connection = new AcpConnection(this.child.stdin, this.child.stdout, {
@@ -834,13 +834,12 @@ export class AcpAgent implements AgentAdapter {
                     await this.setConfig(String(command.configId ?? ''), String(command.value ?? ''))
                     return ok({ configOptions: this.configOptions })
                 case 'set_session_name': {
-                    // The app keeps the name in its session index; Grok Build also titles its own history.
-                    const name = String(command.name ?? '')
-                    this.callbacks.onSession?.(this, { name })
-                    if (this.caps.xai) {
-                        await this.connection.request('_x.ai/session/rename', { sessionId: this.sessionId, cwd: this.sessionCwd || this.options.cwd, ...(name.trim() ? { title: name.trim() } : { resetToAuto: true }) })
-                            .catch(error => console.warn(`[acp] ${this.spec.label} rename failed:`, error?.message ?? error))
-                    }
+                    if (!this.caps.rename)
+                        throw new Error(tr(`${this.spec.label} 不能给会话命名`, `${this.spec.label} cannot name sessions`))
+                    const name = String(command.name ?? '').trim()
+                    await this.connection.request('_x.ai/session/rename', { sessionId: this.sessionId, cwd: this.sessionCwd || this.options.cwd, ...(name ? { title: name } : { resetToAuto: true }) })
+                    if (name)
+                        this.callbacks.onSession?.(this, { title: name })
                     return ok()
                 }
                 default:

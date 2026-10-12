@@ -5,15 +5,19 @@
 import type { ReviewDetails, ReviewIssue, ReviewRecheck, ReviewSeverity } from '@shared/capabilities'
 import type { Thread } from '@/store/thread'
 import type { Localized } from '@shared/i18n'
+import { AgentIcon } from '@/components/AgentIcon'
 import { Markdown } from '@/components/Markdown'
 import { Button } from '@/components/ui/button'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { flatFieldClass } from '@/components/ui/form'
 import { tr } from '@/lib/i18n'
 import { useT } from '@/lib/transcriptText'
 import { cn, formatCost } from '@/lib/utils'
 import { ChevronRight } from 'lucide-react'
 import { observer } from 'mobx-react-lite'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { agentsStore } from '@/store/agents'
+import { appStore } from '@/store/app'
 import { useThread } from '../ThreadContext'
 import { Gutter, Spinner, StatusMark, useNow } from '../ToolRow'
 import { useViewState } from '../viewState'
@@ -234,11 +238,16 @@ export const ReviewStep = observer(({ id, report, applied }: { id: string, repor
     )
 })
 
-/** Review in a finished turn's footer; while one runs, its progress and Stop instead. */
-export const ReviewControl = observer(({ thread, turnKey }: { thread: Thread, turnKey: string }) => {
+/**
+ * Review in a finished turn's footer: pi's review (a separate pi, with evidence) or a new thread of
+ * another agent. While pi's runs, its progress and Stop instead. In another agent's review thread, its
+ * report goes back to the reviewed thread.
+ */
+export const ReviewControl = observer(({ thread, turnKey, finalText }: { thread: Thread, turnKey: string, finalText?: string }) => {
     const progress = thread.reviewProgress
     const now = useNow(!!progress)
-    if (!thread.reviewAvailable || thread.reviewTurnKey !== turnKey)
+    useEffect(() => agentsStore.ensure(), [])
+    if (thread.reviewTurnKey !== turnKey)
         return null
     if (progress) {
         return (
@@ -259,17 +268,45 @@ export const ReviewControl = observer(({ thread, turnKey }: { thread: Thread, tu
     }
     if (thread.running)
         return null
+    const author = thread.reviewOf ? appStore.threads.get(thread.reviewOf) : undefined
+    const footerBtn = 'rounded-[4px] px-1.5 text-gray-500 outline-none hover:bg-black/[0.04] hover:text-gray-800 data-[state=open]:bg-black/[0.06]'
+    if (author && finalText) {
+        return (
+            <span className="flex h-6 min-w-0 items-center gap-1">
+                <span className="text-gray-400">·</span>
+                <button type="button" onClick={() => appStore.sendReviewBack(thread, finalText)} title={tr('把这份报告放进被审查线程的输入框，删减后再发', 'Put this report in the reviewed thread\'s composer, to trim and send')} className={cn(footerBtn, 'min-w-0 truncate')}>
+                    {tr(`发回「${author.title}」`, `Send back to "${author.title}"`)}
+                </button>
+            </span>
+        )
+    }
+    const reviewers = [{ id: 'pi' as const, label: 'pi' }, ...agentsStore.list.filter(a => a.available)]
     return (
         <span className="flex h-6 items-center gap-1">
             <span className="text-gray-400">·</span>
-            <button
-                type="button"
-                onClick={() => void thread.startReview()}
-                title={tr('让一个独立的 pi 进程只读审查这些改动，跑命令取证', 'Have a separate pi process audit these changes read-only, running commands for evidence')}
-                className="rounded-[4px] px-1.5 text-gray-500 hover:bg-black/[0.04] hover:text-gray-800"
-            >
-                Review
-            </button>
+            <DropdownMenu>
+                <DropdownMenuTrigger className={footerBtn}>Review</DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="w-80">
+                    <DropdownMenuLabel>{tr('谁来审查这些改动', 'Who reviews these changes')}</DropdownMenuLabel>
+                    {reviewers.map(agent => (
+                        <DropdownMenuItem
+                            key={agent.id}
+                            onSelect={() => void (agent.id === 'pi' && thread.reviewAvailable ? thread.startReview() : appStore.continueWith(thread, agent.id, 'review'))}
+                            className="h-auto items-start py-1.5"
+                        >
+                            <AgentIcon agent={agent.id} className="mt-0.5" />
+                            <span className="flex min-w-0 flex-1 flex-col">
+                                <span>{agent.label}</span>
+                                <span className="text-[11.5px] text-gray-500">
+                                    {agent.id === 'pi' && thread.reviewAvailable
+                                        ? tr('独立的 pi 进程只读审查，跑命令取证', 'A separate pi process audits read-only, running commands for evidence')
+                                        : tr('在新线程里审查，报告可以发回这里', 'Reviews in a new thread; the report can come back here')}
+                                </span>
+                            </span>
+                        </DropdownMenuItem>
+                    ))}
+                </DropdownMenuContent>
+            </DropdownMenu>
         </span>
     )
 })

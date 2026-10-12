@@ -37,10 +37,10 @@ export function applySave(state: AppState, save: StateSave, owned: readonly stri
     return { state: next, changed }
 }
 
-/** Windows to open on launch. Older state had one window showing activeProject. */
+/** Windows to open on launch. */
 export function savedWindows(state: AppState): SavedWindow[] {
     if (!Array.isArray(state.windows))
-        return state.activeProject ? [{ projects: [state.activeProject], active: state.activeProject }] : []
+        return []
     const windows: SavedWindow[] = []
     // A session is a tab in one window only: the first window listing it keeps it.
     const taken = new Set<string>()

@@ -56,8 +56,42 @@ const queuesInput = (thread: Thread) => thread.agent !== 'pi' && !thread.state?.
 
 /** pi's key for taking the queue back into the editor (app.message.dequeue). */
 const dequeueKeys = os === 'windows' ? 'Alt+Q' : keys('⌥↑')
+const followUpKeys = keys('⌥↩')
+
+/** pi's editor commands (core/slash-commands.ts in pi 1.0.4). RPC neither lists nor runs them; extensions/builtins.ts serves the session ones as extension commands. */
+const PI_BUILTINS = ['settings', 'model', 'tree', 'thinking', 'scoped-models', 'export', 'import', 'share', 'bug', 'copy', 'name', 'session', 'changelog', 'hotkeys', 'fork', 'clone', 'trust', 'login', 'logout', 'new', 'compact', 'resume', 'reload', 'quit']
+
+/** pi's editor commands whose GUI is the app's own: a tab, the search, Settings, the clipboard. */
+const APP_COMMANDS: { name: string, description: Localized, run: (thread: Thread) => Promise<unknown> | void }[] = [
+    { name: 'new', description: { zh: '新线程', en: 'New thread' }, run: thread => appStore.newThread(thread.cwd) },
+    { name: 'resume', description: { zh: '打开别的会话（搜索）', en: 'Open another session (search)' }, run: () => appStore.setSearchOpen(true) },
+    { name: 'settings', description: { zh: '打开设置', en: 'Open Settings' }, run: () => appStore.openSettings('appearance') },
+    { name: 'login', description: { zh: '登录供应商（设置 → 供应商）', en: 'Sign in to a provider (Settings → Providers)' }, run: () => appStore.openSettings('providers') },
+    { name: 'logout', description: { zh: '退出供应商（设置 → 供应商）', en: 'Sign out of a provider (Settings → Providers)' }, run: () => appStore.openSettings('providers') },
+    {
+        name: 'copy',
+        description: { zh: '复制最后一条回答', en: 'Copy the last answer' },
+        run: async (thread) => {
+            const { data } = await thread.request<{ text?: string }>({ type: 'get_last_assistant_text' })
+            if (!data?.text)
+                return toast(tr('还没有回答', 'No answer yet'))
+            await navigator.clipboard.writeText(data.text)
+            toast.success(tr('已复制最后一条回答', 'Copied the last answer'))
+        },
+    },
+    {
+        name: 'export',
+        description: { zh: '导出会话为 HTML', en: 'Export the session as HTML' },
+        run: async (thread) => {
+            const { data } = await thread.request<{ path: string }>({ type: 'export_html' })
+            if (data)
+                void window.pi.revealPath(data.path)
+        },
+    },
+]
 
 const SOURCE_LABEL: Record<SlashCommand['source'], Localized> = {
+    builtin: { zh: '内置', en: 'built-in' },
     extension: { zh: '扩展', en: 'extension' },
     prompt: { zh: '模板', en: 'prompt' },
     skill: { zh: '技能', en: 'skill' },
@@ -85,7 +119,7 @@ const SlashMenu = observer(function SlashMenu({ commands, active, onPick }: { co
                 >
                     <span className="font-mono text-[12.5px] text-gray-900">{`/${c.name}`}</span>
                     <span className="min-w-0 flex-1 truncate text-gray-500">{c.description}</span>
-                    <span className="shrink-0 text-[11px] text-gray-400">{SOURCE_LABEL[c.source] ? tr(SOURCE_LABEL[c.source]) : c.source}</span>
+                    <span className="shrink-0 text-[11px] text-gray-400">{tr(SOURCE_LABEL[PI_BUILTINS.includes(c.name) && c.source === 'extension' ? 'builtin' : c.source] ?? { zh: c.source, en: c.source })}</span>
                 </button>
             ))}
         </div>
@@ -134,10 +168,11 @@ const ComposerEditor = observer(({ thread }: { thread: Thread }) => {
     const [slashIndex, setSlashIndex] = useState(0)
     const [slashDismissed, setSlashDismissed] = useState(false)
 
+    const appCommands: SlashCommand[] = thread.agent === 'pi' ? APP_COMMANDS.map(c => ({ name: c.name, description: tr(c.description), source: 'builtin' })) : []
     const slashQuery = /^\/(\S*)$/.exec(thread.draft)?.[1]
     const slashMatches = slashQuery == null || slashDismissed
         ? []
-        : thread.commands.filter(c => c.name.toLowerCase().includes(slashQuery.toLowerCase())).slice(0, 50)
+        : [...appCommands, ...thread.commands].filter(c => c.name.toLowerCase().includes(slashQuery.toLowerCase())).slice(0, 50)
 
     useEffect(() => {
         setSlashIndex(0)
@@ -169,12 +204,27 @@ const ComposerEditor = observer(({ thread }: { thread: Thread }) => {
     const canSend = hasInput && !installing
     const agent = thread.agentLabel
     const queued = [
-        ...thread.queue.steering.map(text => ({ kind: 'steering' as const, text })),
-        ...thread.queue.followUp.map(text => ({ kind: 'followUp' as const, text })),
+        ...thread.queue.steering.map(text => ({ text, back: thread.unqueueable('steering'), held: false })),
+        ...thread.queue.followUp.map(text => ({ text, back: thread.unqueueable('followUp'), held: false })),
+        ...thread.compactionQueue.map(q => ({ text: q.text, back: true, held: true })),
     ]
     const widgetsAbove = Object.entries(thread.widgets).filter(([, w]) => w.placement === 'aboveEditor')
     const widgetsBelow = Object.entries(thread.widgets).filter(([, w]) => w.placement === 'belowEditor')
     const statuses = thread.visibleStatuses
+
+    // pi's editor commands never go to pi as text: the app runs its own, and the rest exist only in the terminal.
+    const submit = (mode: 'steer' | 'followUp') => {
+        const text = thread.draft.trim()
+        const space = text.indexOf(' ')
+        const name = text.startsWith('/') ? text.slice(1, space < 0 ? undefined : space) : ''
+        if (thread.agent !== 'pi' || !PI_BUILTINS.includes(name) || thread.commands.some(c => c.name === name))
+            return void thread.send(mode)
+        const app = APP_COMMANDS.find(c => c.name === name)
+        if (!app)
+            return void toast(tr(`/${name} 只在终端里的 pi 可用`, `/${name} is only in pi in a terminal`))
+        thread.draft = ''
+        void Promise.resolve(app.run(thread)).catch((error: any) => toast.error(error.message))
+    }
 
     const pickCommand = (c: SlashCommand) => {
         thread.draft = `/${c.name} `
@@ -206,8 +256,9 @@ const ComposerEditor = observer(({ thread }: { thread: Thread }) => {
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault()
             setSlashDismissed(false)
+            // pi's app.message.followUp: Alt+Enter.
             if (canSend)
-                void thread.send()
+                submit(e.altKey ? 'followUp' : 'steer')
             return
         }
         if (e.key === 'Escape' && thread.running) {
@@ -216,7 +267,7 @@ const ComposerEditor = observer(({ thread }: { thread: Thread }) => {
             return
         }
         // pi's app.message.dequeue: Alt+Up, Alt+Q on Windows.
-        if (e.altKey && (os === 'windows' ? e.code === 'KeyQ' : e.key === 'ArrowUp') && queued.some(q => thread.unqueueable(q.kind))) {
+        if (e.altKey && (os === 'windows' ? e.code === 'KeyQ' : e.key === 'ArrowUp') && queued.some(q => q.back)) {
             e.preventDefault()
             void thread.dequeueAll()
         }
@@ -249,16 +300,16 @@ const ComposerEditor = observer(({ thread }: { thread: Thread }) => {
             <CacheNotice thread={thread} />
             {queued.length > 0 && (
                 <div className="mb-2 flex flex-col gap-1">
-                    {queued.map(({ kind, text }, i) => (
+                    {queued.map(({ text, back, held }, i) => (
                         <div key={i} className="group flex items-center gap-2 rounded-md bg-ide-sel py-1 pr-1 pl-2.5 text-[12px] text-gray-800">
-                            <span className="shrink-0 font-medium">{tr('排队中', 'Queued')}</span>
+                            <span className="shrink-0 font-medium">{held ? tr('压缩后发送', 'After compaction') : tr('排队中', 'Queued')}</span>
                             <span className="min-w-0 flex-1 truncate">{text}</span>
-                            {thread.unqueueable(kind) && (
+                            {back && (
                                 <button
                                     type="button"
-                                    title={tr(`撤回到输入框（${dequeueKeys} 撤回全部）`, `Back to the editor (${dequeueKeys} takes back all)`)}
-                                    aria-label={tr('撤回这条排队消息', 'Take back this queued message')}
-                                    onClick={() => void thread.dequeue(kind, text)}
+                                    title={tr(`全部撤回到输入框（${dequeueKeys}）`, `All back to the editor (${dequeueKeys})`)}
+                                    aria-label={tr('撤回排队消息', 'Take back the queued messages')}
+                                    onClick={() => void thread.dequeueAll()}
                                     className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-gray-500 opacity-0 hover:bg-ide-hover hover:text-gray-900 focus-visible:opacity-100 group-hover:opacity-100"
                                 >
                                     <Undo2 size={13} />
@@ -302,7 +353,7 @@ const ComposerEditor = observer(({ thread }: { thread: Thread }) => {
                         value={thread.draft}
                         rows={2}
                         aria-label={tr(`给 ${agent} 发消息`, `Message ${agent}`)}
-                        placeholder={installing ? tr(`正在安装 ${installing}，装好后就能发送`, `Installing ${installing}; you can send once it is ready`) : thread.running ? (queuesInput(thread) ? tr(`继续输入，${agent} 这轮结束后接着发送（Esc 中断）`, `Type a follow-up; ${agent} gets it after this run (Esc to stop)`) : tr(`继续输入以引导 ${agent}（Esc 中断）`, `Type to steer ${agent} (Esc to stop)`)) : thread.planMode ? tr(`描述要做的事，${agent} 先写出计划给你审阅`, `Describe the task; ${agent} writes a plan for you to review first`) : tr(`让 ${agent} 做点什么，输入 / 查看命令`, `Ask ${agent} to do something, or type / for commands`)}
+                        placeholder={installing ? tr(`正在安装 ${installing}，装好后就能发送`, `Installing ${installing}; you can send once it is ready`) : thread.running ? (queuesInput(thread) ? tr(`继续输入，${agent} 这轮结束后接着发送（Esc 中断）`, `Type a follow-up; ${agent} gets it after this run (Esc to stop)`) : tr(`继续输入以引导 ${agent}，${followUpKeys} 排到这轮之后（Esc 中断）`, `Type to steer ${agent}, ${followUpKeys} to queue after this run (Esc to stop)`)) : thread.planMode ? tr(`描述要做的事，${agent} 先写出计划给你审阅`, `Describe the task; ${agent} writes a plan for you to review first`) : tr(`让 ${agent} 做点什么，输入 / 查看命令`, `Ask ${agent} to do something, or type / for commands`)}
                         onChange={(e) => {
                             thread.draft = e.target.value
                             setSlashDismissed(false)
@@ -364,7 +415,7 @@ const ComposerEditor = observer(({ thread }: { thread: Thread }) => {
                                         type="button"
                                         aria-label={thread.running ? tr('发送引导消息', 'Send steering message') : tr('发送', 'Send')}
                                         disabled={!canSend}
-                                        onClick={() => void thread.send()}
+                                        onClick={() => submit('steer')}
                                         title={installing ? tr(`正在安装 ${installing}…`, `Installing ${installing}…`) : tr('发送（Enter）', 'Send (Enter)')}
                                         className="ml-1 flex h-7 w-7 items-center justify-center rounded-md bg-ide-accent text-always-white hover:bg-ide-accent-hover disabled:bg-gray-100 disabled:text-gray-400"
                                     >

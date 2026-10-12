@@ -8,6 +8,9 @@
 //   - the session is listed, and a reopened tab replays it and resumes it
 //   - hooks turned off in the user's settings: the thread shows the TUI and says why, follows the
 //     session file still, and one click turns them on for Filo's threads
+//   - switching between the chat and the TUI, idle, mid-stream, with a dialog up, with a line typed
+//     in the TUI: the view moves only when the user or a dialog the GUI cannot show moves it, the
+//     terminal keeps the pane's size, focus follows the click, cards and prompts stay in step
 //
 //   bun run build && bun run e2e:claude-tui
 import type { AddressInfo } from 'node:net'
@@ -50,6 +53,12 @@ function reply(body: any): any[] {
         }
         const text = textOf(m)
         const n = requests.length
+        if (text.includes('BASHSLOW'))
+            return [{ type: 'tool_use', id: `toolu_bash_${n}`, name: 'Bash', input: { command: 'sleep 4 && touch slept.txt && echo slept', description: 'Wait a while' } }]
+        if (text.includes('ASK2')) {
+            const question = (q: string, header: string, a: string, b: string) => ({ question: q, header, multiSelect: false, options: [{ label: a, description: a }, { label: b, description: b }] })
+            return [{ type: 'tool_use', id: `toolu_ask_${n}`, name: 'AskUserQuestion', input: { questions: [question('Pick a colour?', 'Colour', 'Red', 'Blue'), question('Pick a size?', 'Size', 'Small', 'Large')] } }]
+        }
         if (/\bBASH\b/.test(text))
             return [{ type: 'text', text: 'Making the marker.' }, { type: 'tool_use', id: `toolu_bash_${n}`, name: 'Bash', input: { command: 'touch marker.txt && echo made', description: 'Make the marker' } }]
         if (/\bASK\b/.test(text))
@@ -262,6 +271,135 @@ async function main() {
         await send('again')
         await settled('the resumed answer', 'Hello from the fake model: again')
         check(await js<string>(`${T}.key`) === key, 'a prompt in the reopened tab resumes the same session')
+
+        // Back and forth between the chat and the TUI, by the switch in the corner.
+        const tab = (label: 'Chat' | 'Terminal') => js(`(() => { document.querySelector('section [role=tab][title=${JSON.stringify(label)}]').click(); return true })()`)
+        const view = () => js<{ shown: boolean, reason: string, xterm: boolean, composer: boolean, focusTerm: boolean, focusComposer: boolean, cols: number, rows: number, fit?: { cols?: number, rows?: number } }>(`(() => {
+            const t = ${T}
+            const v = window.__terminalView(t.tuiTerminal)
+            const composer = document.querySelector('section textarea:not(.xterm-helper-textarea)')
+            return { shown: t.tuiShown, reason: t.tuiReason, xterm: !!document.querySelector('section .xterm'), composer: !!composer, focusTerm: !!v && v.focused, focusComposer: !!composer && document.activeElement === composer, cols: v?.term.cols ?? 0, rows: v?.term.rows ?? 0, fit: v?.fitter.proposeDimensions() }
+        })()`)
+        const shownView = (what: string, ms = 5000) => until(what, async () => {
+            const v = await view()
+            return v.shown && v.xterm ? v : undefined
+        }, ms)
+        // Claude Code draws its rules across the whole width: the last one is as wide as the PTY.
+        const ptyCols = async () => [...(await js<string>(`window.pi.terminalText(${T}.tuiTerminal, 80)`)).split('\n').filter(l => l.startsWith('───')).at(-1) ?? ''].length
+        /** Whether the TUI stayed out of view all along `run`. */
+        const neverShown = async (run: () => Promise<unknown>) => {
+            const samples: boolean[] = []
+            const sampling = setInterval(() => void view().then(v => samples.push(v.shown), () => {}), 50)
+            await run()
+            clearInterval(sampling)
+            return samples.length > 0 && !samples.includes(true)
+        }
+        const press = (data: string) => js(`(() => { window.pi.terminalWrite(${T}.tuiTerminal, ${JSON.stringify(data)}); return true })()`)
+        await startThread()
+        // Sent while the TUI is still coming up: nothing to answer there, so it stays out of view.
+        check(await neverShown(async () => {
+            await send('warm up')
+            await settled('the warm-up answer', 'Hello from the fake model: warm up')
+        }), 'a prompt sent as the TUI comes up runs without showing it')
+        await js(`(() => { document.querySelector('section textarea:not(.xterm-helper-textarea)').focus(); return true })()`)
+        for (let i = 0; i < 8; i++) {
+            await tab('Terminal')
+            const shown = await until('the TUI fitted', async () => {
+                const v = await view()
+                return v.xterm && v.cols && v.fit?.cols === v.cols && v.fit?.rows === v.rows ? v : undefined
+            }, 5000)
+            check(shown.shown && !shown.composer && shown.focusTerm, `switch ${i}: the TUI takes the pane, fitted (${shown.cols}x${shown.rows}) and focused`)
+            await until(`the PTY at ${shown.cols} columns`, async () => (await ptyCols()) === shown.cols, 5000)
+            if (SHOTS && i === 7)
+                await page.screenshot(path.join(SHOTS, 'claude-tui-switched.png'))
+            await tab('Chat')
+            const back = await until('the chat in view', async () => {
+                const v = await view()
+                return !v.xterm && v.composer ? v : undefined
+            }, 5000)
+            check(!back.shown && back.focusComposer, `switch ${i}: the chat comes back with the composer focused`)
+        }
+
+        // A line typed in the TUI holds the GUI's prompt back; erased, it does not.
+        await tab('Terminal')
+        await shownView('the TUI')
+        await press('half')
+        await sleep(200)
+        await tab('Chat')
+        await send('from the chat')
+        const draft = await shownView('the TUI for its draft')
+        check(draft.reason === 'draft' && await js<string>(`${T}.draft`) === 'from the chat', 'a line typed in the TUI: the prompt waits in the composer and the TUI shows why')
+        for (const _ of 'half')
+            await press('\x7F')
+        await sleep(300)
+        await tab('Chat')
+        await send('from the chat')
+        await settled('the answer once erased', 'Hello from the fake model: from the chat')
+        check(!(await view()).shown, 'erased in the TUI, the prompt goes in and the chat stays in view')
+
+        // Mid-stream: every switch holds, and the turn streams and ends as it would.
+        await send('SLOW toggling')
+        await until('streaming', () => js<boolean>(`${T}.running && JSON.stringify(${T}.streaming ?? null).includes('Slow line')`), 20_000)
+        let held = true
+        for (let i = 0; i < 16; i++) {
+            const label = i % 2 === 0 ? 'Terminal' : 'Chat'
+            await tab(label)
+            await sleep(150)
+            held &&= (await view()).shown === (label === 'Terminal')
+        }
+        check(held && await js<boolean>(`${T}.running`), 'mid-stream, the view goes where the user switches it and nowhere else')
+        await settled('the streamed answer', 'Slow line 39.')
+        check(!(await view()).shown, 'the turn ends in the view the user left it in')
+
+        // A permission dialog: its card holds through the switches; answered in the TUI, the card goes at once.
+        await send('BASHSLOW wait')
+        await until('the approval card', () => js<boolean>(`!!${T}.uiRequests[0]?.approval`), 30_000)
+        for (let i = 0; i < 6; i++) {
+            await tab(i % 2 === 0 ? 'Terminal' : 'Chat')
+            await sleep(150)
+        }
+        check(await js<number>(`${T}.uiRequests.length`) === 1, 'the approval card holds through the switches (one card)')
+        await tab('Terminal')
+        await sleep(300)
+        await press('1')
+        await until('the card gone', () => js<boolean>(`${T}.uiRequests.length === 0`), 3000)
+        check(await js<boolean>(`${T}.running`), 'answered in the TUI, the card goes while the command still runs')
+        await tab('Chat')
+        await settled('the slow command', 'slept')
+        await send('after the tui answer')
+        await settled('the answer after the TUI answered', 'Hello from the fake model: after the tui answer')
+        check(!(await view()).shown, 'a dialog answered with its number key is not a line in progress')
+
+        // A dialog the GUI cannot show: the TUI comes up without taking the keyboard, and no prompt
+        // from the chat goes into it as its answer.
+        const before = (await js<string[]>(`${T}.turns.map(t => t.user?.text)`)).length
+        await send('ASK2 two questions')
+        const dialog = await shownView('the TUI for the dialog', 30_000)
+        check(dialog.reason === 'dialog' && !dialog.focusTerm, 'a form only the TUI has: it shows, and keys typed elsewhere stay out of it')
+        await tab('Chat')
+        const asked = requests.length
+        await send('not an answer')
+        await sleep(1500)
+        check(requests.length === asked && await js<boolean>(`${T}.running`) && await js<string>(`${T}.draft`) === 'not an answer', 'a prompt from the chat does not answer the TUI\'s dialog')
+        await tab('Terminal')
+        await sleep(300)
+        await press('\x1B')
+        await until('the dialog dismissed', async () => !(await js<boolean>(`${T}.running`)), 30_000)
+        await tab('Chat')
+        await js(`${T}.draft = ''`)
+        check((await js<string[]>(`${T}.turns.map(t => t.user?.text)`)).length === before + 1, 'dismissed in the TUI, the turn ends')
+
+        // The TUI's own /exit: the chat comes back, and a new prompt starts it again in the chat.
+        await tab('Terminal')
+        await sleep(300)
+        await press('/exit')
+        await sleep(300)
+        await press('\r')
+        await until('claude exited', () => js<boolean>(`!${T}.tuiTerminal`), 15_000)
+        check(await neverShown(async () => {
+            await send('back again')
+            await settled('the answer after /exit', 'Hello from the fake model: back again')
+        }), 'started again by a prompt, the TUI stays out of view')
     }
     catch (error) {
         // What the thread, the TUI and the session file looked like.
@@ -269,6 +407,7 @@ async function main() {
         const js = <T = any>(expr: string) => page.evaluate<T>(expr)
         console.error('thread:', await js(`JSON.stringify({ running: window.__app.active?.running, status: window.__app.active?.agentStatus, error: window.__app.active?.agentError, turns: window.__app.active?.turns.length, tui: window.__app.active?.tuiShown, reason: window.__app.active?.tuiReason })`).catch(String))
         console.error('requests:', requests.length)
+        console.error('tui:', await js(`window.pi.terminalText(window.__app.active?.tuiTerminal, 60)`).catch(String))
         console.error('threads:', await js(`JSON.stringify([...window.__app.threads.values()].map(t => ({ key: t.key, loaded: t.loaded, prompts: t.turns.map(u => u.user?.text) })))`).catch(String))
         console.error(execFileSync('/bin/sh', ['-c', `ls -la ${JSON.stringify(path.join(config, 'projects'))}/* 2>&1; tail -c 3000 ${JSON.stringify(path.join(config, 'projects'))}/*/*.jsonl 2>&1; true`], { encoding: 'utf8' }))
         await js(`window.__app.active?.showTui(true)`).catch(() => {})

@@ -144,7 +144,6 @@ describe('capabilities', () => {
         key = launchKey(thread)
         // Only the approval mode changed: nothing to restart.
         apply(state('full', 'edits'))
-        expect(appStore.approvalMode).toBe('edits')
         expect(launchKey(thread)).toBe(key)
         // Resources pi loads at startup (a package installed in the terminal): every process.
         apply(state('full', 'edits', { fingerprint: '["npm:pi-web-access"]' }))
@@ -172,24 +171,6 @@ describe('capabilities', () => {
         expect(appStore.enabledCapabilities).toEqual([])
         await vi.waitFor(() => expect(appStore.capabilityPreset).toBe('standard'))
         error.mockRestore()
-    })
-})
-
-describe('approval mode', () => {
-    beforeEach(reset)
-    afterEach(() => vi.unstubAllGlobals())
-
-    it('is saved with the capabilities, once per change', async () => {
-        const written: any[] = []
-        vi.stubGlobal('window', { pi: { setCapabilities: async (patch: any) => {
-            written.push(patch)
-            return { fingerprint: '[]', modelOverrides: {}, capabilities: { ...resolveCapabilities('standard'), approvalMode: patch.approvalMode, saved: true } }
-        } } })
-        ;(appStore as any).approvalMode = 'auto'
-        appStore.setApprovalMode('ask')
-        appStore.setApprovalMode('ask')
-        expect(appStore.approvalMode).toBe('ask')
-        await vi.waitFor(() => expect(written).toEqual([{ approvalMode: 'ask' }]))
     })
 })
 

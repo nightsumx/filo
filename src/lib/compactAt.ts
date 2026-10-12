@@ -28,7 +28,8 @@ export function isCustom(contextWindow: number | undefined, reserve: number | un
 
 /**
  * Writes that move every known, non-exception model from point `from` to point `to` (null: no
- * point, models follow reserveTokens). With from === to it fills in models added since.
+ * point, models follow reserveTokens). Only when the user sets the point: models pi lists later
+ * follow reserveTokens until it is set again.
  */
 export function syncReserves(models: ModelWindow[], reserves: Record<string, number>, from: number | null, to: number | null): Record<string, number | null> {
     const patch: Record<string, number | null> = {}

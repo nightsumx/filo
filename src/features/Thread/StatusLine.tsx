@@ -97,16 +97,31 @@ export const StatusLine = observer(({ thread }: { thread: Thread }) => {
         const pct = Math.floor(ratio * 100)
         const filled = Math.min(5, Math.floor(ratio * 5 + 0.5))
         const color = pct >= 80 ? DANGER : pct >= 50 ? WARN : OK
-        parts.push(
-            <span key="ctx" title={tr('上下文用量', 'Context usage')}>
+        const figure = (
+            <>
                 <span className={color}>{'█'.repeat(filled)}</span>
                 <span className={MUTED}>{'░'.repeat(5 - filled)}</span>
                 {' '}
                 <span className={color}>{`${pct}%`}</span>
                 {' '}
                 <span className={MUTED}>{`${k(usage.tokens)}/${k(usage.contextWindow)}`}</span>
-            </span>,
+            </>
         )
+        // The terminal's /compact, one click away from the figure it shrinks.
+        parts.push(thread.features.compaction
+            ? (
+                    <button
+                        key="ctx"
+                        type="button"
+                        disabled={thread.running || thread.compacting}
+                        title={thread.compacting ? tr('正在压缩上下文', 'Compacting context') : tr('上下文用量，点击压缩（/compact）', 'Context usage; click to compact (/compact)')}
+                        onClick={() => void thread.compact()}
+                        className="rounded-sm outline-none hover:underline focus-visible:ring-1 focus-visible:ring-gray-400 disabled:no-underline"
+                    >
+                        {figure}
+                    </button>
+                )
+            : <span key="ctx" title={tr('上下文用量', 'Context usage')}>{figure}</span>)
     }
 
     // The conversation's prompt-cache hit rate; a turn's own is in its footer's card. A significant miss on the latest

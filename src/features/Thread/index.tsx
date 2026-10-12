@@ -153,7 +153,7 @@ export const ThreadPane = observer(({ thread, focused }: { thread: Thread, focus
                 ? <HooksNotice thread={thread}><TuiToggle thread={thread} inline /></HooksNotice>
                 : <TuiToggle thread={thread} />)}
             {tuiShown
-                ? <TuiView id={tui} />
+                ? <TuiView id={tui} focus={!thread.tuiReason} />
                 : !thread.loaded
                 ? <div className="flex flex-1 items-center justify-center"><Loader2 size={18} className="animate-spin text-gray-300" /></div>
                 : subagent

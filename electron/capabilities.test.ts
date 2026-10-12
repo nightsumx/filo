@@ -10,12 +10,6 @@ describe('capabilityArgs', () => {
         expect(capabilityArgs(undefined, '/ext')).toEqual([])
         expect(capabilityArgs('todo', '/ext')).toEqual([])
     })
-
-    it('passes the approval mode only when approval loads', () => {
-        expect(capabilityArgs(['approval'], '/ext', { approvalMode: 'edits' })).toEqual(['-e', path.join('/ext', 'approval.ts'), '--gui-approval', 'edits'])
-        expect(capabilityArgs(['todo'], '/ext', { approvalMode: 'edits' })).toEqual(['-e', path.join('/ext', 'todo.ts')])
-        expect(capabilityArgs(['approval'], '/ext', { approvalMode: 'bogus' as any })).toEqual(['-e', path.join('/ext', 'approval.ts')])
-    })
 })
 
 describe('capability catalogue', () => {

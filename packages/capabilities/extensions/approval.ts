@@ -3,10 +3,9 @@
 // (and a subagent can forward its child's prompts unchanged). The mode is per session:
 //   /gui-approval ask|edits|auto       switch mode (the GUI's mode picker)
 //   pi.events gui-approval:set <mode>  switch mode from another extension (pi-cc-tui's mode key)
-//   --gui-approval <mode>              mode for sessions that never chose one (or PI_KIT_APPROVAL_MODE;
-//                                      else the one saved in settings.json, see lib/settings.ts)
-// A mode chosen in the terminal is saved to settings.json for the next session, as the desktop app
-// does for its threads (it saves its own: in rpc mode nothing is written here).
+//   --gui-approval <mode>              a subagent's mode, its parent's (or PI_KIT_APPROVAL_MODE)
+// Sessions that never chose one start in the mode saved in settings.json (lib/settings.ts). A mode
+// chosen, in the terminal or the desktop app, is saved there for the next session; a subagent's is not.
 // The current mode goes down as status `gui-approval` and event `gui-approval:mode`. In the terminal
 // the prompt is Claude Code's permission dialog. Both hosts follow Claude Code's rules:
 // - No (or dismissing the prompt) ends the turn, and the rest of the tool batch is declined unasked,
@@ -22,6 +21,7 @@ import { mirrored } from '../lib/mirror'
 import { isReadOnlyCommand } from '../lib/readonly'
 import { readCapabilityState, writeCapabilityChoice } from '../lib/settings'
 import { promptApproval } from '../tui/approval'
+import { ENV } from '../protocol'
 import { serialized } from '../tui/dialog'
 
 const COMMAND: GuiCommands['approval'] = 'gui-approval'
@@ -31,7 +31,6 @@ const TITLE_PREFIX = 'gui-approval '
 const MODES: ApprovalMode[] = ['ask', 'edits', 'auto']
 const SET_EVENT = 'gui-approval:set'
 const MODE_EVENT = 'gui-approval:mode'
-const ENV_MODE = 'PI_KIT_APPROVAL_MODE'
 
 /** Built-in tools that only read; pi does not annotate its own tools. */
 const READ_ONLY = new Set(['read', 'grep', 'find', 'ls'])
@@ -134,7 +133,7 @@ export default function (pi: ExtensionAPI) {
             .filter((e: any) => e.type === 'custom' && e.customType === ENTRY)
             .pop() as { data?: Partial<State> } | undefined
         current = ctx
-        const flag = pi.getFlag(COMMAND) ?? process.env[ENV_MODE]
+        const flag = pi.getFlag(COMMAND) ?? process.env[ENV.approvalMode]
         state.mode = isMode(saved?.data?.mode) ? saved.data.mode : isMode(flag) ? flag : readCapabilityState(getAgentDir()).approvalMode
         state.always = Array.isArray(saved?.data?.always) ? saved.data.always.filter(s => typeof s === 'string') : []
         publish(ctx)
@@ -144,7 +143,7 @@ export default function (pi: ExtensionAPI) {
         state.mode = mode
         persist()
         publish(ctx)
-        if (ctx.mode === 'tui')
+        if (!process.env[ENV.subagent])
             void writeCapabilityChoice(getAgentDir(), { approvalMode: mode }).catch(() => {})
     }
 

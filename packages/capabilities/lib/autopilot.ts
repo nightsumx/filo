@@ -7,7 +7,7 @@ import type { Changes } from './review'
 import { appendFileSync, mkdirSync, readdirSync, readFileSync, renameSync, rmdirSync, rmSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { clip } from './child'
+import { clip } from './review'
 import { evidenceOf } from './review'
 
 export const AUTOPILOT_TYPES = {

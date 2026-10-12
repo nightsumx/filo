@@ -9,13 +9,14 @@ import { systemLang, tr } from '@/lib/i18n'
 import { TRANSCRIPT_TEXT } from '@/lib/transcriptText'
 import { cn } from '@/lib/utils'
 import { appStore } from '@/store/app'
-import { Archive, Bot, KeyRound, Palette, Puzzle, Route } from 'lucide-react'
+import { Archive, Bot, KeyRound, Palette, Puzzle, Route, Sparkles } from 'lucide-react'
 import { observer } from 'mobx-react-lite'
 import { AgentsPage } from './Agents'
 import { CapabilitiesPage } from './Capabilities'
 import { CompactionPage } from './Compaction'
 import { ProvidersPage } from './Providers'
 import { RoutesPage } from './Routes'
+import { SkillsPage } from './Skills'
 
 /** A few transcript lines in the chosen wording, so the effect is visible before closing. */
 function TranscriptPreview({ lang }: { lang: TranscriptLang }) {
@@ -118,6 +119,7 @@ const PAGES: { id: SettingsPageId, label: Localized, icon: LucideIcon, page: Rea
     { id: 'routes', label: { zh: '路由', en: 'Routing' }, icon: Route, page: RoutesPage },
     { id: 'agents', label: { zh: 'Agent', en: 'Agents' }, icon: Bot, page: AgentsPage },
     { id: 'capabilities', label: { zh: '能力', en: 'Capabilities' }, icon: Puzzle, page: CapabilitiesPage },
+    { id: 'skills', label: { zh: '技能', en: 'Skills' }, icon: Sparkles, page: SkillsPage },
     { id: 'compaction', label: { zh: '上下文压缩', en: 'Compaction' }, icon: Archive, page: CompactionPage },
 ]
 
@@ -169,7 +171,7 @@ export const SettingsDialog = observer(() => {
                 }}
             >
                 <DialogTitle className="absolute left-4 top-0 flex h-12 items-center text-[14px]">{tr('设置', 'Settings')}</DialogTitle>
-                <DialogDescription className="sr-only">{tr('外观、供应商、路由、agent、能力和上下文压缩设置，改动立即生效。', 'Appearance, provider, routing, agent, capability and compaction settings; changes apply immediately.')}</DialogDescription>
+                <DialogDescription className="sr-only">{tr('外观、供应商、路由、agent、能力、技能和上下文压缩设置，改动立即生效。', 'Appearance, provider, routing, agent, capability, skill and compaction settings; changes apply immediately.')}</DialogDescription>
                 <PageList />
                 <div className="min-w-0 flex-1 overflow-y-auto px-6 pb-5 scrollbar-trigger">
                     <Page />

@@ -5,7 +5,7 @@ import { APPROVAL_TITLE_PREFIX, CAPABILITIES } from '@shared/capabilities'
 import { execFileSync } from 'node:child_process'
 import { readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
-import { afterEach, beforeAll, describe, expect, it } from 'vitest'
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { findPi, startMockLlm, startPi } from './harness'
 
 let env: PiEnv | null = null
@@ -665,20 +665,17 @@ describe.runIf(process.env.PI_GUI_SKIP_E2E !== '1')('capability extensions (real
         expect(pi.events.some(e => e.type === 'entry_appended' && e.entry?.customType === 'pi-kit-review')).toBe(false)
     }, 60_000)
 
-    it('settings.json: pi keeps the shared choice when it saves; the app\'s pi leaves the mode to the app', async ({ skip }) => {
+    it('settings.json: a new session starts in the saved mode, and a switch is saved for the next, as in the terminal', async ({ skip }) => {
         if (!env)
             return skip('pi not installed')
-        const choice = { enabled: 'standard', approvalMode: 'ask' }
-        const { pi } = await setup(['approval'], script(), { approvalMode: 'auto', settings: { 'pi-capabilities': choice } })
+        const { pi } = await setup(['approval'], script(), { settings: { 'pi-capabilities': { enabled: 'standard', approvalMode: 'ask' } } })
         const file = path.join(pi.agentDir, 'settings.json')
         expect((await pi.request({ type: 'set_auto_compaction', enabled: false })).success).toBe(true)
-        // The flag the app passes wins over settings.json; switching in rpc mode writes nothing.
-        expect(statusOf(pi, 'gui-approval')).toBe('auto')
+        expect(statusOf(pi, 'gui-approval')).toBe('ask')
         await pi.request({ type: 'prompt', message: '/gui-approval edits' })
         await pi.waitFor(e => e.type === 'extension_ui_request' && e.method === 'setStatus' && e.statusText === 'edits')
-        const saved = JSON.parse(readFileSync(file, 'utf8'))
-        expect(saved.compaction).toEqual({ enabled: false })
-        expect(saved['pi-capabilities']).toEqual(choice)
+        await vi.waitFor(() => expect(JSON.parse(readFileSync(file, 'utf8'))['pi-capabilities']).toEqual({ enabled: 'standard', approvalMode: 'edits' }))
+        expect(JSON.parse(readFileSync(file, 'utf8')).compaction).toEqual({ enabled: false })
     }, 30_000)
 
     it('gui- commands are registered as extension commands', async ({ skip }) => {

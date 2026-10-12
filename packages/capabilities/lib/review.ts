@@ -3,7 +3,6 @@
 // evidence decides confirmed vs suspected), and how picked items go back to the agent.
 import type { ReviewApply, ReviewDetails, ReviewEvidence, ReviewFeedbackDetails, ReviewIssue, ReviewRecheck, ReviewSeverity, ReviewSuggestion, SubagentDetails } from '../protocol'
 import path from 'node:path'
-import { clip } from './child'
 
 export const REVIEW_TYPES = { report: 'pi-kit-review', feedback: 'pi-kit-review-feedback' } as const
 
@@ -14,6 +13,8 @@ const CLAIMS_BUDGET = 8000
 export const DIFF_BUDGET = 60_000
 /** Tail of a command's output kept as evidence. */
 const EVIDENCE_TAIL = 1500
+
+export const clip = (text: string, max: number) => text.length > max ? `${text.slice(0, max)}\n… (${text.length - max} more characters)` : text
 
 // ---------------------------------------------------------------- the session branch
 
@@ -147,7 +148,11 @@ export interface Changes {
 const section = (title: string, body: string) => `## ${title}\n\n${body.trim()}\n`
 const quote = (text: string) => text.split('\n').map(l => `> ${l}`).join('\n')
 
-export function reviewerTask(facts: BranchFacts, changes: Changes, focus?: string): string {
+/**
+ * `tool`: the reviewer is review.ts's pi, which reports through submit_review and whose bash commands
+ * become evidence. Otherwise it is another agent's thread, which answers in text.
+ */
+export function reviewerTask(facts: BranchFacts, changes: Changes, focus?: string, tool = true): string {
     const parts: string[] = [
         'You are reviewing another agent\'s work in this project. You did not write it and you have not seen its reasoning; treat everything it claims as unverified until you check it.\n',
         section('What the user asked', facts.requests.length ? facts.requests.map(quote).join('\n\n') : '(no messages)'),
@@ -162,7 +167,7 @@ export function reviewerTask(facts: BranchFacts, changes: Changes, focus?: strin
     if (changes.diff)
         changeBody += `\n\`\`\`diff\n${changes.diff}\n\`\`\`\n`
     if (changes.unshown.length)
-        changeBody += `\nNot shown above (read these yourself, or run git diff on them):\n${changes.unshown.map(f => `- ${f}`).join('\n')}\n`
+        changeBody += `\n${changes.diff ? 'Not shown above (read these yourself, or run git diff on them)' : 'Run git diff on these (new files: read them)'}:\n${changes.unshown.map(f => `- ${f}`).join('\n')}\n`
     parts.push(section('Changes to review', changeBody))
     if (facts.previous) {
         const p = facts.previous
@@ -177,14 +182,39 @@ export function reviewerTask(facts: BranchFacts, changes: Changes, focus?: strin
         parts.push(section('The user wants you to focus on', focus))
     parts.push(section('How to review', [
         '- Read the code around each change, not only the diff. Look for bugs, regressions, requirements from the user\'s messages that were missed, unhandled edge cases, and claims the code does not back up.',
-        '- Verify by running things: the project\'s tests, type checker or build, or a small script that exercises the change. Put the exact command that shows a problem in the issue\'s `repro`; the report keeps that command\'s exit code and output as evidence. An issue without a command you ran is reported as suspected.',
+        tool
+            ? '- Verify by running things: the project\'s tests, type checker or build, or a small script that exercises the change. Put the exact command that shows a problem in the issue\'s `repro`; the report keeps that command\'s exit code and output as evidence. An issue without a command you ran is reported as suspected.'
+            : '- Verify by running things: the project\'s tests, type checker or build, or a small script that exercises the change. For each problem give the exact command you ran that shows it and what it printed; mark a problem you could not show this way as suspected.',
         '- Do not change the project: no edits, commits, installs or deletions. Scratch files go in the system temp directory.',
         '- Report real problems only, with the file and line. Style is not a problem unless it causes one. If the work holds up, say so with verdict "pass" and no issues.',
         '- Suggestions are worthwhile follow-ups that are not defects: a missing test, a risky spot, a next step.',
         '- Write the report in the language the user writes in.',
-        '- Finish by calling submit_review once.',
+        tool
+            ? '- Finish by calling submit_review once.'
+            : '- Finish with the report as your reply: a verdict (pass or needs work) and a two or three sentence summary, then each problem as R1, R2, … with its severity (high, medium, low), file and line, what goes wrong, how to fix it and its command, then suggestions as S1, S2, …. Your report goes back to the agent that did the work.',
     ].join('\n')))
     return parts.join('\n')
+}
+
+/**
+ * Another agent's new thread taking over a thread's task (it stopped: a usage limit, a dead end). The
+ * facts a reviewer gets, as a text the user sends; history stays with the first agent.
+ */
+export function handoffTask(facts: BranchFacts, changes: Changes, from: string): string {
+    const files = changes.files.length
+        ? `${changes.scope === 'thread' ? 'The files it edited' : 'It made no edit/write calls; every uncommitted change'}. Run git diff on these (new files: read them):\n${changes.files.map(f => `- ${f}`).join('\n')}`
+        : 'No file changes were found.'
+    return [
+        `You are taking over a task that another agent (${from}) worked on in this project and did not finish. You have not seen its reasoning; treat what it says it did as unverified.\n`,
+        section('What the user asked', facts.requests.length ? facts.requests.map(quote).join('\n\n') : '(no messages)'),
+        section('What the agent says it did', facts.claims.length ? facts.claims.map(quote).join('\n\n') : '(no reply)'),
+        section('Changes so far', files),
+        section('How to continue', [
+            '- First check where things stand: read the changes, run the project\'s tests or checks, and compare with what the user asked.',
+            '- Then finish what is left. Keep the work that holds up; fix what does not.',
+            '- End by telling the user what you found done, what you did and what is still open.',
+        ].join('\n')),
+    ].join('\n')
 }
 
 // ---------------------------------------------------------------- evidence and the report

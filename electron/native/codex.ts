@@ -41,6 +41,7 @@ export const CODEX_CAPS: AcpAgentCaps = {
     fork: true,
     delete: true,
     list: true,
+    rename: true,
     xai: false,
     forkAt: true,
     rewind: true,
@@ -63,10 +64,15 @@ const LISTED_SOURCES = ['cli', 'vscode', 'exec', 'appServer', 'unknown']
 
 // ---------------------------------------------------------------- modes
 
-type ModeId = 'read-only' | 'auto' | 'full-access' | 'plan'
+type Preset = 'read-only' | 'auto' | 'full-access' | 'plan'
+/** A preset, or the approval and sandbox config.toml gave the thread (Codex's own default). */
+type ModeId = Preset | 'config'
 
-/** Approval and sandbox per mode, sent with every turn (Codex keeps them for the turns after). */
-const MODES: Record<ModeId, { approvalPolicy: string, sandboxPolicy: { type: string } }> = {
+/** config.toml's approval and sandbox for the thread, as thread/start and thread/resume report them. */
+interface Permissions { approvalPolicy: unknown, sandboxPolicy: Record<string, unknown> }
+
+/** Approval and sandbox per preset; turn/start carries the picked one and Codex keeps it for the turns after. */
+const MODES: Record<Preset, { approvalPolicy: string, sandboxPolicy: { type: string } }> = {
     'read-only': { approvalPolicy: 'on-request', sandboxPolicy: { type: 'readOnly' } },
     'auto': { approvalPolicy: 'on-request', sandboxPolicy: { type: 'workspaceWrite' } },
     'full-access': { approvalPolicy: 'never', sandboxPolicy: { type: 'dangerFullAccess' } },
@@ -74,33 +80,30 @@ const MODES: Record<ModeId, { approvalPolicy: string, sandboxPolicy: { type: str
     'plan': { approvalPolicy: 'on-request', sandboxPolicy: { type: 'readOnly' } },
 }
 
-const modeOption = (current: ModeId): AcpConfigOption => ({
-    id: 'mode',
-    name: tr('模式', 'Mode'),
-    category: 'mode',
-    currentValue: current,
-    options: [
+const PRESETS: Preset[] = ['read-only', 'auto', 'full-access', 'plan']
+
+/** The preset the config amounts to; 'config' when it is none of them (granular approval, writable roots, network). */
+function presetOf(p: Permissions): ModeId {
+    const plain = Object.entries(p.sandboxPolicy).every(([k, v]) => k === 'type' || !v || (Array.isArray(v) && !v.length))
+    return PRESETS.find(id => id !== 'plan' && plain && MODES[id].approvalPolicy === p.approvalPolicy && MODES[id].sandboxPolicy.type === p.sandboxPolicy.type) ?? 'config'
+}
+
+function modeOption(current: ModeId, configured: Permissions | null): AcpConfigOption {
+    const options = [
         { value: 'read-only', name: tr('只读', 'Read only'), description: tr('能读文件；改文件、跑命令前先问你', 'Reads files; asks before edits and commands') },
         { value: 'auto', name: tr('自动', 'Auto'), description: tr('在项目里改文件、跑命令；越出项目或联网前问你', 'Edits and runs commands in the project; asks before going outside it or online') },
         { value: 'full-access', name: tr('完全访问', 'Full access'), description: tr('不问，不受沙箱限制', 'Never asks, no sandbox') },
         { value: 'plan', name: tr('计划', 'Plan'), description: tr('只读探索并写计划，你批准后再动手', 'Explores read-only and writes a plan; changes start once you approve it') },
-    ],
-})
-
-/** The mode a thread opens in, from the sandbox Codex reports (the user's own config). */
-/** Codex lets one process write a thread at a time. */
-const ACTIVE_WRITER = /active writer/i
-
-function modeOf(sandbox: any, collaboration: any): ModeId {
-    if (collaboration?.mode === 'plan')
-        return 'plan'
-    const type = typeof sandbox === 'string' ? sandbox : sandbox?.type
-    if (type === 'dangerFullAccess' || type === 'danger-full-access')
-        return 'full-access'
-    if (type === 'readOnly' || type === 'read-only')
-        return 'read-only'
-    return 'auto'
+    ]
+    if (current === 'config' || (configured && presetOf(configured) === 'config')) {
+        const approval = configured && (typeof configured.approvalPolicy === 'string' ? configured.approvalPolicy : Object.keys(configured.approvalPolicy ?? {})[0])
+        options.push({ value: 'config', name: 'config.toml', description: configured ? `approval_policy ${approval} · sandbox ${String(configured.sandboxPolicy.type)}` : tr('Codex 自己的配置', 'Codex\'s own config') })
+    }
+    return { id: 'mode', name: tr('模式', 'Mode'), category: 'mode', currentValue: current, options }
 }
+
+/** Codex lets one process write a thread at a time. */
+const isActiveWriter = (message: string) => message.toLowerCase().includes('active writer')
 
 // ---------------------------------------------------------------- items → pi calls
 
@@ -572,15 +575,16 @@ export class CodexAgent implements AgentAdapter {
     private loading = true
     /** Opened while another process writes the thread: read, not resumed (see takeOver). */
     private detached = false
-    /** The user picked a mode here: it wins over the one the thread resumes with. */
+    /** The user picked a mode here: turns carry it, over config.toml's. */
     private modeChosen = false
+    private configured: Permissions | null = null
 
     private models: ModelInfo[] = []
     private model = ''
     private effort = ''
-    private mode: ModeId = 'auto'
+    private mode: ModeId = 'config'
     /** The mode before plan mode, which an accepted plan goes back to. */
-    private workMode: ModeId = 'auto'
+    private workMode: ModeId = 'config'
     private context: { used: number, size: number } | null = null
     private tokens: Tokens | null = null
 
@@ -679,9 +683,10 @@ export class CodexAgent implements AgentAdapter {
     /** Sign-in failures read as what to do about them. */
     private explain(error: any): string {
         const message = String(error?.message ?? error)
-        if (ACTIVE_WRITER.test(message))
+        if (isActiveWriter(message))
             return tr(`这个线程正在别处打开着（Codex 终端、VS Code 或另一个标签页），关掉那边再试。（${message}）`, `This thread is open elsewhere (the Codex TUI, VS Code or another tab); close it there and try again. (${message})`)
-        if (/\b401\b|unauthori[sz]ed|not (signed|logged) in|login|api key/i.test(message))
+        const lower = message.toLowerCase()
+        if (['401', 'unauthorized', 'unauthorised', 'not signed in', 'not logged in', 'login', 'api key'].some(s => lower.includes(s)))
             return tr(`${this.spec.label} 还没有登录：${this.spec.signIn.zh}。（${message}）`, `${this.spec.label} is not signed in: ${this.spec.signIn.en}. (${message})`)
         return message
     }
@@ -701,7 +706,7 @@ export class CodexAgent implements AgentAdapter {
             // (the tab forked from, the Codex TUI) leaves this one reading it until it is free:
             // forking works meanwhile, a prompt takes the thread over then (takeOver).
             info = await this.rpc('thread/resume', { threadId: this.options.sessionId, excludeTurns: true }).catch(async (error) => {
-                if (!ACTIVE_WRITER.test(String(error?.message ?? error)))
+                if (!isActiveWriter(String(error?.message ?? error)))
                     throw new Error(this.explain(error))
                 this.detached = true
                 const read: any = await this.rpc('thread/read', { threadId: this.options.sessionId })
@@ -717,9 +722,7 @@ export class CodexAgent implements AgentAdapter {
         }
         this.model = String(info?.model ?? '')
         this.effort = String(info?.reasoningEffort ?? '')
-        this.mode = modeOf(info?.sandbox, info?.collaborationMode)
-        if (this.mode !== 'plan')
-            this.workMode = this.mode
+        this.applyConfigured(info)
         this.transcript.finish('end_turn')
         this.loading = false
         if (this.options.readOnly)
@@ -738,11 +741,16 @@ export class CodexAgent implements AgentAdapter {
         })
         this.detached = false
         if (!this.modeChosen) {
-            this.mode = modeOf(info?.sandbox, info?.collaborationMode)
-            if (this.mode !== 'plan')
-                this.workMode = this.mode
+            this.applyConfigured(info)
             this.configChanged()
         }
+    }
+
+    /** The thread opens on config.toml's approval and sandbox, as in the Codex TUI. thread/read reports none. */
+    private applyConfigured(info: any) {
+        this.configured = info?.sandbox && typeof info.sandbox === 'object' ? { approvalPolicy: info.approvalPolicy, sandboxPolicy: info.sandbox } : null
+        this.workMode = this.configured ? presetOf(this.configured) : 'config'
+        this.mode = info?.collaborationMode?.mode === 'plan' ? 'plan' : this.workMode
     }
 
     private async loadModels() {
@@ -783,7 +791,7 @@ export class CodexAgent implements AgentAdapter {
         const efforts = this.currentModel()?.efforts ?? []
         if (efforts.length)
             options.push({ id: 'reasoning_effort', name: tr('思考强度', 'Reasoning'), category: 'thought_level', currentValue: this.effort, options: efforts.map(e => ({ value: e.value, name: e.value, description: e.description })) })
-        options.push(modeOption(this.mode))
+        options.push(modeOption(this.mode, this.configured))
         return options
     }
 
@@ -814,9 +822,10 @@ export class CodexAgent implements AgentAdapter {
             this.effort = value
         }
         else if (configId === 'mode') {
-            if (!(value in MODES))
+            const mode = [...PRESETS, 'config' as const].find(m => m === value)
+            if (!mode || (mode === 'config' && !this.configured))
                 throw new Error(tr(`没有这个模式：${value}`, `No such mode: ${value}`))
-            this.mode = value as ModeId
+            this.mode = mode
             this.modeChosen = true
             if (this.mode !== 'plan')
                 this.workMode = this.mode
@@ -828,12 +837,11 @@ export class CodexAgent implements AgentAdapter {
         this.configChanged()
     }
 
-    /** The settings every turn carries: Codex applies them to it and the turns after. */
+    /** The settings every turn carries: Codex applies them to it and the turns after. Approval and sandbox only once picked here. */
     private turnSettings() {
-        const mode = MODES[this.mode]
+        const permissions = !this.modeChosen ? {} : this.mode === 'config' ? this.configured ?? {} : MODES[this.mode]
         return {
-            approvalPolicy: mode.approvalPolicy,
-            sandboxPolicy: mode.sandboxPolicy,
+            ...permissions,
             ...(this.model ? { model: this.model } : {}),
             ...(this.effort ? { effort: this.effort } : {}),
             ...(this.model
@@ -1755,7 +1763,7 @@ export class CodexAgent implements AgentAdapter {
                 case 'get_available_thinking_levels':
                     return ok({ levels: (this.currentModel()?.efforts ?? []).map(e => e.value) })
                 case 'get_commands':
-                    return ok({ commands: [{ name: 'compact', description: tr('压缩上下文，腾出空间', 'Summarize the conversation to free up context'), source: 'prompt' }] })
+                    return ok({ commands: [{ name: 'compact', description: tr('压缩上下文，腾出空间', 'Summarize the conversation to free up context'), source: 'builtin' }] })
                 case 'get_session_stats': {
                     const tokens = this.transcript.totals()
                     const context = this.context
@@ -1815,12 +1823,9 @@ export class CodexAgent implements AgentAdapter {
                     this.setConfig(String(command.configId ?? ''), String(command.value ?? ''))
                     return ok({ configOptions: this.configOptions() })
                 case 'set_session_name': {
-                    const name = String(command.name ?? '')
-                    this.callbacks.onSession?.(this, { name })
-                    if (name.trim()) {
-                        await this.rpc('thread/name/set', { threadId: this.threadId, name: name.trim() })
-                            .catch(error => console.warn(`[codex] rename failed:`, error?.message ?? error))
-                    }
+                    const name = String(command.name ?? '').trim()
+                    await this.rpc('thread/name/set', { threadId: this.threadId, name })
+                    this.callbacks.onSession?.(this, { title: name })
                     return ok()
                 }
                 default:

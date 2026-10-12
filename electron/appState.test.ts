@@ -44,8 +44,7 @@ describe('applySave', () => {
 })
 
 describe('savedWindows', () => {
-    it('reads the old single-window state as one window on its active project', () => {
-        expect(savedWindows({ ...base(), activeProject: '/a' })).toEqual([{ projects: ['/a'], active: '/a' }])
+    it('no saved windows: none', () => {
         expect(savedWindows(base())).toEqual([])
     })
 

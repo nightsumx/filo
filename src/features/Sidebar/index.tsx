@@ -13,9 +13,9 @@ import { AgentIcon } from '@/components/AgentIcon'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { childToolCount, subagentActivity, subagentLive } from '@/lib/subagents'
 import { formatElapsed } from '@/lib/threadActivity'
-import { cn, relativeTime, shortPath } from '@/lib/utils'
+import { basename, cn, relativeTime, shortPath } from '@/lib/utils'
 import { appStore } from '@/store/app'
-import { AppWindow, ChevronRight, ChevronsDownUp, ChevronsUpDown, EyeOff, FolderOpen, FolderPlus, LocateFixed, Minus, MoreHorizontal, Plus, X } from 'lucide-react'
+import { AppWindow, ChevronRight, ChevronsDownUp, ChevronsUpDown, EyeOff, FolderOpen, FolderPlus, GitBranch, GitMerge, LocateFixed, Minus, MoreHorizontal, Plus, Trash2, X } from 'lucide-react'
 import { confirm } from '@/lib/confirm'
 import { observer } from 'mobx-react-lite'
 import { useEffect, useState } from 'react'
@@ -216,6 +216,16 @@ async function closeProject(cwd: string, remove: boolean) {
     await (remove ? appStore.removeProject(cwd) : appStore.closeProject(cwd))
 }
 
+async function removeWorktree(project: Project) {
+    const ok = await confirm({
+        title: tr('删除副本', 'Delete worktree'),
+        description: tr(`${project.cwd} 会被删除，没应用的改动和副本里的提交都会丢失。线程记录保留在 pi 的会话里。`, `${project.cwd} will be deleted, with changes not applied and commits made in it. The threads stay in pi's sessions.`),
+        confirmText: tr('删除', 'Delete'),
+    })
+    if (ok)
+        await appStore.removeWorktree(project.cwd)
+}
+
 const ProjectNode = observer(({ project, index, expanded, onToggle }: { project: Project, index: number, expanded: boolean, onToggle: (open?: boolean) => void }) => {
     const [menuOpen, setMenuOpen] = useState(false)
     const [all, setAll] = useState(false)
@@ -223,6 +233,8 @@ const ProjectNode = observer(({ project, index, expanded, onToggle }: { project:
     const activity = appStore.activity(project.cwd)
     const tabs = appStore.tabsOf(project.cwd)
     const activeKey = active ? appStore.activeKey : null
+    const parent = appStore.worktreeParents[project.cwd]
+    const parentName = parent && basename(parent)
 
     // Unsaved new tabs first, then every session (most recent first); open sessions use their Thread.
     const drafts = tabs.filter(t => !t.persisted && !project.sessions.some(s => s.path === t.key))
@@ -271,10 +283,10 @@ const ProjectNode = observer(({ project, index, expanded, onToggle }: { project:
                 >
                     <ChevronRight size={14} className={cn('transition-transform duration-100', expanded && 'rotate-90')} />
                 </button>
-                <ProjectBadge name={project.name} size={16} className="rounded-[4px]" />
+                {parent ? <GitBranch size={14} className="mx-px shrink-0 text-gray-500" /> : <ProjectBadge name={project.name} size={16} className="rounded-[4px]" />}
                 <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
                     <span className={cn('shrink-0 truncate text-gray-900', active && 'font-semibold')}>{project.name}</span>
-                    <span className="min-w-0 truncate text-[12px] text-gray-500">{parentPath(shortPath(project.cwd)) || '/'}</span>
+                    <span className="min-w-0 truncate text-[12px] text-gray-500">{parent ? tr(`${parentName} 的副本`, `worktree of ${parentName}`) : parentPath(shortPath(project.cwd)) || '/'}</span>
                 </span>
                 <span className={cn('flex shrink-0 items-center', menuOpen ? 'hidden' : 'group-hover/row:hidden')}>
                     <ActivityBadge activity={activity} />
@@ -303,10 +315,29 @@ const ProjectNode = observer(({ project, index, expanded, onToggle }: { project:
                                 <Plus size={14} />
                                 {newThreadLabel()}
                             </DropdownMenuItem>
+                            {!parent && (
+                                <DropdownMenuItem onSelect={() => void appStore.newWorktreeThread(project.cwd)}>
+                                    <GitBranch size={14} />
+                                    {tr('在副本中新建线程', 'New thread in a worktree')}
+                                </DropdownMenuItem>
+                            )}
                             <DropdownMenuItem onSelect={() => void window.pi.openFolder(project.cwd)}>
                                 <FolderOpen size={14} />
                                 {showInFolderLabel()}
                             </DropdownMenuItem>
+                            {parent && (
+                                <>
+                                    <DropdownMenuSeparator />
+                                    <DropdownMenuItem disabled={activity.running > 0} onSelect={() => void appStore.applyWorktree(project.cwd)}>
+                                        <GitMerge size={14} />
+                                        {tr(`把改动应用到 ${parentName}`, `Apply changes to ${parentName}`)}
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem onSelect={() => void removeWorktree(project)}>
+                                        <Trash2 size={14} />
+                                        {tr('删除副本', 'Delete worktree')}
+                                    </DropdownMenuItem>
+                                </>
+                            )}
                             <DropdownMenuSeparator />
                             {appStore.windowProjects.length > 1 && (
                                 <DropdownMenuItem onSelect={() => void appStore.detachProject(project.cwd)}>
@@ -374,6 +405,11 @@ export const Sidebar = observer(() => {
     const toggleAll = () => setExpanded(anyExpanded ? new Set() : new Set(appStore.windowProjectList.map(p => p.cwd)))
     const toggleAllLabel = anyExpanded ? tr('全部折叠', 'Collapse all') : tr('全部展开', 'Expand all')
 
+    // A worktree follows its main checkout when both are in the window.
+    const parents = appStore.worktreeParents
+    const list = appStore.windowProjectList
+    const ordered = list.filter(p => !appStore.windowProjects.includes(parents[p.cwd])).flatMap(p => [p, ...list.filter(c => parents[c.cwd] === p.cwd)])
+
     const files = appStore.sidebarView === 'files'
     return (
         <nav className="ide-island flex w-[272px] shrink-0 flex-col bg-ide-side" aria-label={tr('项目', 'Projects')}>
@@ -408,7 +444,7 @@ export const Sidebar = observer(() => {
                 ? <FileTree />
                 : (
                         <div role="tree" aria-label={tr('项目和线程', 'Projects and threads')} className="group/tree flex-1 overflow-y-auto px-1.5 pb-2 scrollbar-trigger">
-                            {appStore.windowProjectList.map(project => (
+                            {ordered.map(project => (
                                 <ProjectNode
                                     key={project.cwd}
                                     project={project}

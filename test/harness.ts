@@ -186,7 +186,8 @@ export async function startPi(env: PiEnv, llm: MockLlm, capabilities: Capability
     await writeFile(path.join(agentDir, 'models.json'), JSON.stringify({
         providers: { mock: { baseUrl: llm.baseUrl, api: 'openai-completions', apiKey: 'mock', models: [{ id: 'mock-1', contextWindow: 100_000, maxTokens: 1000, ...options.model }] } },
     }))
-    await writeFile(path.join(agentDir, 'settings.json'), JSON.stringify({ defaultProvider: 'mock', defaultModel: 'mock-1', defaultThinkingLevel: 'off', ...options.settings }))
+    const approval = options.approvalMode ? { 'pi-capabilities': { approvalMode: options.approvalMode } } : {}
+    await writeFile(path.join(agentDir, 'settings.json'), JSON.stringify({ defaultProvider: 'mock', defaultModel: 'mock-1', defaultThinkingLevel: 'off', ...approval, ...options.settings }))
 
     const events: PiEvent[] = []
     const waiters: { match: (e: PiEvent) => boolean, resolve: (e: PiEvent) => void }[] = []
@@ -209,7 +210,7 @@ export async function startPi(env: PiEnv, llm: MockLlm, capabilities: Capability
     // piSpawnEnv copies process.env at spawn time.
     const previous = process.env.PI_CODING_AGENT_DIR
     process.env.PI_CODING_AGENT_DIR = agentDir
-    const id = manager.start(env, { cwd, capabilities, approvalMode: options.approvalMode })
+    const id = manager.start(env, { cwd, capabilities })
     if (previous === undefined)
         delete process.env.PI_CODING_AGENT_DIR
     else

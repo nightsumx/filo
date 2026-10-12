@@ -3,6 +3,7 @@
 
 import type { Thread } from '@/store/thread'
 import { cn, shortPath } from '@/lib/utils'
+import { appStore } from '@/store/app'
 import { tr } from '@/lib/i18n'
 import { Loader2, MessageSquareText, SquareTerminal, TriangleAlert } from 'lucide-react'
 import { observer } from 'mobx-react-lite'
@@ -10,7 +11,8 @@ import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { agentViewOf, dropAgentView } from '../Terminal/views'
 
-export const TuiView = observer(({ id }: { id: string }) => {
+/** `focus`: the user asked for it; shown for the agent, keys typed elsewhere must not land in its dialog. */
+export const TuiView = observer(({ id, focus }: { id: string, focus: boolean }) => {
     const host = useRef<HTMLDivElement>(null)
     useEffect(() => {
         const el = host.current
@@ -18,7 +20,8 @@ export const TuiView = observer(({ id }: { id: string }) => {
             return
         const view = agentViewOf(id)
         view.mount(el)
-        view.focus()
+        if (focus)
+            view.focus()
         let frame = 0
         const refit = () => {
             cancelAnimationFrame(frame)
@@ -72,7 +75,11 @@ export const TuiToggle = observer(({ thread, inline = false }: { thread: Thread,
                     role="tab"
                     aria-selected={thread.tuiShown === tui}
                     title={label}
-                    onClick={() => thread.showTui(tui)}
+                    onClick={() => {
+                        thread.showTui(tui)
+                        if (!tui)
+                            appStore.focus(thread.key, true)
+                    }}
                     className={cn(
                         'flex h-6 items-center gap-1 rounded px-1.5 text-[12px] outline-none',
                         thread.tuiShown === tui ? 'bg-ide-hover text-gray-900' : 'text-gray-500 hover:text-gray-800',

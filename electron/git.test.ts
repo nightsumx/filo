@@ -4,7 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { platform } from './platform'
-import { gitCommit, gitDiscard, gitFileBytes, gitFileEntries, gitFileThumbs, gitStatus, MAX_PREVIEW_BYTES, parseNumstat, parsePorcelain } from './git'
+import { applyWorktree, createWorktree, gitCommit, gitDiscard, gitFileBytes, gitFileEntries, gitFileThumbs, gitStatus, MAX_PREVIEW_BYTES, parseNumstat, parsePorcelain, removeWorktree, threadTask, worktreeParent } from './git'
 
 describe('parsePorcelain', () => {
     it('parses modified, untracked and renamed entries', () => {
@@ -176,5 +176,129 @@ describe('gitFileBytes', () => {
         const isPng = (b: Uint8Array | null) => !!b && Buffer.from(b.subarray(0, 4)).equals(Buffer.from([0x89, 0x50, 0x4E, 0x47]))
         expect(isPng(thumbs.old) && isPng(thumbs.new)).toBe(true)
         expect(Buffer.from(thumbs.old!).equals(Buffer.from(thumbs.new!))).toBe(false)
+    })
+})
+
+describe('worktrees', () => {
+    let repo: string
+    let dir: string
+    const run = (cwd: string, ...args: string[]) => execFileSync('git', ['-c', 'user.email=a@b', '-c', 'user.name=t', ...args], { cwd }).toString()
+    beforeEach(async () => {
+        repo = await realpath(await mkdtemp(path.join(os.tmpdir(), 'pi-git-')))
+        dir = await realpath(await mkdtemp(path.join(os.tmpdir(), 'pi-wt-')))
+        run(repo, 'init', '-q')
+        run(repo, 'config', 'core.autocrlf', 'false')
+        await writeFile(path.join(repo, 'a.ts'), 'a\n')
+        await writeFile(path.join(repo, 'b.ts'), 'one\ntwo\nthree\n')
+        run(repo, 'add', '-A')
+        run(repo, 'commit', '-qm', 'init')
+    })
+    afterEach(async () => {
+        await rm(repo, { recursive: true, force: true })
+        await rm(dir, { recursive: true, force: true })
+    })
+    const read = (file: string) => readFile(file, 'utf8')
+
+    it('adds copies outside the repository and knows their main checkout', async () => {
+        const one = await createWorktree(repo, dir)
+        const two = await createWorktree(repo, dir)
+        expect(path.dirname(one)).toBe(dir)
+        expect(path.basename(one).startsWith(`${path.basename(repo)}-`)).toBe(true)
+        expect(two).not.toBe(one)
+        expect(await worktreeParent(one)).toBe(repo)
+        expect(await worktreeParent(repo)).toBeNull()
+        expect(await worktreeParent(dir)).toBeNull()
+    })
+
+    it('applies commits, edits and new files as uncommitted changes, around the main checkout\'s own', async () => {
+        const wt = await createWorktree(repo, dir)
+        await writeFile(path.join(wt, 'a.ts'), 'committed\n')
+        run(wt, 'commit', '-qam', 'in the copy')
+        await writeFile(path.join(wt, 'b.ts'), 'one\ntwo\nTHREE\n')
+        await writeFile(path.join(wt, 'new.ts'), 'n\n')
+        await writeFile(path.join(wt, 'img.bin'), Buffer.from([0, 1, 2, 255]))
+        // The main checkout moved on and edited an untouched line meanwhile.
+        await writeFile(path.join(repo, 'c.ts'), 'c\n')
+        run(repo, 'add', 'c.ts')
+        run(repo, 'commit', '-qm', 'main')
+        await writeFile(path.join(repo, 'b.ts'), 'ONE\ntwo\nthree\n')
+        expect(await applyWorktree(wt)).toEqual({ files: 4, conflicts: [] })
+        expect(await read(path.join(repo, 'a.ts'))).toBe('committed\n')
+        expect(await read(path.join(repo, 'b.ts'))).toBe('ONE\ntwo\nTHREE\n')
+        expect(await read(path.join(repo, 'new.ts'))).toBe('n\n')
+        expect([...await readFile(path.join(repo, 'img.bin'))]).toEqual([0, 1, 2, 255])
+        expect(run(repo, 'log', '--format=%s')).toBe('main\ninit\n')
+        // Unstaged: the main checkout's index is untouched.
+        expect(run(repo, 'diff', '--cached', '--name-only')).toBe('')
+        // The copy's own index is untouched.
+        expect(run(wt, 'status', '--porcelain')).toContain('?? new.ts')
+    })
+
+    it('leaves conflict markers when both sides changed the same lines', async () => {
+        const wt = await createWorktree(repo, dir)
+        await writeFile(path.join(wt, 'b.ts'), 'one\nTWO\nthree\n')
+        await writeFile(path.join(repo, 'b.ts'), 'one\n2\nthree\n')
+        run(repo, 'commit', '-qam', 'main')
+        expect(await applyWorktree(wt)).toEqual({ files: 1, conflicts: ['b.ts'] })
+        expect(await read(path.join(repo, 'b.ts'))).toContain('<<<<<<<')
+    })
+
+    it('sees an edit of the same size made in the second the copy\'s index was written', async () => {
+        const wt = await createWorktree(repo, dir)
+        await writeFile(path.join(wt, 'b.ts'), 'one\nTWO\nthree\n')
+        await new Promise(r => setTimeout(r, 1100))
+        expect(await applyWorktree(wt)).toEqual({ files: 1, conflicts: [] })
+    })
+
+    it('has nothing to apply from an untouched copy, and removes it with its changes', async () => {
+        const wt = await createWorktree(repo, dir)
+        expect(await applyWorktree(wt)).toEqual({ files: 0, conflicts: [] })
+        await writeFile(path.join(wt, 'a.ts'), 'lost\n')
+        await removeWorktree(wt)
+        expect(run(repo, 'worktree', 'list')).not.toContain(wt)
+        await expect(readFile(path.join(wt, 'a.ts'))).rejects.toThrow()
+    })
+})
+
+describe('threadTask', () => {
+    let repo: string
+    beforeEach(async () => {
+        repo = await realpath(await mkdtemp(path.join(os.tmpdir(), 'pi-git-')))
+        const run = (...args: string[]) => execFileSync('git', ['-c', 'user.email=a@b', '-c', 'user.name=t', ...args], { cwd: repo })
+        run('init', '-q')
+        await writeFile(path.join(repo, 'a.ts'), 'a\n')
+        await writeFile(path.join(repo, 'b.ts'), 'b\n')
+        run('add', '-A')
+        run('commit', '-qm', 'init')
+    })
+    afterEach(() => rm(repo, { recursive: true, force: true }))
+
+    const messages = [
+        { role: 'user', content: 'Fix a.ts' },
+        { role: 'assistant', content: [{ type: 'text', text: 'Fixed it.' }, { type: 'toolCall', id: 'c1', name: 'edit', arguments: { path: 'a.ts', oldText: 'a', newText: 'changed' } }] },
+        { role: 'toolResult', toolCallId: 'c1', toolName: 'edit', content: [], isError: false },
+        { role: 'assistant', content: [{ type: 'text', text: 'Done: a.ts is fixed.' }] },
+    ]
+
+    it('tells another agent what pi\'s reviewer is told, with the thread\'s files to diff and a reply as the report', async () => {
+        await writeFile(path.join(repo, 'a.ts'), 'changed\n')
+        await writeFile(path.join(repo, 'b.ts'), 'not this thread\n')
+        const task = await threadTask(repo, messages, 'review', 'Codex')
+        expect(task).toContain('> Fix a.ts')
+        expect(task).toContain('> Done: a.ts is fixed.')
+        expect(task).toContain('Run git diff on these (new files: read them):\n- a.ts')
+        expect(task).not.toContain('b.ts')
+        expect(task).not.toContain('```diff')
+        expect(task).not.toContain('submit_review')
+        expect(task).toContain('Finish with the report as your reply')
+    })
+
+    it('hands the task over with the same facts and the files to check', async () => {
+        await writeFile(path.join(repo, 'a.ts'), 'changed\n')
+        const task = await threadTask(repo, messages, 'handoff', 'Claude Code')
+        expect(task).toContain('another agent (Claude Code)')
+        expect(task).toContain('> Fix a.ts')
+        expect(task).toContain('Run git diff on these (new files: read them):\n- a.ts')
+        expect(task).toContain('finish what is left')
     })
 })

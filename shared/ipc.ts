@@ -1,8 +1,8 @@
 import type { AcpAgentCaps, AgentAvailability, AgentKind } from './agents'
 import type { Ledger } from 'pi-capabilities/lib/ledger.ts'
-import type { ApprovalMode, CapabilityChoice, CapabilityId, CapabilityState, Presence } from './capabilities'
+import type { CapabilityChoice, CapabilityId, CapabilityState, Presence } from './capabilities'
 import type { LangPref } from './i18n'
-import type { AgentMessage, PiEvent, RpcResponse } from './pi'
+import type { AgentMessage, PiEvent, RpcResponse, ThinkingLevel } from './pi'
 import type { AuthMethod, ChannelHealth, ChannelModel, ChannelSave, ChannelTestUpdate, EndpointModel, EndpointSave, LoginUpdate, ProvidersState } from './providers'
 import type { AgentChannel, RouteCatalog, RoutesState, TerminalAgent, ThreadRoute, ThreadRouteInfo } from './routes'
 import type { SetupProbe } from './setup'
@@ -56,6 +56,18 @@ export interface SearchResult {
     hits: SearchHit[]
     /** Matching messages in all. */
     total: number
+}
+
+/** A skill folder (with a SKILL.md) in the agents' skill folders, by name; see electron/skills.ts. */
+export interface SkillInfo {
+    name: string
+    description: string
+    /** The agents whose folders hold it (a link counts). */
+    agents: AgentKind[]
+    /** The folders behind it; more than one means different copies under one name. */
+    paths: string[]
+    /** One copy, in ~/.agents/skills and linked into Claude Code's folder when it has one. */
+    shared: boolean
 }
 
 export interface SessionItem {
@@ -189,10 +201,6 @@ export interface GlobalPrefs {
     transcriptLang?: TranscriptLang
     /** Changes panel: files in a folder tree (default) or a flat list. */
     reviewView?: ReviewView
-    /** Older state: the capabilities, now in pi's settings.json (moved there once, piSettings.ts migrateCapabilities). A preset id or a list; older still, a map per project cwd. */
-    capabilities?: string | CapabilityId[] | Record<string, CapabilityId[]>
-    /** Older state: the approval mode new threads start in, now in pi's settings.json. */
-    approvalMode?: ApprovalMode
     /** The agent a new thread starts with; absent: pi. */
     defaultAgent?: AgentKind
     /** The setup assistant's version the user went through (shared/setup.ts SETUP_VERSION); absent: never. */
@@ -212,8 +220,13 @@ export interface PiSettingsState {
     webAccess: PiPackageState
     /** pi's `cacheWarming`. */
     cacheWarming: CacheWarming
-    /** pi's `defaultProvider` + `defaultModel` (modelKey). */
-    defaultModel?: string
+}
+
+/** What pi starts a new session in a project on: settings.json, the project's .pi/settings.json over it. */
+export interface PiDefaults {
+    /** modelKey; absent: pi picks one by itself. */
+    model?: string
+    thinkingLevel: ThinkingLevel
 }
 
 /** pi's cache warming: off; while the agent runs; also between runs while a reply stays likely enough to pay for it. */
@@ -244,14 +257,10 @@ export interface AppState extends GlobalPrefs {
     tabs: Record<string, string[]>
     /** Focused tab per project (session file path). */
     activeTabs: Record<string, string>
-    /** Project windows open at quit, reopened on launch. Absent in older state (one window, activeProject). */
+    /** Project windows open at quit, reopened on launch. */
     windows?: SavedWindow[]
     /** Last window frame per project (a merged window is keyed by its first project). */
     windowBounds?: Record<string, WindowBounds>
-    /** Older state: the project the single window showed. */
-    activeProject?: string
-    /** Older state: the same, per project cwd. Read once, then dropped. */
-    approvalModes?: Record<string, ApprovalMode>
 }
 
 /** What a window writes: changed shared settings, plus the tabs of the projects it shows. */
@@ -360,8 +369,6 @@ export interface AgentStartOptions {
     sessionPath?: string
     /** Capability extensions to load with `-e`. */
     capabilities?: CapabilityId[]
-    /** Approval mode for a session that has not chosen one yet. */
-    approvalMode?: ApprovalMode
     /** The thread's own routing choice (composer), when its agent runs through the gateway. */
     route?: ThreadRoute
 }
@@ -501,8 +508,11 @@ export interface PiBridge {
     installWebAccess: () => Promise<PiSettingsState>
     setWebAccess: (enabled: boolean) => Promise<PiSettingsState>
     setCacheWarming: (mode: CacheWarming) => Promise<PiSettingsState>
-    /** pi's `defaultProvider` + `defaultModel`. */
-    setDefaultModel: (provider: string, model: string) => Promise<PiSettingsState>
+    piDefaults: (cwd: string) => Promise<PiDefaults>
+    /** pi's `defaultProvider` + `defaultModel`, as its TUI's "set as default" writes them. */
+    setDefaultModel: (cwd: string, provider: string, model: string) => Promise<PiDefaults>
+    /** pi's `defaultThinkingLevel`. */
+    setDefaultThinkingLevel: (cwd: string, level: ThinkingLevel) => Promise<PiDefaults>
     /** settings.json changed (this app, pi in a terminal, an editor). */
     onPiSettingsChanged: (listener: (state: PiSettingsState) => void) => () => void
     /** App menu → 设置… (⌘,). */
@@ -524,6 +534,18 @@ export interface PiBridge {
     gitDiscard: (cwd: string, files: Pick<GitFileChange, 'path' | 'status' | 'origPath'>[]) => Promise<void>
     /** Commits exactly these paths (relative to the repository root); returns the short hash. */
     gitCommit: (cwd: string, message: string, paths: string[]) => Promise<string>
+    skills: () => Promise<SkillInfo[]>
+    /** Moves or links each into ~/.agents/skills and links it for Claude Code; returns the new list. */
+    shareSkills: (names: string[]) => Promise<SkillInfo[]>
+    /** The main checkout of each folder that is a linked worktree; others are left out. */
+    worktreeParents: (cwds: string[]) => Promise<Record<string, string>>
+    /** A detached worktree of the folder's repository at HEAD, outside it; returns its path. */
+    createWorktree: (cwd: string) => Promise<string>
+    /** The worktree's changes as unstaged changes in its main checkout; see applyWorktree in electron/git.ts. */
+    applyWorktree: (cwd: string) => Promise<{ files: number, conflicts: string[] }>
+    removeWorktree: (cwd: string) => Promise<void>
+    /** What another agent's new thread is told to review or take over a thread (its pi-format messages); see threadTask in electron/git.ts. */
+    threadTask: (cwd: string, messages: unknown[], kind: 'review' | 'handoff', from: string) => Promise<string>
 
     openFolder: (path: string) => Promise<void>
     /** Selects a file or folder in Finder / Explorer. */
@@ -655,7 +677,9 @@ export const IPC = {
     installWebAccess: 'pi:install-web-access',
     setWebAccess: 'pi:set-web-access',
     setCacheWarming: 'pi:set-cache-warming',
+    piDefaults: 'pi:defaults',
     setDefaultModel: 'pi:set-default-model',
+    setDefaultThinkingLevel: 'pi:set-default-thinking-level',
     gitStatus: 'git:status',
     gitBranches: 'git:branches',
     gitFileDiff: 'git:file-diff',
@@ -665,6 +689,13 @@ export const IPC = {
     repoEdits: 'git:repo-edits',
     gitDiscard: 'git:discard',
     gitCommit: 'git:commit',
+    skills: 'skills:list',
+    shareSkills: 'skills:share',
+    worktreeParents: 'git:worktree-parents',
+    createWorktree: 'git:create-worktree',
+    applyWorktree: 'git:apply-worktree',
+    removeWorktree: 'git:remove-worktree',
+    threadTask: 'git:thread-task',
     openFolder: 'shell:open-folder',
     missingFolders: 'fs:missing-folders',
     revealPath: 'shell:reveal-path',

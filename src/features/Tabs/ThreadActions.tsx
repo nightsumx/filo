@@ -6,6 +6,9 @@ import type { SessionSummary } from '@shared/ipc'
 import { confirm } from '@/lib/confirm'
 import { appStore, isFileTab } from '@/store/app'
 import { AppWindow, Archive, ArrowRightToLine, EyeOff, FolderOpen, GitFork, Pencil, Trash2, X, XCircle } from 'lucide-react'
+import { AgentIcon } from '@/components/AgentIcon'
+import { agentsStore } from '@/store/agents'
+import { useEffect } from 'react'
 import { observable, runInAction } from 'mobx'
 import { observer } from 'mobx-react-lite'
 import { tr } from '@/lib/i18n'
@@ -84,14 +87,19 @@ export const ThreadActions = observer(({ thread, parts: { Item, Separator } }: {
     const canTearOff = hasOthers || appStore.windowProjects.length > 1
     const caps = thread.state?.agentCaps ?? session?.agentCaps
     const acp = thread.agent !== 'pi'
+    useEffect(() => agentsStore.ensure(), [])
+    // Another agent takes the task over in a thread of its own (this one's agent ran out, got stuck).
+    const heirs = [{ id: 'pi' as const, label: 'pi' }, ...agentsStore.list.filter(a => a.available)].filter(a => a.id !== thread.agent)
     return (
         <>
             {!thread.isEmpty && (
                 <>
-                    <Item onSelect={() => runInAction(() => (renaming.key = thread.key))}>
-                        <Pencil size={14} />
-                        {tr('重命名', 'Rename')}
-                    </Item>
+                    {thread.features.rename && (
+                        <Item onSelect={() => runInAction(() => (renaming.key = thread.key))}>
+                            <Pencil size={14} />
+                            {tr('重命名', 'Rename')}
+                        </Item>
+                    )}
                     {thread.features.compaction && (
                         <Item disabled={thread.running} onSelect={() => void thread.compact()}>
                             <Archive size={14} />
@@ -104,6 +112,12 @@ export const ThreadActions = observer(({ thread, parts: { Item, Separator } }: {
                             {tr('分叉线程', 'Fork thread')}
                         </Item>
                     )}
+                    {heirs.map(agent => (
+                        <Item key={agent.id} onSelect={() => void appStore.continueWith(thread, agent.id, 'handoff')}>
+                            <AgentIcon agent={agent.id} />
+                            {tr(`交给 ${agent.label} 继续`, `Continue in ${agent.label}`)}
+                        </Item>
+                    ))}
                 </>
             )}
             <Item onSelect={() => void window.pi.openFolder(thread.cwd)}>

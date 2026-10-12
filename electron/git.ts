@@ -1,9 +1,11 @@
 import type { GitFileBytes, GitFileChange, GitFileDiff, GitFileEntries, GitFileThumbs, GitStatus } from '@shared/ipc'
 import { execFile } from 'node:child_process'
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { copyFile, mkdir, mkdtemp, readFile, realpath, rm, stat, utimes, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { promisify } from 'node:util'
+import { collectChanges } from 'pi-capabilities/lib/changes.ts'
+import { branchFacts, handoffTask, reviewerTask } from 'pi-capabilities/lib/review.ts'
 import { tr } from './i18n'
 import { platform } from './platform'
 
@@ -347,4 +349,126 @@ export async function gitCommit(cwd: string, message: string, files: string[]): 
         throw gitError(error)
     }
     return (await git(root, ['rev-parse', '--short', 'HEAD'])).trim()
+}
+
+/**
+ * The main checkout a linked worktree belongs to, whoever added it (`git worktree add`, `claude
+ * --worktree`, this app); null for a main checkout, a submodule, or outside a repository.
+ */
+export async function worktreeParent(cwd: string): Promise<string | null> {
+    const out = (await git(cwd, ['rev-parse', '--path-format=absolute', '--git-common-dir', '--show-toplevel']).catch(() => '')).trim()
+    if (!out)
+        return null
+    const [common, top] = out.split('\n').map(p => path.resolve(p))
+    return path.basename(common) === '.git' && path.dirname(common) !== top ? path.dirname(common) : null
+}
+
+/**
+ * A worktree of cwd's repository at its HEAD, detached, in `dir`. Outside the repository, so its test
+ * runner and watchers do not see the copy. Uncommitted changes stay where they are. Names are never
+ * reused: sessions keep a deleted copy's path as their cwd.
+ */
+export async function createWorktree(cwd: string, dir = path.join(os.homedir(), '.filo', 'worktrees')): Promise<string> {
+    const root = await gitRoot(cwd)
+    if (!root)
+        throw new Error(tr('不是 git 仓库', 'Not a git repository'))
+    if (!await git(root, ['rev-parse', '--verify', 'HEAD']).then(() => true, () => false))
+        throw new Error(tr('仓库还没有提交，副本要从一个提交开始', 'The repository has no commits yet; a worktree starts from one'))
+    await mkdir(dir, { recursive: true })
+    const name = `${path.basename(root)}-${Date.now().toString(36)}`
+    for (let n = 0; ; n++) {
+        const target = path.join(dir, n ? `${name}-${n}` : name)
+        if (await stat(target).then(() => true, () => false))
+            continue
+        try {
+            await execFileAsync('git', ['worktree', 'add', '--detach', '--quiet', target, 'HEAD'], { cwd: root, timeout: 300_000 })
+        }
+        catch (error) {
+            throw gitError(error)
+        }
+        return realpath(target)
+    }
+}
+
+/**
+ * The working copy (new files included) as a tree, through a copy of its index, which the real one
+ * never sees. Leaves the copy at `index` for git commands run with it.
+ */
+async function snapshot(root: string, index: string): Promise<string> {
+    // With the original's mtime: git trusts cached stats older than the index file, so a fresh mtime would
+    // hide an edit made in the same second as the last index write.
+    const source = path.resolve(root, (await git(root, ['rev-parse', '--git-path', 'index'])).trim())
+    await copyFile(source, index).then(async () => {
+        const { atime, mtime } = await stat(source)
+        await utimes(index, atime, mtime)
+    }).catch(() => {})
+    const env = { ...process.env, GIT_INDEX_FILE: index }
+    await execFileAsync('git', ['add', '-A'], { cwd: root, env, timeout: 120_000 })
+    return (await execFileAsync('git', ['write-tree'], { cwd: root, env })).stdout.trim()
+}
+
+/**
+ * Everything a worktree changed since it left its main checkout's history (its commits, edits and new
+ * files) as unstaged changes in the main checkout, merged three ways with the main checkout's own
+ * edits. Returns the number of files and the ones left with conflict markers.
+ */
+export async function applyWorktree(cwd: string): Promise<{ files: number, conflicts: string[] }> {
+    const parent = await worktreeParent(cwd)
+    if (!parent)
+        throw new Error(tr('这个目录不是副本', 'This folder is not a worktree'))
+    const root = await toplevel(cwd)
+    const temp = await mkdtemp(path.join(os.tmpdir(), 'filo-apply-'))
+    try {
+        const tree = await snapshot(root, path.join(temp, 'source'))
+        const base = (await git(root, ['merge-base', 'HEAD', (await git(parent, ['rev-parse', 'HEAD'])).trim()])).trim()
+        const files = (await git(root, ['diff', '--name-only', '-z', base, tree])).split('\0').filter(Boolean).length
+        if (!files)
+            return { files, conflicts: [] }
+        const patch = path.join(temp, 'patch')
+        await writeFile(patch, await git(root, ['diff', '--binary', '--full-index', base, tree]))
+        // --3way works on an index matching the files: the main checkout's state in a copy of its index.
+        const index = path.join(temp, 'target')
+        await snapshot(parent, index)
+        const env = { ...process.env, GIT_INDEX_FILE: index }
+        try {
+            await execFileAsync('git', ['apply', '--3way', '--whitespace=nowarn', patch], { cwd: parent, env, timeout: 120_000 })
+            return { files, conflicts: [] }
+        }
+        catch (error) {
+            const { stdout } = await execFileAsync('git', ['diff', '--name-only', '--diff-filter=U', '-z'], { cwd: parent, env })
+            const conflicts = stdout.split('\0').filter(Boolean)
+            if (!conflicts.length)
+                throw gitError(error)
+            return { files, conflicts }
+        }
+    }
+    finally {
+        await rm(temp, { recursive: true, force: true })
+    }
+}
+
+/** Deletes a worktree folder and git's entry for it, uncommitted and unapplied changes included. */
+export async function removeWorktree(cwd: string) {
+    const parent = await worktreeParent(cwd)
+    if (!parent)
+        throw new Error(tr('这个目录不是副本', 'This folder is not a worktree'))
+    try {
+        await git(parent, ['worktree', 'remove', '--force', await toplevel(cwd)])
+    }
+    catch (error) {
+        throw gitError(error)
+    }
+}
+
+/**
+ * What another agent's new thread is told about a thread (its messages, pi-format) to review it or take
+ * it over: pi's review task or the handoff (lib/review.ts), listing the changed files to diff rather
+ * than quoting the diff. `from`: the thread's agent.
+ */
+export async function threadTask(cwd: string, messages: unknown[], kind: 'review' | 'handoff', from: string): Promise<string> {
+    const facts = branchFacts(messages.map(message => ({ type: 'message', message })), cwd)
+    const exec = (command: string, args: string[], options: { cwd: string, timeout: number }) => execFileAsync(command, args, { ...options, maxBuffer: 32 * 1024 * 1024 })
+        .then(r => ({ code: 0, stdout: r.stdout }), (error: any) => ({ code: typeof error?.code === 'number' ? error.code : 1, stdout: String(error?.stdout ?? '') }))
+    const changes = await collectChanges({ exec }, cwd, facts.files, 0)
+    return kind === 'review' ? reviewerTask(facts, changes, undefined, false) : handoffTask(facts, changes, from)
 }

@@ -9,7 +9,7 @@ import type { AcpLaunch } from './agent'
 import type { ListedSession, SessionList } from './list'
 import { ACP_AGENTS, acpAgent, acpSessionKey, parseAcpSessionKey } from '@shared/agents'
 import { readFileSync } from 'node:fs'
-import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { mkdir, rename, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import process from 'node:process'
@@ -18,7 +18,6 @@ import { loginShellPath } from '../pi-env'
 import { platform } from '../platform'
 import { ClaudeTuiAgent } from '../native/claudeTui'
 import { CodexAgent } from '../native/codex'
-import { agentDir } from '../piSettings'
 import { AcpAgent } from './agent'
 import { CursorChats, GeminiChats } from './cliSessions'
 import { installAgent, installedAgent, installSource } from './install'
@@ -32,9 +31,7 @@ export interface AcpSessionRecord {
     agent: AcpAgentId
     sessionId: string
     cwd: string
-    /** Set by the user (rename). */
-    name?: string
-    /** Set by the agent (session_info_update). */
+    /** The agent's own: session_info_update, or a rename it took. */
     title?: string
     firstPrompt?: string
     createdAt: number
@@ -83,19 +80,6 @@ function overrideOf(spec: AcpAgentSpec): string[] | undefined {
     return [raw]
 }
 
-/** A literal API key saved in pi's auth.json for this provider (not an env name or a !command). */
-async function piApiKey(provider: string): Promise<string | undefined> {
-    try {
-        const auth = JSON.parse(await readFile(path.join(agentDir(), 'auth.json'), 'utf8'))
-        const entry = auth?.[provider]
-        const key = entry?.type === 'api_key' && typeof entry.key === 'string' ? entry.key.trim() : ''
-        return key && !key.startsWith('!') && !/^[A-Z][A-Z0-9_]*$/.test(key) ? key : undefined
-    }
-    catch {
-        return undefined
-    }
-}
-
 /**
  * Tests install from a local package instead of the pinned one: PI_GUI_ACP_INSTALL_<ID>=<npm spec>,
  * read only with PI_GUI_TEST=1.
@@ -127,11 +111,6 @@ export async function resolveLaunch(spec: AcpAgentSpec, appRoot?: string): Promi
         const cli = await findCli(spec, searchPath)
         if (cli)
             env[spec.cli.env] = cli
-    }
-    if (spec.apiKey && !env[spec.apiKey.env]) {
-        const key = await piApiKey(spec.apiKey.provider)
-        if (key)
-            env[spec.apiKey.env] = key
     }
     const override = overrideOf(spec)
     if (override)
@@ -290,7 +269,7 @@ export class AcpService {
                 this.replays.delete(a.key)
                 this.note(a, change)
                 this.mirrorSoon(a.key, () => a.snapshot())
-                if (change.title && !this.records.get(a.key)?.name)
+                if (change.title)
                     callbacks.onEvent(a.id, { type: 'session_info_changed', name: change.title })
             },
         })
@@ -298,7 +277,7 @@ export class AcpService {
         return instance
     }
 
-    private note(agent: AgentAdapter, change: { prompt?: string, title?: string, name?: string }) {
+    private note(agent: AgentAdapter, change: { prompt?: string, title?: string }) {
         const now = Date.now()
         const existing = this.records.get(agent.key)
         // A session that never got a prompt is not worth listing (pi writes no file for it either).
@@ -309,8 +288,6 @@ export class AcpService {
             record.firstPrompt = change.prompt.trim().slice(0, 200)
         if (change.title)
             record.title = change.title
-        if (change.name !== undefined)
-            record.name = change.name || undefined
         record.updatedAt = now
         this.records.set(record.key, record)
         this.save()
@@ -335,7 +312,7 @@ export class AcpService {
             path: r.key,
             id: r.sessionId,
             cwd: r.cwd,
-            name: r.name ?? r.title,
+            name: r.title,
             firstPrompt: r.firstPrompt,
             createdAt: r.createdAt,
             updatedAt: r.updatedAt,
@@ -354,7 +331,7 @@ export class AcpService {
             throw new Error(`Not an ACP session: ${key}`)
         const record = this.records.get(key)
         const live = this.live.get(key)
-        const header: Omit<SessionSnapshot, 'items'> = { path: key, id: parsed.sessionId, cwd: record?.cwd ?? live?.cwd ?? '', name: record?.name ?? record?.title }
+        const header: Omit<SessionSnapshot, 'items'> = { path: key, id: parsed.sessionId, cwd: record?.cwd ?? live?.cwd ?? '', name: record?.title }
         if (live)
             return { ...header, items: live.snapshot() }
         if (!record)
@@ -473,7 +450,7 @@ export class AcpService {
         // Only listed sessions: one that never got a prompt is not in the index either.
         if (!record || !file || !items.length)
             return
-        const text = mirrorText({ sessionId: record.sessionId, cwd: record.cwd, createdAt: record.createdAt, name: record.name ?? record.title }, items)
+        const text = mirrorText({ sessionId: record.sessionId, cwd: record.cwd, createdAt: record.createdAt, name: record.title }, items)
         try {
             await mkdir(path.dirname(file), { recursive: true })
             await writeFile(`${file}.tmp`, text)
@@ -551,13 +528,11 @@ export class AcpService {
         const key = acpSessionKey(from.spec.id, sessionId)
         const source = this.records.get(from.key)
         const now = Date.now()
-        const title = source?.name ?? source?.title ?? source?.firstPrompt
         this.records.set(key, {
             key,
             agent: from.spec.id,
             sessionId,
             cwd: from.cwd,
-            name: title ? tr(`${title}（分叉）`, `${title} (fork)`) : undefined,
             firstPrompt: source?.firstPrompt,
             createdAt: now,
             updatedAt: now,

@@ -1,5 +1,5 @@
 import type { AgentKind } from '@shared/agents'
-import type { ApprovalMode, CapabilityChoice, CapabilityId, Presence } from '@shared/capabilities'
+import type { CapabilityChoice, CapabilityId, Presence } from '@shared/capabilities'
 import type { LangPref } from '@shared/i18n'
 import type { AppState, CacheWarming, GlobalCompactionPatch, GlobalPrefs, OpenProject, PiEnvResult, PiPackageState, PiSettingsState, ProjectActivity, ProjectTransfer, RepoEdits, ReviewView, SearchResult, SessionSummary, StateSave, ThemePref, ThreadTransfer, TranscriptLang, WindowReport } from '@shared/ipc'
 import { acpAgent } from '@shared/agents'
@@ -8,7 +8,6 @@ import { LANG_PREFS } from '@shared/i18n'
 import { SETUP_VERSION } from '@shared/setup'
 import { DEFAULT_THEME, GLOBAL_PREF_KEYS, REVIEW_VIEWS, THEME_PREFS, TRANSCRIPT_LANGS } from '@shared/ipc'
 import type { PiEvent, PiModel } from '@shared/pi'
-import { modelKey } from '@shared/pi'
 import type { RouteGroup, RoutedAgent, RoutesConfig, RoutesState } from '@shared/routes'
 import { pickableGroups } from '@shared/routes'
 import type { ThreadHost } from './thread'
@@ -19,7 +18,7 @@ import { autoReserve, inferCompactAt, syncReserves } from '@/lib/compactAt'
 import { applyLangPref, tr } from '@/lib/i18n'
 import { waitingLabel } from '@/lib/threadActivity'
 import { basename, ipcMessage, uid } from '@/lib/utils'
-import { makeAutoObservable, observable, reaction, runInAction } from 'mobx'
+import { makeAutoObservable, observable, reaction, runInAction, toJS } from 'mobx'
 import { toast } from 'sonner'
 import { FileTab, fileKey, isFileKey, pathOfFileKey } from './fileTab'
 import { Thread } from './thread'
@@ -50,7 +49,7 @@ const IDLE_SWEEP_MS = 60_000
 export const MIN_PANE_WIDTH = 520
 export const MAX_PANES = 3
 
-export type SettingsPageId = 'appearance' | 'providers' | 'routes' | 'agents' | 'capabilities' | 'compaction'
+export type SettingsPageId = 'appearance' | 'providers' | 'routes' | 'agents' | 'capabilities' | 'skills' | 'compaction'
 
 export interface Project {
     cwd: string
@@ -88,6 +87,8 @@ class AppStore implements ThreadHost {
     hiddenProjects: string[] = []
     /** Project folders that no longer exist on disk; refreshed with the session list. */
     missingProjects: string[] = []
+    /** Projects that are linked worktrees, to their main checkout (as git reports it); refreshed with the session list. */
+    worktreeParents: Record<string, string> = {}
 
     /** Main's id for this window. */
     windowId = 0
@@ -121,9 +122,6 @@ class AppStore implements ThreadHost {
     capabilities: CapabilityId[] = resolveCapabilities(undefined).ids
     /** The preset the capabilities are, saved by id so its later changes apply; undefined: a custom set. */
     capabilityPreset: string | undefined = resolveCapabilities(undefined).preset
-    /** Mode new threads start in, the same for all projects; undefined until one is chosen. */
-    /** Mode new threads start in; 全自动 until the user picks another. */
-    approvalMode: ApprovalMode = 'auto'
     /** The budget capability's limit per prompt, in US dollars. */
     budget = DEFAULT_BUDGET
     /** The agent a new thread starts with (the setup assistant, Settings → Agents). */
@@ -144,15 +142,12 @@ class AppStore implements ThreadHost {
     /** pi-web-access in settings.json; `installing` while `pi install` runs. */
     webAccess: PiPackageState & { installing?: boolean } = { installed: false, enabled: false }
     cacheWarming: CacheWarming = 'streaming'
-    /** pi's default model (modelKey), what its new sessions start on. */
-    piDefaultModel: string | undefined = undefined
     /** Bumps on every compaction write, including ones no running thread needs a restart for. */
     compactionRevision = 0
     /** Bumps when credentials or endpoints change in any window (Settings → 供应商 reloads). */
     providersRevision = 0
     /** Settings → 路由 and the gateway's live status; null until main answers. */
     routes: RoutesState | null = null
-    private reconciling = false
     /** How many panes fit side by side; measured by the pane container. */
     paneCapacity = 1
     /** Bumped to move keyboard focus into a thread's composer. */
@@ -184,11 +179,10 @@ class AppStore implements ThreadHost {
     private ready = false
 
     constructor() {
-        makeAutoObservable<this, 'agentThreads' | 'eventQueue' | 'flushTimer' | 'sentPrefs' | 'sentTabs' | 'ready' | 'reconciling' | 'editsQueued' | 'editsLoading'>(this, {
+        makeAutoObservable<this, 'agentThreads' | 'eventQueue' | 'flushTimer' | 'sentPrefs' | 'sentTabs' | 'ready' | 'editsQueued' | 'editsLoading'>(this, {
             agentThreads: false,
             editsQueued: false,
             editsLoading: false,
-            reconciling: false,
             eventQueue: false,
             flushTimer: false,
             sentPrefs: false,
@@ -421,8 +415,6 @@ class AppStore implements ThreadHost {
                 waiting = new Set(keys)
             },
         )
-        // Gives models pi lists for the first time (or after an update) the global compaction point.
-        reaction(() => [this.modelWindows.length, this.compactAt], () => void this.reconcileCompaction())
         window.addEventListener('focus', () => {
             void this.refreshSessions()
             this.windowProjects.forEach(cwd => this.refreshEdits(cwd))
@@ -458,7 +450,7 @@ class AppStore implements ThreadHost {
             this.ready = true
             this.projectOrder = this.projects.map(p => p.cwd)
         })
-        await this.refreshMissing()
+        await this.refreshFolders()
         if (env.ok && this.activeProject)
             this.showProject(this.activeProject)
         // Main tells other windows (project lists, Dock badge, close prompt) what this one is doing.
@@ -563,7 +555,7 @@ class AppStore implements ThreadHost {
             toast.error(`${tr('读取会话失败：', 'Could not read sessions: ')}${error.message}`)
         }
         if (this.ready)
-            await this.refreshMissing()
+            await this.refreshFolders()
     }
 
     /** Re-reads the edit log for a project soon; bursts of tool calls collapse into one read. */
@@ -592,9 +584,13 @@ class AppStore implements ThreadHost {
         }, 300))
     }
 
-    private async refreshMissing() {
-        const missing = await api().missingFolders(this.projects.map(p => p.cwd)).catch(() => [])
-        runInAction(() => (this.missingProjects = missing))
+    private async refreshFolders() {
+        const cwds = this.projects.map(p => p.cwd)
+        const [missing, parents] = await Promise.all([api().missingFolders(cwds).catch(() => []), api().worktreeParents(cwds).catch(() => ({}))])
+        runInAction(() => {
+            this.missingProjects = missing
+            this.worktreeParents = parents
+        })
     }
 
     // ---------------------------------------------------------------- persistence
@@ -645,7 +641,7 @@ class AppStore implements ThreadHost {
      * other capabilities, the ones on a model whose compaction changed.
      */
     private applyPiSettings(state: PiSettingsState) {
-        const { ids, preset, approvalMode, budget } = state.capabilities
+        const { ids, preset, budget } = state.capabilities
         const models = new Set([...Object.keys(this.modelOverrides), ...Object.keys(state.modelOverrides)]
             .filter(model => JSON.stringify(this.modelOverrides[model]) !== JSON.stringify(state.modelOverrides[model])))
         // The first read (at startup) finds no process to restart.
@@ -660,11 +656,9 @@ class AppStore implements ThreadHost {
         this.modelOverrides = state.modelOverrides
         this.capabilities = ids
         this.capabilityPreset = preset
-        this.approvalMode = approvalMode
         this.budget = budget
         this.webAccess = { ...state.webAccess, installing: this.webAccess.installing }
         this.cacheWarming = state.cacheWarming
-        this.piDefaultModel = state.defaultModel
         if (capabilities || affected) {
             for (const thread of this.threads.values())
                 void thread.applyConfig()
@@ -821,14 +815,6 @@ class AppStore implements ThreadHost {
     /** A plain copy: it is sent over IPC, which cannot clone MobX arrays. */
     get enabledCapabilities(): CapabilityId[] {
         return [...this.capabilities]
-    }
-
-    /** Also pi-cc-tui's: kept in settings.json with the capabilities. */
-    setApprovalMode(mode: ApprovalMode) {
-        if (mode === this.approvalMode)
-            return
-        this.approvalMode = mode
-        void this.writeCapabilities({ approvalMode: mode })
     }
 
     registerAgent(agentId: string, thread: Thread) {
@@ -1161,12 +1147,6 @@ class AppStore implements ThreadHost {
         return this.writePiSettings(() => api().setCacheWarming(mode), tr('缓存保温设置没有保存', 'Cache warming setting not saved'))
     }
 
-    /** What pi's TUI does with a model set as the default. */
-    setPiDefaultModel(model: PiModel) {
-        this.piDefaultModel = modelKey(model)
-        return this.writePiSettings(() => api().setDefaultModel(model.provider, model.id), tr('默认模型没有保存', 'Default model not saved'))
-    }
-
     setWebAccess(enabled: boolean) {
         this.webAccess.enabled = enabled
         return this.writePiSettings(() => api().setWebAccess(enabled), tr('联网搜索设置没有保存', 'Web access setting not saved'))
@@ -1211,27 +1191,6 @@ class AppStore implements ThreadHost {
         const global = this.compactAt
         const reserve = at !== null ? contextWindow - at : global !== null ? autoReserve(contextWindow, global) : null
         await this.writeReserves({ [key]: reserve })
-    }
-
-    private async reconcileCompaction() {
-        // Wait for pi's model list; the focused thread's model alone shows up first and is too few
-        // to tell a global point from one exception.
-        const models = this.modelWindows
-        if (!this.modelCatalog.models.length || this.reconciling || !this.ready)
-            return
-        this.reconciling = true
-        try {
-            const info = await api().globalCompaction()
-            const at = inferCompactAt(models, info.modelReserves)
-            if (at !== null)
-                await this.writeReserves(syncReserves(models, info.modelReserves, at, at))
-        }
-        catch {
-            // Settings page shows the error when the user edits; nothing to do in the background.
-        }
-        finally {
-            this.reconciling = false
-        }
     }
 
     /** Only threads whose model changed need a restart to pick the new reserve up. */
@@ -1367,6 +1326,79 @@ class AppStore implements ThreadHost {
             await thread.stopAgent()
         }))
         await api().closeProject(cwd)
+    }
+
+    /**
+     * A new thread of another agent next to a thread, told the user's requests, the agent's replies (as
+     * claims) and the changed files. 'review': it reviews them now, and its report can go back through
+     * the author's composer. 'handoff': it takes the task over; the brief waits in its composer.
+     * History stays with each agent: the new session is the agent's own.
+     */
+    async continueWith(author: Thread, agent: AgentKind, kind: 'review' | 'handoff') {
+        try {
+            const task = await api().threadTask(author.cwd, [...author.items, ...author.live].map(i => toJS(i.message)), kind, author.agentLabel)
+            const thread = new Thread(this, { key: `new:${uid()}`, cwd: author.cwd, agent })
+            thread.loaded = true
+            thread.draft = task
+            if (kind === 'review')
+                thread.reviewOf = author.key
+            runInAction(() => {
+                this.threads.set(thread.key, thread)
+                this.insertTab(thread)
+                this.focus(thread.key, true)
+            })
+            if (kind === 'review')
+                await thread.send()
+        }
+        catch (error: any) {
+            toast.error(`${kind === 'review' ? tr('无法开始审查：', 'Could not start the review: ') : tr('无法交接：', 'Could not hand over: ')}${error.message}`)
+        }
+    }
+
+    /** A review thread's report into the reviewed thread's composer, to trim and send. */
+    sendReviewBack(reviewer: Thread, report: string) {
+        const author = reviewer.reviewOf ? this.threads.get(reviewer.reviewOf) : undefined
+        if (!author)
+            return
+        // For the model, in English as pi's review feedback is.
+        const text = `An independent reviewer (${reviewer.agentLabel}) checked your work and reported the following. For each item, either fix it and verify the fix by running something, or explain why it does not apply. Answer item by item, using the ids.\n\n${report.trim()}`
+        author.draft = [author.draft.trim(), text].filter(Boolean).join('\n\n')
+        this.focus(author.key, true)
+    }
+
+    /** A new thread in a fresh worktree of the project's repository, which joins this window. */
+    async newWorktreeThread(cwd: string) {
+        try {
+            const folder = await api().createWorktree(cwd)
+            runInAction(() => (this.worktreeParents = { ...this.worktreeParents, [folder]: cwd }))
+            await this.attachProject(folder)
+        }
+        catch (error: any) {
+            toast.error(`${tr('无法创建副本：', 'Could not create a worktree: ')}${error.message}`)
+        }
+    }
+
+    /** The worktree's changes into its main checkout, unstaged, for review there. */
+    async applyWorktree(cwd: string) {
+        const parent = basename(this.worktreeParents[cwd] ?? '')
+        try {
+            const { files, conflicts } = await api().applyWorktree(cwd)
+            if (!files)
+                toast(tr('副本里没有改动', 'The worktree has no changes'))
+            else if (conflicts.length)
+                toast.warning(tr(`已应用到 ${parent}，${conflicts.length} 个文件有冲突`, `Applied to ${parent}; ${conflicts.length} ${conflicts.length === 1 ? 'file has' : 'files have'} conflicts`), { description: conflicts.join('\n') })
+            else
+                toast.success(tr(`已把 ${files} 个文件的改动应用到 ${parent}`, `Applied changes to ${files} ${files === 1 ? 'file' : 'files'} in ${parent}`))
+        }
+        catch (error: any) {
+            toast.error(`${tr('应用失败：', 'Could not apply: ')}${error.message}`)
+        }
+    }
+
+    /** Deletes a worktree with whatever was not applied; its threads stop and it leaves the list. */
+    async removeWorktree(cwd: string) {
+        await this.removeProject(cwd)
+        await api().removeWorktree(cwd).catch(error => toast.error(`${tr('删除副本失败：', 'Could not delete the worktree: ')}${error.message}`))
     }
 
     /** Off the project list (until a session or the user brings it back); closed first if open here. */

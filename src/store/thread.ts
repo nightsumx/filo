@@ -72,9 +72,6 @@ export interface ThreadHost {
     onSettled: (thread: Thread) => void
     /** Plain copy (sent over IPC); the same for every project. */
     readonly enabledCapabilities: CapabilityId[]
-    /** Approval mode new sessions start in (all projects); updated when a thread switches mode. */
-    readonly approvalMode: ApprovalMode | undefined
-    setApprovalMode: (mode: ApprovalMode) => void
     /** Bumps when pi's own settings.json changes from the app; pi reads it only at startup. */
     piSettingsEpoch: number
     /** Per agent, what routing starts its processes with (RoutesState.launchKeys). */
@@ -154,6 +151,8 @@ export class Thread {
     /** The model picked in this thread (modelKey), put back when its process restarts before the agent saved the session. */
     private chosenModel: string | undefined = undefined
     queue: { steering: string[], followUp: string[] } = { steering: [], followUp: [] }
+    /** Typed during a compaction: as pi's TUI does, held here and sent once it ends. */
+    compactionQueue: { text: string, images: ImageContent[], mode: 'steer' | 'followUp' }[] = []
     /** Images sent with queued messages, by text: the queue pi reports carries text only. */
     private queuedImages = new Map<string, ImageContent[]>()
 
@@ -163,6 +162,8 @@ export class Thread {
 
     draft = ''
     images: ImageContent[] = []
+    /** Set on another agent's review of a thread: the reviewed thread's key, for sending the report back. In memory only. */
+    reviewOf: string | undefined = undefined
     /** Tool call id of the subagent shown in place of the transcript (opened from the tree or its card). */
     subagentView: string | null = null
     /**
@@ -677,7 +678,7 @@ export class Thread {
         await this.settleRoute(resumable)
         this.loadedConfig = this.configKey()
         this.restartPending = false
-        const agentId = await api().agentStart({ cwd: this.cwd, agent: this.agent, sessionPath: resumable, capabilities, approvalMode: this.host.approvalMode, route: toJS(this.route) })
+        const agentId = await api().agentStart({ cwd: this.cwd, agent: this.agent, sessionPath: resumable, capabilities, route: toJS(this.route) })
         runInAction(() => {
             this.agentId = agentId
             this.stopping = false
@@ -850,27 +851,33 @@ export class Thread {
 
     // ---------------------------------------------------------------- actions
 
-    async send() {
+    /** As in pi's TUI: during a run, Enter steers it and Alt+Enter queues a follow-up; idle, both start a turn. */
+    async send(mode: 'steer' | 'followUp' = 'steer') {
         const text = this.draft.trim()
         const images = toJS(this.images)
         if (!text && !images.length)
             return
         this.draft = ''
         this.images = []
+        await this.submit(text, images, mode)
+    }
 
+    private async submit(text: string, images: ImageContent[], mode: 'steer' | 'followUp') {
+        // An extension command (pi's /tree, /fork… among them) is no turn: its questions show as the idle thread's.
+        const space = text.indexOf(' ')
+        const command = text.startsWith('/') && this.commands.some(c => c.source === 'extension' && c.name === text.slice(1, space < 0 ? undefined : space))
+        if (this.compacting && !command) {
+            runInAction(() => this.compactionQueue.push({ text, images, mode }))
+            return
+        }
         if (this.running) {
-            // Codex-style: typing during a run steers the agent after its current tool calls.
             try {
                 if (images.length)
-                    this.queuedImages.set(text, images)
-                await this.request({ type: 'prompt', message: text, images, streamingBehavior: 'steer' })
+                    runInAction(() => this.queuedImages.set(text, images))
+                await this.request({ type: 'prompt', message: text, images, streamingBehavior: mode })
             }
             catch (error: any) {
-                runInAction(() => {
-                    this.queuedImages.delete(text)
-                    this.draft = text
-                    this.images = images
-                })
+                runInAction(() => this.restore([text], new Map([[text, images]])))
                 toast.error(error.message)
             }
             return
@@ -879,30 +886,49 @@ export class Thread {
         // The terminal pi moved the session on: a fresh process reads it before this prompt.
         if (this.agentStale && this.agentId)
             await this.restartAgent()
-        runInAction(() => {
-            this.pendingPrompt = { text, images, timestamp: Date.now() }
-            this.running = true
-            this.runStartedAt = Date.now()
-        })
+        if (!command) {
+            runInAction(() => {
+                this.pendingPrompt = { text, images, timestamp: Date.now() }
+                this.running = true
+                this.runStartedAt = Date.now()
+            })
+        }
         try {
             const response = await this.request<{ disposition: string }>({ type: 'prompt', message: text, images })
             if (response.data?.disposition === 'handled') {
-                runInAction(() => {
-                    this.pendingPrompt = null
-                    this.running = false
-                })
+                // A command's own turn (one that sends a message) runs from agent_start like any other.
+                if (!command) {
+                    runInAction(() => {
+                        this.pendingPrompt = null
+                        this.running = false
+                    })
+                }
+                // It may have moved the session (tree, fork, compaction) or what pi loaded (reload).
                 await this.syncState()
+                if (!this.running)
+                    await this.load().catch(() => {})
+                runInAction(() => {
+                    if (this.items.length)
+                        this.persisted = true
+                })
+                await Promise.all([this.refreshStats(), this.refreshCommands()])
             }
         }
         catch (error: any) {
             runInAction(() => {
                 this.pendingPrompt = null
                 this.running = false
-                this.draft = text
-                this.images = images
+                this.restore([text], new Map([[text, images]]))
             })
             toast.error(error.message)
         }
+    }
+
+    private async flushCompactionQueue() {
+        const queued = toJS(this.compactionQueue)
+        this.compactionQueue = []
+        for (const { text, images, mode } of queued)
+            await this.submit(text, images, mode)
     }
 
     /** Esc: pull queued messages back into the editor, then abort the run. */
@@ -935,52 +961,21 @@ export class Thread {
         }
     }
 
-    /**
-     * One queued message back into the editor. pi takes back only the whole queue (clear_queue), so
-     * the others go in again right after, in order and as what they were (steer or follow-up).
-     */
-    async dequeue(kind: 'steering' | 'followUp', text: string) {
-        let queued: Awaited<ReturnType<Thread['takeQueue']>>
-        try {
-            queued = await this.takeQueue()
-        }
-        catch (error: any) {
-            toast.error(error.message)
-            return
-        }
-        const list = queued[kind]
-        const at = list.indexOf(text)
-        if (at >= 0)
-            list.splice(at, 1)
-        const back = at >= 0 ? [text] : []
-        const requeue = [
-            ...queued.steering.map(message => ({ message, streamingBehavior: 'steer' })),
-            ...queued.followUp.map(message => ({ message, streamingBehavior: 'followUp' })),
-        ]
-        for (const [i, { message, streamingBehavior }] of requeue.entries()) {
-            const images = queued.images.get(message) ?? []
-            if (images.length)
-                runInAction(() => this.queuedImages.set(message, images))
-            try {
-                await this.request({ type: 'prompt', message, images, streamingBehavior })
-            }
-            catch (error: any) {
-                // What did not go in again is not lost: it joins the editor too.
-                back.push(...requeue.slice(i).map(r => r.message))
-                toast.error(error.message)
-                break
-            }
-        }
-        runInAction(() => this.restore(back, queued.images))
-        if (at < 0)
-            toast.info(tr('这条已经送出了，撤不回来', 'That message went out already'))
-    }
-
-    /** Empties the agent's queue; the images come along, as its queue_update forgets them. */
+    /** Empties the agent's queue and the held one; the images come along, as its queue_update forgets them. */
     private async takeQueue() {
         const images = new Map(this.queuedImages)
         const response = await this.request<{ steering: string[], followUp: string[] }>({ type: 'clear_queue' })
-        return { steering: response.data?.steering ?? [], followUp: response.data?.followUp ?? [], images }
+        return runInAction(() => {
+            const held = this.compactionQueue
+            this.compactionQueue = []
+            for (const h of held)
+                images.set(h.text, h.images)
+            return {
+                steering: [...response.data?.steering ?? [], ...held.filter(h => h.mode === 'steer').map(h => h.text)],
+                followUp: [...response.data?.followUp ?? [], ...held.filter(h => h.mode === 'followUp').map(h => h.text)],
+                images,
+            }
+        })
     }
 
     /** Taken-back messages go in front of what is being typed, with their images. */
@@ -1164,11 +1159,9 @@ export class Thread {
 
     async setThinkingLevel(level: ThinkingLevel) {
         try {
+            // pi clamps the level to what the model has: show the one it took.
             await this.request({ type: 'set_thinking_level', level })
-            runInAction(() => {
-                if (this.state)
-                    this.state.thinkingLevel = level
-            })
+            await this.syncState()
         }
         catch (error: any) {
             toast.error(error.message)
@@ -1334,10 +1327,8 @@ export class Thread {
             }
             if (this.planMode)
                 await this.guiCommand('gui-plan', 'off')
-            if (this.approvalMode !== undefined) {
+            if (this.approvalMode !== undefined)
                 await this.guiCommand('gui-approval', mode)
-                this.host.setApprovalMode(mode)
-            }
         }
         catch (error: any) {
             toast.error(error.message)
@@ -1546,6 +1537,7 @@ export class Thread {
                 this.compacting = false
                 if (event.errorMessage)
                     toast.error(`${tr('压缩失败：', 'Compaction failed: ')}${readableError(event.errorMessage)}`)
+                void this.flushCompactionQueue()
                 break
             case 'auto_retry_start':
                 this.retry = { attempt: event.attempt, maxAttempts: event.maxAttempts, errorMessage: readableError(event.errorMessage ?? '') }
@@ -1759,6 +1751,9 @@ export class Thread {
         }
         const unexpected = !this.stopping
         this.agentId = null
+        // The next process comes up in the chat view; it shows its TUI itself if it needs to.
+        this.tuiShown = false
+        this.tuiReason = ''
         this.routeInfo = null
         this.agentStatus = unexpected ? 'exited' : 'none'
         this.startPromise = null

@@ -3,11 +3,12 @@
 // <cwd>/.pi/settings.json, then compaction.modelOverrides["provider/id"] over compaction.*, then pi's
 // defaults. The capability choice (SETTINGS_KEY), shared with pi-cc-tui. And a watch on the file, which
 // pi in a terminal writes too.
-import type { ApprovalMode, CapabilityChoice, CapabilityState } from '@shared/capabilities'
-import type { CompactionInfo, GlobalCompaction, GlobalCompactionPatch, PiSettingsState } from '@shared/ipc'
+import type { CapabilityState } from '@shared/capabilities'
+import type { CompactionInfo, GlobalCompaction, GlobalCompactionPatch, PiDefaults, PiSettingsState } from '@shared/ipc'
 import { CACHE_WARMING } from '@shared/ipc'
+import { THINKING_LEVELS } from '@shared/pi'
 import type { FSWatcher } from 'node:fs'
-import { APPROVAL_MODES, capabilityChoice, capabilityState, resolveCapabilities } from '@shared/capabilities'
+import { capabilityChoice, capabilityState } from '@shared/capabilities'
 import { watch } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { SettingsWriteError, updateSettings, writeCapabilityChoice } from 'pi-capabilities/lib/settings.ts'
@@ -199,44 +200,48 @@ export async function setCacheWarming(mode: unknown): Promise<void> {
     await updateGlobalSettings(current => ({ ...current, cacheWarming: valid }))
 }
 
-/** What pi's TUI writes when a model is set as the default: new sessions, here and in a terminal, start on it. */
-export async function setDefaultModel(provider: unknown, model: unknown): Promise<void> {
+async function mergedSettings(cwd: unknown): Promise<Record<string, any>> {
+    const [global, project] = await Promise.all([
+        readJson(globalSettingsPath()),
+        typeof cwd === 'string' && path.isAbsolute(cwd) ? readJson(path.join(cwd, '.pi', 'settings.json')) : Promise.resolve({}),
+    ])
+    return merge(global, project)
+}
+
+export async function piDefaults(cwd: unknown): Promise<PiDefaults> {
+    const settings = await mergedSettings(cwd)
+    return {
+        model: typeof settings.defaultProvider === 'string' && typeof settings.defaultModel === 'string' ? `${settings.defaultProvider}/${settings.defaultModel}` : undefined,
+        thinkingLevel: THINKING_LEVELS.find(l => l === settings.defaultThinkingLevel) ?? 'medium',
+    }
+}
+
+/**
+ * What pi's TUI writes when a model is set as the default (agent-session.js setModel with persist):
+ * new sessions, here and in a terminal, start on it. With enabledModels set, the model joins it, so
+ * it stays among the scoped ones; a glob that already covers it gets the exact name next to it.
+ */
+export async function setDefaultModel(cwd: unknown, provider: unknown, model: unknown): Promise<void> {
     if (typeof provider !== 'string' || !provider || typeof model !== 'string' || !model)
         throw new Error(`Invalid model: ${String(provider)}/${String(model)}`)
-    await updateGlobalSettings(current => ({ ...current, defaultProvider: provider, defaultModel: model }))
+    const ref = `${provider}/${model}`
+    const enabled = (await mergedSettings(cwd)).enabledModels
+    const patterns: string[] = Array.isArray(enabled) ? enabled.filter(p => typeof p === 'string') : []
+    const listed = patterns.some(p => p.toLowerCase() === ref.toLowerCase() || p.toLowerCase() === model.toLowerCase())
+    await updateGlobalSettings(current => ({
+        ...current,
+        defaultProvider: provider,
+        defaultModel: model,
+        ...(patterns.length && !listed ? { enabledModels: [...patterns, ref] } : {}),
+    }))
 }
 
-/** The part of an older state.json that held the choice. */
-export interface OldCapabilityState {
-    capabilities?: unknown
-    approvalMode?: unknown
-    /** Older still: per project cwd, like `capabilities` as a map. */
-    approvalModes?: Record<string, unknown>
-    activeProject?: string | null
-}
-
-/**
- * The choice an older state.json held, undefined when it held none. Per-project maps (older still)
- * give the active project's entry, else the last saved one.
- */
-export function oldCapabilityChoice(old: OldCapabilityState): CapabilityChoice | undefined {
-    const perProject = (map: unknown) => isObject(map) ? (old.activeProject && map[old.activeProject]) || Object.values(map).at(-1) : undefined
-    const enabled = isObject(old.capabilities) ? perProject(old.capabilities) : old.capabilities
-    const mode = old.approvalMode ?? perProject(old.approvalModes)
-    if (enabled === undefined && mode === undefined)
-        return undefined
-    const { ids, preset } = resolveCapabilities(enabled)
-    return { enabled: preset ?? ids, approvalMode: APPROVAL_MODES.includes(mode as ApprovalMode) ? mode as ApprovalMode : 'auto' }
-}
-
-/**
- * Older builds kept the choice in the app's state.json. Moved once, when settings.json has none:
- * from then on pi in a terminal follows it too.
- */
-export async function migrateCapabilities(old: OldCapabilityState): Promise<void> {
-    const choice = oldCapabilityChoice(old)
-    if (choice && !(await readCapabilities()).saved)
-        await setCapabilities(choice)
+/** pi's TUI thinking selector, "set as default". */
+export async function setDefaultThinkingLevel(level: unknown): Promise<void> {
+    const valid = THINKING_LEVELS.find(l => l === level)
+    if (!valid)
+        throw new Error(`Unknown thinking level: ${String(level)}`)
+    await updateGlobalSettings(current => ({ ...current, defaultThinkingLevel: valid }))
 }
 
 // ---------------------------------------------------------------- watching (the terminal changes it too)
@@ -258,7 +263,6 @@ export function piSettingsOf(settings: Record<string, any>): PiSettingsState {
         capabilities: capabilityState(capabilityChoice(settings)),
         webAccess: packageState(settings),
         cacheWarming: CACHE_WARMING.includes(settings.cacheWarming) ? settings.cacheWarming : 'streaming',
-        defaultModel: typeof settings.defaultProvider === 'string' && typeof settings.defaultModel === 'string' ? `${settings.defaultProvider}/${settings.defaultModel}` : undefined,
     }
 }
 

@@ -10,6 +10,7 @@ import { spawn } from 'node:child_process'
 import path from 'node:path'
 import process from 'node:process'
 import { promptApproval } from '../tui/approval'
+import { clip } from './review'
 import { serialized } from '../tui/dialog'
 
 const APPROVAL_TITLE_PREFIX = 'gui-approval '
@@ -19,7 +20,6 @@ const PARENT_ONLY = new Set(['subagent.ts', 'ask.ts', 'plan.ts', 'review.ts'])
 export const RESULT_CLIP = 2000
 const THINKING_CLIP = 8000
 
-export const clip = (text: string, max: number) => text.length > max ? `${text.slice(0, max)}\n… (${text.length - max} more characters)` : text
 
 /** `-e` values from this process's command line, without parent-only capabilities. */
 export function childExtensionArgs(argv: string[]): string[] {

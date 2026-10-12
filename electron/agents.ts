@@ -53,7 +53,7 @@ class PiAgent implements ManagedAgent {
     private exited = false
 
     constructor(env: PiEnv, options: AgentStartOptions, extensionsDir: string, callbacks: AgentCallbacks, hostEnv: Record<string, string> = {}, extra: PiExtra = {}) {
-        const args = ['--mode', 'rpc', ...hostExtensionArgs(extensionsDir), ...(extra.args ?? []), ...capabilityArgs(options.capabilities, extensionsDir, { approvalMode: options.approvalMode })]
+        const args = ['--mode', 'rpc', ...hostExtensionArgs(extensionsDir), ...(extra.args ?? []), ...capabilityArgs(options.capabilities, extensionsDir)]
         if (options.sessionPath)
             args.push('--session', options.sessionPath)
         const command = piCommand(env, args)

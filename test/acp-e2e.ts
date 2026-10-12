@@ -140,7 +140,7 @@ async function main() {
         await until('the session is listed', () => js<boolean>(`window.__app.sessions.some(s => s.path === ${JSON.stringify(key)} && s.agent === 'opencode')`))
         check(true, 'the session shows up in the project with its agent')
         check(await js<string>(`window.__app.sessions.find(s => s.path === ${JSON.stringify(key)}).name`) === 'Edit notes.txt', 'the agent\'s session title names it')
-        check(await js<boolean>(`[...document.querySelectorAll('[role=treeitem]')].some(r => r.textContent.includes('OpenCode'))`), 'the sidebar row says OpenCode')
+        check(await js<boolean>(`[...document.querySelectorAll('[role=treeitem]')].some(r => r.title.includes('OpenCode'))`), 'the sidebar row says OpenCode')
         check(await js<boolean>(`![...document.querySelectorAll('button')].some(b => b.getAttribute('title') === 'Fork from here')`), 'fork stays hidden for ACP threads')
 
         // The app's copy of the transcript feeds search and the edit log.
@@ -195,7 +195,7 @@ async function main() {
         check(!!forkKey && forkKey.startsWith('acp:opencode:fork-'), `session/fork makes a new session (${forkKey})`)
         await js(`window.__app.revealHere(${JSON.stringify(forkKey)})`)
         await until('the fork opens', () => js<boolean>(`(() => { const t = window.__app.threads.get(${JSON.stringify(forkKey)}); return !!t && t.loaded && JSON.stringify(t.turns).includes('echo: after slow') })()`), 20_000)
-        check(await js<string>(`window.__app.sessions.find(s => s.path === ${JSON.stringify(forkKey)}).name`) === 'Edit notes.txt (fork)', 'the fork is listed under its source\'s name')
+        check(!(await js<string | undefined>(`window.__app.sessions.find(s => s.path === ${JSON.stringify(forkKey)}).name`))?.includes('(fork)'), 'the fork has only the name the agent gives it')
 
         // Delete from the agent: its own record goes too.
         await js(`(() => { void window.__app.deleteSession(window.__app.sessions.find(s => s.path === ${JSON.stringify(forkKey)}), { history: true }); return true })()`)

@@ -82,6 +82,7 @@ export interface PiModel {
 export const modelKey = (m: { provider: string, id: string }) => `${m.provider}/${m.id}`
 
 export type ThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+export const THINKING_LEVELS: readonly ThinkingLevel[] = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']
 
 export interface RpcSessionState {
     model?: PiModel
@@ -111,7 +112,7 @@ export interface SessionStats {
     contextUsage?: { tokens: number | null, contextWindow: number, percent: number | null }
 }
 
-export interface SlashCommand { name: string, description?: string, source: 'extension' | 'prompt' | 'skill' }
+export interface SlashCommand { name: string, description?: string, source: 'builtin' | 'extension' | 'prompt' | 'skill' }
 
 /** Any record pi writes to stdout that is not a command response. */
 export interface PiEvent { type: string, [key: string]: any }

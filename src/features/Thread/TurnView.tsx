@@ -472,7 +472,7 @@ export const TranscriptRowView = memo(({ row, thread, subagent, top }: { row: Tr
                                     </TooltipContent>
                                 </Tooltip>
                             </TooltipProvider>
-                            <ReviewControl thread={thread} turnKey={turn.key} />
+                            <ReviewControl thread={thread} turnKey={turn.key} finalText={row.finalText} />
                             {row.finalText && (
                                 <span className="flex h-6 items-center opacity-0 transition-opacity group-hover/turn:opacity-100">
                                     <CopyAction text={row.finalText} />

@@ -54,7 +54,7 @@ export interface AgentAdapterCallbacks {
      * finishes. `prompt` is set when the user just sent one; `title` and `name` when the agent
      * suggests them.
      */
-    onSession?: (agent: AgentAdapter, change: { prompt?: string, title?: string, name?: string }) => void
+    onSession?: (agent: AgentAdapter, change: { prompt?: string, title?: string }) => void
     /**
      * The agent forked the session into a new one. The service layer must allocate a key for it
      * and return it, so the adapter can switch to that key.

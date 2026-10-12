@@ -42,6 +42,7 @@ export const CLAUDE_TUI_CAPS: AcpAgentCaps = {
     fork: false,
     delete: false,
     list: true,
+    rename: true,
     xai: false,
     ask: true,
 }
@@ -148,10 +149,11 @@ export function hookSettings(dir: string, cwd: string, managed = managedDirs()):
 
 /**
  * The app's own environment that must not reach the TUI: a parent Claude Code session (it would
- * refuse to nest, or report to it), and an IDE's (an app started from a JetBrains IDE's terminal
- * carries its bundle id, and Claude Code then greets the IDE and tries to connect to it).
+ * refuse to nest, report to it, or take itself for its child and not save its transcript), and an
+ * IDE's (an app started from a JetBrains IDE's terminal carries its bundle id, and Claude Code then
+ * greets the IDE and tries to connect to it).
  */
-const STRIP_ENV = ['CLAUDECODE', 'CLAUDE_CODE_ENTRYPOINT', 'CLAUDE_CODE_SSE_PORT', 'ENABLE_IDE_INTEGRATION', 'TERMINAL_EMULATOR', 'ELECTRON_RUN_AS_NODE', '__CFBundleIdentifier']
+const STRIP_ENV = ['CLAUDECODE', 'CLAUDE_CODE_ENTRYPOINT', 'CLAUDE_CODE_SSE_PORT', 'CLAUDE_CODE_CHILD_SESSION', 'CLAUDE_CODE_SESSION_ID', 'CLAUDE_CODE_SESSION_ATTENDED', 'CLAUDE_CODE_MESSAGING_SOCKET', 'CLAUDE_CODE_MESSAGING_TOKEN', 'CLAUDE_CODE_EXECPATH', 'CLAUDE_PID', 'AI_AGENT', 'ENABLE_IDE_INTEGRATION', 'TERMINAL_EMULATOR', 'ELECTRON_RUN_AS_NODE', '__CFBundleIdentifier']
 
 /** Claude Code's folder: CLAUDE_CONFIG_DIR, else ~/.claude. */
 export function claudeDir(env: Record<string, string | undefined> = process.env): string {
@@ -199,7 +201,8 @@ const SLEEP = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 interface Approval {
     id: string
     toolUseId: string
-    kind: 'approval' | 'ask'
+    /** `tui`: a dialog only the TUI answers, shown there or taken up there by the user's keys. */
+    kind: 'approval' | 'ask' | 'tui'
     questions?: AskQuestion[]
 }
 
@@ -227,8 +230,10 @@ export class ClaudeTuiAgent implements AgentAdapter {
     /** SessionStart came: the TUI is at its prompt. */
     private started = false
     private startedWaiters: (() => void)[] = []
-    /** The user typed in the TUI since the last submit: a GUI prompt would join their line. */
-    private dirty = false
+    /** Not started within STARTUP_GRACE_MS: the TUI probably asks something first. */
+    private slowStart = false
+    /** Characters the user typed in the TUI's input since the last submit: a GUI prompt would join their line. */
+    private dirty = 0
     private lastPre: { name: string, input: string, id: string } | null = null
     private waits = new Map<string, Approval>()
     private model = ''
@@ -324,6 +329,7 @@ export class ClaudeTuiAgent implements AgentAdapter {
         mkdirSync(tmp, { recursive: true, mode: 0o700 })
         this.settingsFile = path.join(tmp, `${this.id}.json`)
         this.started = false
+        this.slowStart = false
         this.wrote = false
         this.submitted = 0
         this.askedAtStart = this.log.fold.asked
@@ -347,8 +353,10 @@ export class ClaudeTuiAgent implements AgentAdapter {
             this.hooksOff(this.hooksIssue)
         const terminal = this.terminal
         setTimeout(() => {
-            if (!this.started && !this.exited && this.terminal === terminal)
+            if (!this.started && !this.exited && this.terminal === terminal) {
+                this.slowStart = true
                 this.emit({ type: 'tui_view', show: true, reason: 'starting' })
+            }
         }, STARTUP_GRACE_MS)
     }
 
@@ -478,7 +486,7 @@ export class ClaudeTuiAgent implements AgentAdapter {
             case 'UserPromptSubmit':
                 this.markStarted()
                 this.submitted++
-                this.dirty = false
+                this.dirty = 0
                 this.awaiting = { prompts: this.log.fold.prompts, until: Date.now() + PROMPT_RECORD_MS }
                 if (!this.named && typeof event.prompt === 'string') {
                     this.named = true
@@ -589,11 +597,16 @@ export class ClaudeTuiAgent implements AgentAdapter {
             this.emit({ type: 'tui_view', show: true, reason: 'dialog' })
             return
         }
+        // Held until the call ends, so a GUI prompt does not go into the dialog as its answer.
+        const inTui = () => {
+            this.waits.set(toolUseId, { id: toolUseId, toolUseId, kind: 'tui' })
+            this.emit({ type: 'tui_view', show: true, reason: 'dialog' })
+        }
         if (toolName === 'AskUserQuestion') {
             const questions = askQuestions(input.questions)
             // One single-choice question maps onto its number keys; the rest is the TUI's own form.
             if (questions.length !== 1 || questions[0].multiple || !questions[0].options.length) {
-                this.emit({ type: 'tui_view', show: true, reason: 'dialog' })
+                inTui()
                 return
             }
             for (let i = 0; i < 10; i++) {
@@ -604,11 +617,11 @@ export class ClaudeTuiAgent implements AgentAdapter {
                 await SLEEP(150)
                 this.tail()
             }
-            this.emit({ type: 'tui_view', show: true, reason: 'dialog' })
+            inTui()
             return
         }
         if (toolName === 'ExitPlanMode') {
-            this.emit({ type: 'tui_view', show: true, reason: 'dialog' })
+            inTui()
             return
         }
         const always = alwaysLabel(event.permission_suggestions)
@@ -673,10 +686,28 @@ export class ClaudeTuiAgent implements AgentAdapter {
 
     /** Keys a window typed into the TUI: a line in progress there holds the GUI's prompts back. */
     private typed(data: string) {
-        if (data.includes(ENTER) || data.includes('\x03') || data.includes('\x15'))
-            this.dirty = false
-        else if (data.startsWith('\x1B[200~') || /^[^\x00-\x1F\x7F]/.test(data))
-            this.dirty = true
+        // Sign-in and the folder question come before the prompt (no hooks: no telling when).
+        if (!this.started && !this.hooksIssue)
+            return
+        // Keys for a dialog, not the input line: the user answers it there, and its card goes.
+        if (this.waits.size) {
+            if (data !== ESC && data.startsWith(ESC))
+                return
+            for (const wait of this.waits.values()) {
+                if (wait.kind === 'approval')
+                    this.emit({ type: 'extension_ui_cancel', id: wait.id })
+                wait.kind = 'tui'
+            }
+            return
+        }
+        if (data.startsWith('\x1B[200~'))
+            this.dirty += data.length
+        else if (data.includes(ENTER) || data.includes('\x03') || data.includes('\x15'))
+            this.dirty = 0
+        else if (data === '\x7F' || data === '\b')
+            this.dirty = Math.max(0, this.dirty - 1)
+        else if (/^[^\x00-\x1F\x7F]/.test(data))
+            this.dirty += [...data].length
     }
 
     private async whenStarted() {
@@ -692,7 +723,9 @@ export class ClaudeTuiAgent implements AgentAdapter {
                 ? tr('Claude Code 的 hooks 没开，这一轮请在终端里跟进', 'Claude Code\'s hooks are off: follow this turn in the terminal')
                 : tr('Claude Code 的 hooks 没开，先在终端里发第一条', 'Claude Code\'s hooks are off: send the first prompt in the terminal'))
         }
-        this.emit({ type: 'tui_view', show: true, reason: 'starting' })
+        // Within the grace the TUI is just coming up; past it, it is asking something.
+        if (this.slowStart)
+            this.emit({ type: 'tui_view', show: true, reason: 'starting' })
         await new Promise<void>(resolve => this.startedWaiters.push(resolve))
     }
 
@@ -714,6 +747,19 @@ export class ClaudeTuiAgent implements AgentAdapter {
         terminals!.inject(this.terminal, paste(text))
         await SLEEP(80)
         terminals!.inject(this.terminal, ENTER)
+        // A busy TUI can take the Enter before the paste is in its line, as an empty submit; until
+        // UserPromptSubmit says it went, Enter again (at an idle, empty prompt it does nothing).
+        const terminal = this.terminal
+        const before = this.submitted
+        if (!this.running && !this.hooksIssue && !text.trim().startsWith('/'))
+            void (async () => {
+                for (let i = 0; i < 3; i++) {
+                    await SLEEP(1500)
+                    if (this.submitted !== before || this.running || this.waits.size || this.dirty || this.exited || this.terminal !== terminal)
+                        return
+                    terminals!.inject(terminal, ENTER)
+                }
+            })()
         // A command that opens a menu (/model, /config, …) is answered in the TUI.
         if (/^\/\S+$/.test(text.trim()) && !/^\/(compact|clear|cost|exit)$/.test(text.trim()))
             this.emit({ type: 'tui_view', show: true, reason: 'command' })
@@ -766,7 +812,7 @@ export class ClaudeTuiAgent implements AgentAdapter {
                 case 'get_available_thinking_levels':
                     return ok({ levels: [] })
                 case 'get_commands':
-                    return ok({ commands: [{ name: 'compact', description: tr('压缩上下文，腾出空间', 'Summarize the conversation to free up context'), source: 'prompt' }] })
+                    return ok({ commands: [{ name: 'compact', description: tr('压缩上下文，腾出空间', 'Summarize the conversation to free up context'), source: 'builtin' }] })
                 case 'get_session_stats':
                     return ok({ tokens: this.log.transcript.totals(), cost: undefined })
                 case 'prompt': {
@@ -791,9 +837,13 @@ export class ClaudeTuiAgent implements AgentAdapter {
                     return ok({})
                 case 'set_session_name': {
                     const name = String(command.name ?? '').trim().replace(/\s+/g, ' ')
-                    this.callbacks.onSession?.(this, { name })
-                    if (name && !this.running && !this.dirty && this.started)
-                        await this.prompt(`/rename ${name}`, [])
+                    if (!name)
+                        throw new Error(tr('名字不能为空', 'The name is empty'))
+                    // /rename is typed into its editor: only when nothing else is there or running.
+                    if (this.running || this.dirty || !this.started)
+                        throw new Error(tr('Claude Code 正忙，等它停下再改名', 'Claude Code is busy; rename once it stops'))
+                    await this.prompt(`/rename ${name}`, [])
+                    this.callbacks.onSession?.(this, { title: name })
                     return ok()
                 }
                 default:

@@ -4,12 +4,16 @@
 //   - an issue the reviewer reproduced is marked so, with the command's exit code as evidence
 //   - picked items and a note go back to the agent as one feedback prompt, and are marked sent
 //   - the report and the sent marks survive reloading the session from disk
+//   - another agent reviews in a thread of its own, told the same facts with the files to diff, and
+//     its report goes back into the reviewed thread's composer
+//   - handing a thread over opens another agent's thread with the same facts waiting in its composer
 //
 //   bun run build && bun run e2e:review
 import { execFileSync } from 'node:child_process'
 import { mkdir, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import process from 'node:process'
+import type { Page } from './app'
 import { check, launch, PORT, until, windows, workDir } from './app'
 import { startMockLlm } from './harness'
 
@@ -18,6 +22,16 @@ const SHOTS = process.env.SHOTS ?? ''
 
 const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8' }).trim()
 const toolNames = (r: any) => r.tools.map((t: any) => t.function?.name ?? t.name)
+
+/** A real click in the middle of an element: Radix menus open on pointer down, not on click(). */
+async function click(page: Page, element: string) {
+    const box = await until('element to click', () => page.evaluate<{ x: number, y: number } | null>(`(() => {
+        const r = (${element})?.getBoundingClientRect()
+        return r && r.width ? { x: r.x + r.width / 2, y: r.y + r.height / 2 } : null
+    })()`))
+    await page.call('Input.dispatchMouseEvent', { type: 'mousePressed', ...box, button: 'left', clickCount: 1 })
+    await page.call('Input.dispatchMouseEvent', { type: 'mouseReleased', ...box, button: 'left', clickCount: 1 })
+}
 
 async function main() {
     await rm(WORK, { recursive: true, force: true })
@@ -51,6 +65,8 @@ async function main() {
         if (last?.role === 'tool')
             return { text: 'Done: a.txt now says fixed, and I verified it.' }
         const prompt = JSON.stringify(last?.content ?? '')
+        if (prompt.includes('reviewing another agent'))
+            return { text: 'Needs work.\n\nR1 (high) a.txt:1 says "changed", not "fixed".' }
         if (prompt.includes('independent reviewer'))
             return { text: 'R1: fixing it now.' }
         if (prompt.includes('edit'))
@@ -87,7 +103,9 @@ async function main() {
 
         await until('Review in the footer', () => page.evaluate<boolean>(`!!${button('Review')}`))
         check(true, 'a finished turn that did work offers Review in its footer')
-        await page.evaluate(`${button('Review')}.click()`)
+        const reviewer = (hint: string) => `[...document.querySelectorAll('[role=menuitem]')].find(e => e.textContent.includes(${JSON.stringify(hint)}))`
+        await click(page, button('Review'))
+        await page.evaluate(`${reviewer('A separate pi process')}.click()`)
         await until('review progress', async () => (await text()).includes('Reviewing'), 10_000)
         check(await page.evaluate<boolean>(`!!${button('Stop')}`), 'while it runs, the footer shows its progress and Stop')
         if (SHOTS)
@@ -142,6 +160,23 @@ async function main() {
         check(await page.evaluate<number>(`[...document.querySelectorAll('span')].filter(s => s.textContent === 'sent').length`) === 2, 'after reloading the session the report and sent marks are still there')
         await until('Review again', () => page.evaluate<boolean>(`!!${button('Review')}`))
         check(true, 'the latest turn offers Review again')
+
+        // Another agent's review (pi's thread here: every agent's thread takes the same path).
+        const author = await page.evaluate<string>(`${thread}.key`)
+        await page.evaluate(`window.__app.continueWith(${thread}, 'pi', 'review')`)
+        await until('review thread answered', () => page.evaluate<boolean>(`(() => { const t = ${thread}; return t.key !== ${JSON.stringify(author)} && !t.running && t.reviewOf === ${JSON.stringify(author)} && JSON.stringify(t.items).includes('R1 (high) a.txt:1') })()`), 30_000)
+        const task = JSON.stringify(llm.requests.at(-1)!.messages)
+        check(task.includes('reviewing another agent') && task.includes('edit a.txt to say fixed') && task.includes('- a.txt') && !task.includes('```diff') && !task.includes('submit_review'), 'the review thread is told the requests, the claims and the files to diff')
+        await click(page, button('Send back to'))
+        await until('back in the author', () => page.evaluate<boolean>(`window.__app.active.key === ${JSON.stringify(author)}`))
+        const draft = await page.evaluate<string>(`window.__app.active.draft`)
+        check(draft.startsWith('An independent reviewer (pi) checked your work') && draft.includes('R1 (high) a.txt:1'), 'Send back puts the report in the reviewed thread\'s composer')
+
+        const requests = llm.requests.length
+        await page.evaluate(`window.__app.continueWith(${thread}, 'pi', 'handoff')`)
+        await until('handoff tab', () => page.evaluate<boolean>(`window.__app.active.key !== ${JSON.stringify(author)} && window.__app.active.draft.startsWith('You are taking over')`))
+        const brief = await page.evaluate<string>(`window.__app.active.draft`)
+        check(brief.includes('edit a.txt to say fixed') && brief.includes('- a.txt') && !(await page.evaluate<boolean>(`window.__app.active.running`)) && llm.requests.length === requests, 'a handoff opens a new thread with the brief in its composer, not sent')
         page.close()
     }
     finally {

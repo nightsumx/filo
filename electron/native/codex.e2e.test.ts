@@ -198,6 +198,35 @@ describe.skipIf(!codex)('Codex native adapter against codex app-server', () => {
         expect(requests).toHaveLength(1)
     }, 30_000)
 
+    it('runs on config.toml\'s approval and sandbox until a mode is picked', async () => {
+        const events: PiEvent[] = []
+        let settle = () => {}
+        const settled = new Promise<void>(resolve => settle = resolve)
+        const callbacks: AgentAdapterCallbacks = {
+            onEvent: (_id, e) => {
+                events.push(e)
+                if (e.type === 'agent_settled')
+                    settle()
+            },
+            onExit: () => {},
+            onFork: (_a, id) => `acp:codex:${id}`,
+        }
+        const base = launch()
+        const agent = new CodexAgent(spec, { ...base, args: ['-c', 'approval_policy="never"', ...base.args] }, { cwd: work }, callbacks)
+        agents.push(agent)
+        await agent.ready
+        const mode = (await ok(agent, { type: 'get_state' })).configOptions.find((o: any) => o.id === 'mode')
+        expect(mode.currentValue).toBe('config')
+        expect(mode.options.find((o: any) => o.value === 'config').description).toBe('approval_policy never · sandbox readOnly')
+        script = [exec('touch escalated.txt', { sandbox_permissions: 'require_escalated' }), { text: 'done' }]
+        await ok(agent, { type: 'prompt', message: 'make it' })
+        await settled
+        expect(requests.length).toBeGreaterThan(1)
+        // never: Codex declines the escalation itself instead of asking.
+        expect(events.some(e => e.type === 'extension_ui_request')).toBe(false)
+        expect(existsSync(path.join(work, 'escalated.txt'))).toBe(false)
+    }, 30_000)
+
     it('asks before an escalated command: allow runs it, deny declines it', async () => {
         const { agent, events, next, settled } = await start()
         script = [exec('touch allowed.txt', { sandbox_permissions: 'require_escalated', justification: 'make the marker' }), { text: 'done' }]

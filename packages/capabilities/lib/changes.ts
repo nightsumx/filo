@@ -1,6 +1,5 @@
 // The working tree as review and autopilot see it: the diff of the files a thread edited, or of every
 // uncommitted change when it edited none, within a budget.
-import type { ExtensionAPI } from '@earendil-works/pi-coding-agent'
 import type { Changes } from './review'
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
@@ -27,8 +26,13 @@ export function statusPaths(output: string): string[] {
     return out
 }
 
+/** pi.exec, or the same over child_process (the desktop app). */
+export interface Exec {
+    exec: (command: string, args: string[], options: { cwd: string, timeout: number }) => Promise<{ code: number, stdout: string }>
+}
+
 /** The diff to start from: the thread's files, or every uncommitted change. */
-export async function collectChanges(pi: ExtensionAPI, cwd: string, threadFiles: string[], budget = DIFF_BUDGET): Promise<Changes> {
+export async function collectChanges(pi: Exec, cwd: string, threadFiles: string[], budget = DIFF_BUDGET): Promise<Changes> {
     const git = (...args: string[]) => pi.exec('git', args, { cwd, timeout: 20_000 })
     const top = await git('rev-parse', '--show-toplevel')
     const root = top.code === 0 ? top.stdout.trim() : undefined
