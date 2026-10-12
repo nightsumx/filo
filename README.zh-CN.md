@@ -20,7 +20,7 @@ Windows（10 或 11，x64），在 PowerShell 里：
 irm https://filoapp.dev/install.ps1 | iex
 ```
 
-脚本从 GitHub 下载最新的 [release](https://github.com/nightsumx/filo/releases)，校验之后再安装；再运行一次就是更新，运行前先退出 Filo。不需要管理员或 root 权限。
+脚本从 filoapp.dev 下载最新版，校验之后再安装；再运行一次就是更新，运行前先退出 Filo。不需要管理员或 root 权限。
 
 - macOS：校验签名，装到 `/Applications`；没有管理员权限的话装到 `~/Applications`。旧名 Pi 的安装会被替换掉。
 - Linux：校验 SHA-256，把 AppImage 放到 `~/.local/share/filo`，加上应用菜单项和 `~/.local/bin/filo` 命令。AppImage 需要 FUSE（`fuse3`），大多数发行版自带。
@@ -28,7 +28,7 @@ irm https://filoapp.dev/install.ps1 | iex
 
 不需要 Node.js 或 pi 命令行：Filo 自带一份 pi，登录 shell 里有你自己的 pi 就用你的。第一次打开时有个设置向导：可以装 Node.js、终端用的 pi、Claude Code、Codex 和 Grok Build，每个都在窗口里的终端里跑官方安装程序（要输密码或回答提示就在里面输），然后选新线程默认用哪个 agent。之后在“设置 → Agent”里可以改，也能重新打开向导。在“设置 → 供应商”里登录订阅、填 API key，或者接入本地模型，配置都存在 pi 自己的 `~/.pi/agent`。
 
-也可以从 releases 页面手动下载 `.dmg`、AppImage 或 `Filo-Setup-x64.exe`。macOS 版没有经过 Apple 公证，浏览器下载的第一次打开会被拦下：先打开一次，再到“系统设置 → 隐私与安全性”点“仍要打开”。Windows 安装程序没有代码签名，SmartScreen 会拦一次：点“更多信息”，再点“仍要运行”。
+也可以在 [filoapp.dev](https://filoapp.dev) 手动下载 `.dmg`、AppImage 或 `Filo-Setup-x64.exe`。macOS 版没有经过 Apple 公证，浏览器下载的第一次打开会被拦下：先打开一次，再到“系统设置 → 隐私与安全性”点“仍要打开”。Windows 安装程序没有代码签名，SmartScreen 会拦一次：点“更多信息”，再点“仍要运行”。
 
 ## 功能
 

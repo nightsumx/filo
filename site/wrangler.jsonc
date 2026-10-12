@@ -1,13 +1,17 @@
-// The website: static files only, served by a Worker at filoapp.dev.
+// The website: static files, and the release downloads from R2 (worker.js), at filoapp.dev.
 //   bun run deploy:site   (copies scripts/install.sh in, then deploys)
 {
     "name": "filo-www",
     "account_id": "90a866fd8bf964c3ae839061a40e3e7e",
     "compatibility_date": "2026-10-01",
+    "main": "./worker.js",
     "assets": {
         "directory": "./public",
-        "not_found_handling": "404-page"
+        "binding": "ASSETS",
+        "not_found_handling": "404-page",
+        "run_worker_first": ["/download/*"]
     },
+    "r2_buckets": [{ "binding": "RELEASES", "bucket_name": "filo-releases" }],
     "routes": [{ "pattern": "filoapp.dev", "custom_domain": true }],
     "workers_dev": false
 }

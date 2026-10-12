@@ -96,7 +96,7 @@ Approval, plan mode, questions, todos, subagents, review and autopilot come from
 
 ## With the Filo desktop app
 
-pi-cc-tui lets the [Filo desktop app](https://github.com/nightsumx/filo) see and join the pi running in your terminal. Nothing changes in the terminal without the app.
+pi-cc-tui lets the [Filo desktop app](https://filoapp.dev) see and join the pi running in your terminal. Nothing changes in the terminal without the app.
 
 - **Presence** — the app lists this pi in its project tree as working, waiting for you, or idle, from a small file at `~/.pi/agent/pi-kit-presence/<pid>.json`.
 - **Bridge** — open the same session in the app and it joins this pi instead of starting a second one on the same file, which would fork the conversation. A run typed here streams into the app as it happens, including thinking; a prompt, stop or model change from the app runs here. Approval prompts, questions and plan sign-off open on both sides, and whichever side answers first closes the other. The app connects over a unix socket, `~/.pi/agent/pi-kit-presence/<pid>.sock`, that only your user can open, and speaks pi's RPC protocol on it. Quitting pi (or `/new`, `/resume`) disconnects the app, which keeps the transcript. While joined, forking and clearing queued messages only work from the terminal.

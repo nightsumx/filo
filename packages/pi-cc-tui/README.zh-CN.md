@@ -98,7 +98,7 @@ pi install npm:pi-cc-tui
 
 ## 配合 Filo 桌面版
 
-pi-cc-tui 让 [Filo 桌面版](https://github.com/nightsumx/filo)看得见、也能连上终端里的 pi。不用桌面版的话，终端里什么都不变。
+pi-cc-tui 让 [Filo 桌面版](https://filoapp.dev)看得见、也能连上终端里的 pi。不用桌面版的话，终端里什么都不变。
 
 - **状态同步**：桌面版的项目树里会列出这个 pi，显示在跑、等你回答还是空闲，读的是 `~/.pi/agent/pi-kit-presence/<pid>.json` 这个小文件。
 - **直连**：在桌面版打开同一个会话时，它会直接连上这个 pi，不再在同一个文件上另起一个（那样对话会分叉）。终端里打的字实时显示在桌面版，思考过程也有；桌面版发的消息、停止、切模型都在这里执行。审批、提问、计划确认两边都会弹出，哪边先回答，另一边的就关掉。连接走 unix socket `~/.pi/agent/pi-kit-presence/<pid>.sock`，只有你自己的用户能打开，上面跑的是 pi 的 RPC 协议。退出 pi（或 `/new`、`/resume`）后桌面版自动断开，对话内容保留。连接期间，分叉和清空排队消息只能在终端里做。

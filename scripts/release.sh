@@ -1,8 +1,9 @@
 #!/bin/bash
-# Builds the macOS app from the committed HEAD and publishes it as a GitHub release, tagged
-# v<package.json version>, with fixed asset names so releases/latest/download/... always points at it.
-# The tag also starts .github/workflows/release.yml, which builds Linux and Windows and adds them to
-# the draft; the release goes public once that has passed, so every OS ships the same version.
+# Builds the macOS app from the committed HEAD and opens a draft GitHub release, tagged
+# v<package.json version>, with fixed asset names. The tag also starts .github/workflows/release.yml,
+# which builds Linux and Windows and adds them to the draft. Once that has passed, every file goes to
+# the R2 bucket under v<version>/ and `latest` names the version: filoapp.dev/download/<file>
+# (site/worker.js) serves it, so every OS ships the same version and the repository can be private.
 #
 # The build runs on a copy of HEAD, not the working tree: uncommitted edits (other agents share this
 # folder) must not ship.
@@ -85,5 +86,15 @@ if ! gh run watch "$run" -R "$repo" --exit-status --interval 30 >/dev/null; then
     echo "The Linux/Windows build failed (gh run view $run -R $repo --log-failed); the draft stays unpublished." >&2
     exit 1
 fi
+rm -rf "$out"
+gh release download "$tag" -R "$repo" -D "$out"
+for f in "$out"/Filo-*; do
+    case "$f" in
+        *.sha256) type=text/plain ;;
+        *) type=application/octet-stream ;;
+    esac
+    npx wrangler r2 object put "filo-releases/$tag/$(basename "$f")" --remote --file "$f" --content-type "$type"
+done
+printf '%s\n' "$version" | npx wrangler r2 object put filo-releases/latest --remote --pipe --content-type text/plain
 gh release edit "$tag" -R "$repo" --draft=false --latest
 echo "Published $tag"

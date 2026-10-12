@@ -20,7 +20,7 @@ Windows (10 or 11, x64), in PowerShell:
 irm https://filoapp.dev/install.ps1 | iex
 ```
 
-The scripts download the latest [release](https://github.com/nightsumx/filo/releases) and check it before installing; run one again to update, after quitting Filo. No admin or root rights needed.
+The scripts download the latest release from filoapp.dev and check it before installing; run one again to update, after quitting Filo. No admin or root rights needed.
 
 - macOS: checks the signature and installs to `/Applications` (`~/Applications` without admin rights). It replaces an older install named Pi.
 - Linux: checks the SHA-256 and puts the AppImage in `~/.local/share/filo`, with an app menu entry and a `~/.local/bin/filo` command. AppImages need FUSE (`fuse3`), which most distributions have.
@@ -28,7 +28,7 @@ The scripts download the latest [release](https://github.com/nightsumx/filo/rele
 
 No Node.js or pi CLI needed: Filo comes with its own pi, and uses yours if your login shell has one. On first launch a setup assistant offers Node.js, pi for your terminal, Claude Code, Codex and Grok Build, each with its official installer in a terminal inside the window (you type any password or answer its prompts there), then asks which agent new threads start with. Settings → Agents changes that and reopens the assistant. Sign in to a subscription, add an API key or connect a local model under Settings → Providers. It all goes to pi's own `~/.pi/agent`.
 
-The releases page has the `.dmg`, the AppImages and `Filo-Setup-x64.exe` for a manual install. The macOS app is not notarized, so macOS blocks its first launch from a browser download: open it once, then System Settings → Privacy & Security → Open Anyway. The Windows installer is not signed, so SmartScreen asks once: More info → Run anyway.
+[filoapp.dev](https://filoapp.dev) has the `.dmg`, the AppImages and `Filo-Setup-x64.exe` for a manual install. The macOS app is not notarized, so macOS blocks its first launch from a browser download: open it once, then System Settings → Privacy & Security → Open Anyway. The Windows installer is not signed, so SmartScreen asks once: More info → Run anyway.
 
 ## Features
 

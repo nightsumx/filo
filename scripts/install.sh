@@ -1,5 +1,5 @@
 #!/bin/bash
-# Installs or updates Filo from the latest GitHub release:
+# Installs or updates Filo from the latest release (filoapp.dev/download, site/worker.js):
 #   curl -fsSL https://filoapp.dev/install.sh | bash
 #
 # macOS (Apple Silicon): the app is ad-hoc signed, not notarized. Files fetched with curl carry no
@@ -14,7 +14,7 @@
 # Linux the checksum is read from FILO_URL.sha256.
 set -euo pipefail
 
-RELEASE=https://github.com/nightsumx/filo/releases/latest/download
+RELEASE=https://filoapp.dev/download
 
 install_mac() {
     local url="${FILO_URL:-$RELEASE/Filo-arm64-mac.zip}"

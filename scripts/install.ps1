@@ -1,4 +1,4 @@
-# Installs or updates Filo on Windows from the latest GitHub release:
+# Installs or updates Filo on Windows from the latest release (filoapp.dev/download, site/worker.js):
 #   irm https://filoapp.dev/install.ps1 | iex
 #
 # Runs the release's installer silently, for this user only (no admin prompt): Filo goes to
@@ -20,7 +20,7 @@ $ProgressPreference = 'SilentlyContinue'
 function Install-Filo {
     $url = $env:FILO_URL
     if (-not $url) {
-        $url = 'https://github.com/nightsumx/filo/releases/latest/download/Filo-Setup-x64.exe'
+        $url = 'https://filoapp.dev/download/Filo-Setup-x64.exe'
     }
     # x64 build; Windows on ARM runs it emulated.
     if (-not [Environment]::Is64BitOperatingSystem) {
