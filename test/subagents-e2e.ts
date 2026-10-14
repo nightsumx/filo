@@ -52,7 +52,7 @@ async function main() {
     await writeFile(path.join(agentDir, 'models.json'), JSON.stringify({
         providers: { mock: { baseUrl: llm.baseUrl, api: 'openai-completions', apiKey: 'mock', models: [{ id: 'mock-1', contextWindow: 100_000, maxTokens: 1000 }] } },
     }))
-    await writeFile(path.join(agentDir, 'settings.json'), JSON.stringify({ defaultProvider: 'mock', defaultModel: 'mock-1', defaultThinkingLevel: 'off' }))
+    await writeFile(path.join(agentDir, 'settings.json'), JSON.stringify({ 'defaultProvider': 'mock', 'defaultModel': 'mock-1', 'defaultThinkingLevel': 'off', 'pi-capabilities': { enabled: ['approval', 'subagent'], approvalMode: 'ask' } }))
     await writeFile(path.join(userData, 'state.json'), JSON.stringify({
         projects: [repo],
         hiddenProjects: [],
@@ -62,8 +62,6 @@ async function main() {
         theme: process.env.E2E_THEME ?? 'dark',
         lang: 'en',
         transcriptLang: 'en',
-        capabilities: ['approval', 'subagent'],
-        approvalMode: 'ask',
         windows: [{ projects: [repo] }],
     }))
     const env = { PI_GUI_USER_DATA: userData, PI_CODING_AGENT_DIR: agentDir, PI_GUI_TEST: '1' }

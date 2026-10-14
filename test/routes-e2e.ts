@@ -371,7 +371,8 @@ async function main() {
             throw error
         })
         const codexChannel = await readFile(path.join(codexHome, 'config.toml'), 'utf8')
-        check(codexChannel.startsWith('model = "chan-m"\nmodel_provider = "pi-127.0.0.1"\n') && codexChannel.includes(`[model_providers."pi-127.0.0.1"]\nname = "127.0.0.1"\nbase_url = "${base}/chan/v1"\nwire_api = "responses"\nexperimental_bearer_token = "chan-key"\n`), `Codex's own config.toml names the channel (${codexChannel})`)
+        const topLevel = codexChannel.slice(0, codexChannel.indexOf('\n[')).split('\n')
+        check(topLevel.includes('model = "chan-m"') && topLevel.includes('model_provider = "pi-127.0.0.1"') && codexChannel.includes(`[model_providers."pi-127.0.0.1"]\nname = "127.0.0.1"\nbase_url = "${base}/chan/v1"\nwire_api = "responses"\nexperimental_bearer_token = "chan-key"\n`), `Codex's own config.toml names the channel (${codexChannel})`)
         check(await js<boolean>(`${T}.routeInfo === null`), 'Codex reaches the channel itself, not through the gateway')
         check(seen[0]?.path === '/v1/models' && seen[0].auth === 'Bearer chan-key', 'the channel\'s models come from the endpoint, with its key')
         const added = JSON.parse(await readFile(path.join(agentDir, 'models.json'), 'utf8')).providers['127.0.0.1']

@@ -2,7 +2,7 @@
 // reports cached tokens the way OpenAI does (prompt_tokens_details.cached_tokens):
 //   - request 1 reads nothing, request 2 reads the prefix back, request 3 loses it at a new prompt,
 //     request 4 reads most of it and is billed again for the tail
-//   - pi-cc-tui's status line shows the last request's hit rate, the turn that lost the cache says so
+//   - pi-cc-tui's status line shows the conversation's hit rate, the turn that lost the cache says so
 //     in its footer, and /cache lists the misses
 //   - the app, opening the same session, shows the same figure and footer; clicking the figure lists
 //     the misses, and a row scrolls the conversation to its request
@@ -83,12 +83,12 @@ async function main() {
             await term.type(`prompt ${i}`)
             await until(`reply ${i}`, async () => (await term.pane()).includes(`reply ${i}`))
             if (i === 2) {
-                await until('hit rate', async () => (await term.pane()).includes('cache 83%'), 5000)
-                check(true, 'terminal: a request that reads the prefix back shows its hit rate')
+                await until('hit rate', async () => (await term.pane()).includes('cache 45%'), 5000)
+                check(true, 'terminal: a request that reads the prefix back raises the hit rate (50k of 110k)')
             }
         }
         const pane = await term.pane()
-        check(pane.includes('cache 50%'), 'terminal: the status line shows the last request\'s hit rate')
+        check(pane.includes('cache 35%'), 'terminal: the status line shows the conversation\'s hit rate (100k of 280k)')
         check(pane.includes('cache miss (lost at a new prompt, +$0.16)'), 'terminal: the turn that lost the cache names the miss, why, and what it cost')
         check(pane.split('\n').filter(l => l.includes('cache miss')).length === 1, 'terminal: a re-billed tail does not flag its turn')
         await term.type('/cache')
@@ -116,7 +116,7 @@ async function main() {
         const thread = `window.__app.threads.get(${JSON.stringify(file)})`
         const text = () => page.evaluate<string>('document.body.innerText')
         await until('transcript', async () => (await text()).includes('reply 4'))
-        check((await text()).includes('cache 50%'), 'app: the status line shows the same figure as the terminal')
+        check((await text()).includes('cache 35%'), 'app: the status line shows the same figure as the terminal')
         check((await text()).split('cache miss').length - 1 === 1, 'app: one turn footer says cache miss')
 
         // The footer's hover card sums the turn's misses.
@@ -132,7 +132,7 @@ async function main() {
         await page.call('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 5, y: 5 })
 
         // Clicking the figure lists the thread's misses.
-        await page.evaluate(`[...document.querySelectorAll('button')].find(b => b.textContent === 'cache 50%').click()`)
+        await page.evaluate(`[...document.querySelectorAll('button')].find(b => b.textContent === 'cache 35%').click()`)
         const panel = await until('cache panel', async () => {
             const t = await text()
             return t.includes('Prompt cache') ? t : undefined
