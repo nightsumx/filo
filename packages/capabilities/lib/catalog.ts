@@ -120,12 +120,6 @@ export function presetOf(ids: readonly CapabilityId[]): CapabilityPreset | undef
     return PRESETS.find(p => sameSet(p.capabilities, ids))
 }
 
-/**
- * Capabilities added after Settings started saving presets by id. A list saved by an older build
- * could not include them, so it is still the preset it was without them.
- */
-const NEWER_THAN_LISTS: readonly CapabilityId[] = ['review', 'autopilot', 'budget', 'terminal']
-
 /** A saved choice (preset id, list, or anything unreadable) → the ids it enables. */
 export function resolveCapabilities(saved: unknown): { ids: CapabilityId[], preset?: string } {
     if (typeof saved === 'string') {
@@ -137,8 +131,7 @@ export function resolveCapabilities(saved: unknown): { ids: CapabilityId[], pres
         return { ids: [...DEFAULT_CAPABILITIES], preset: preset?.id }
     }
     const list = normalizeCapabilities(saved)
-    const preset = presetOf(list) ?? PRESETS.find(p => p.capabilities.length && sameSet(p.capabilities.filter(id => !NEWER_THAN_LISTS.includes(id) || list.includes(id)), list))
-    return preset ? { ids: [...preset.capabilities], preset: preset.id } : { ids: list }
+    return { ids: list, preset: presetOf(list)?.id }
 }
 
 /** Valid ids only, deduplicated, in CAPABILITIES order (so equal sets compare equal). */

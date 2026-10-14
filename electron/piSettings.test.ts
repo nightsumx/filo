@@ -157,6 +157,10 @@ describe('capability settings', () => {
             expect(await readCapabilities()).toEqual({ ids: ['todo', 'plan'], approvalMode: 'edits', budget: 5, saved: true })
             await setCapabilities({ budget: 2.5 })
             expect(await readCapabilities()).toMatchObject({ ids: ['todo', 'plan'], budget: 2.5 })
+
+            // A preset with one switched off stays off, not the preset again.
+            await setCapabilities({ enabled: FULL.filter(id => id !== 'budget') })
+            expect(await readCapabilities()).toMatchObject({ ids: FULL.filter(id => id !== 'budget'), preset: undefined })
         })
     })
 })
