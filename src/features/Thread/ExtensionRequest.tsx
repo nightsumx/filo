@@ -177,9 +177,13 @@ export const ExtensionRequest = observer(({ thread }: { thread: Thread }) => {
                 <span className="shrink-0 text-amber-600 dark:text-amber-400">{t.askWaiting}</span>
             </div>
             {request.message && <div className="mt-0.5 whitespace-pre-wrap text-[13px] leading-5 text-gray-600">{request.message}</div>}
-            <div className="mt-2 mb-1">
-                <RequestForm key={request.id} request={request} onRespond={payload => thread.respondUi(request, payload)} />
-            </div>
+            {request.method === 'terminal'
+                ? <div className="mt-0.5 mb-1 text-[13px] leading-5 text-gray-600">{tr('终端里的 pi 在问一个只有终端能显示的问题，去终端里回答。', 'The terminal pi is asking something only the terminal can show; answer it there.')}</div>
+                : (
+                        <div className="mt-2 mb-1">
+                            <RequestForm key={request.id} request={request} onRespond={payload => thread.respondUi(request, payload)} />
+                        </div>
+                    )}
         </Gutter>
     )
 })

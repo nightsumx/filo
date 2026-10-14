@@ -40,6 +40,16 @@ const statusOf = (pi: PiSession, key: string) => pi.events.filter(e => e.type ==
 const toolNames = (r: MockRequest) => r.tools.map((t: any) => t.function?.name ?? t.name)
 
 describe.runIf(process.env.PI_GUI_SKIP_E2E !== '1')('capability extensions (real pi, mock model)', () => {
+    it('project trust: pi runs a project\'s own extensions only when trusted, as its TUI\'s answer decides', async ({ skip }) => {
+        if (!env)
+            return skip()
+        const project = { '.pi/extensions/mine.ts': 'export default function (pi) { pi.registerCommand(\'from-project\', { handler: async () => {} }) }' }
+        const names = async (pi: PiSession) => (await pi.request({ type: 'get_commands' })).data.commands.map((c: { name: string }) => c.name)
+        expect(await names((await setup([], () => ({ text: 'ok' }), { project })).pi)).not.toContain('from-project')
+        expect(await names((await setup([], () => ({ text: 'ok' }), { project, trust: true })).pi)).toContain('from-project')
+        expect(await names((await setup([], () => ({ text: 'ok' }), { project, trust: false })).pi)).not.toContain('from-project')
+    }, 60_000)
+
     it('todo: details carry the full list and the model gets a summary', async ({ skip }) => {
         if (!env)
             return skip('pi not installed')

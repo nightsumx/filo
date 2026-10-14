@@ -542,6 +542,16 @@ function registerIpc() {
         return piSettingsState()
     })
     ipcMain.handle(IPC.piDefaults, (_e, cwd: unknown) => piDefaults(cwd))
+    ipcMain.handle(IPC.piTrust, (_e, cwd: unknown, sessionPath: unknown) => {
+        if (typeof cwd !== 'string' || !path.isAbsolute(cwd) || presence.current.some(p => p.bridge && p.session === sessionPath))
+            return null
+        return providers.service.helper.trustQuestion(cwd)
+    })
+    ipcMain.handle(IPC.answerPiTrust, (_e, cwd: unknown, label: unknown) => {
+        if (typeof cwd !== 'string' || !path.isAbsolute(cwd))
+            throw new Error('expected a project folder')
+        return providers.service.helper.answerTrust(cwd, typeof label === 'string' ? label : undefined)
+    })
     ipcMain.handle(IPC.setDefaultModel, async (_e, cwd: unknown, provider: unknown, model: unknown) => {
         await setDefaultModel(cwd, provider, model)
         return piDefaults(cwd)

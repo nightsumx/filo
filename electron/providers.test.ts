@@ -1,9 +1,10 @@
 import type { LoginUpdate } from '@shared/providers'
 import { existsSync, realpathSync } from 'node:fs'
-import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import process from 'node:process'
+import { pathToFileURL } from 'node:url'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { applyEndpoint, checkEndpoint, fetchEndpointModels, piEntry, ProviderHelper, ProviderService, readEndpoints, readModelsJson, removeEndpoint, writeModelsJson } from './providers'
 import { platform } from './platform'
@@ -248,6 +249,37 @@ describe('ProviderHelper', () => {
         const broken = await helper.list()
         expect(broken.modelsError).toBeTruthy()
         expect(broken.providers.some(p => p.id === 'deepseek')).toBe(true)
+    }, 30_000)
+
+    it('asks pi\'s trust question for a project with its own settings, and saves the answer as its TUI does', async () => {
+        const project = path.join(dir, 'trusting', 'project')
+        await mkdir(path.join(project, '.pi'), { recursive: true })
+        await writeFile(path.join(project, '.pi', 'settings.json'), '{}')
+        const real = realpathSync(project)
+        // The labels pi's TUI shows (not exported from its index).
+        const { getProjectTrustOptions } = await import(pathToFileURL(path.join(path.dirname(piEntry(PI_BIN)!), 'core/trust-manager.js')).href)
+        const question = await helper.trustQuestion(project)
+        expect(question).toEqual({
+            title: 'Trust project folder?',
+            message: `${project}\n\nThis allows pi to load .pi settings and resources, install missing project packages, and execute project extensions.`,
+            options: getProjectTrustOptions(project, { includeSessionOnly: true }).map((o: { label: string }) => o.label),
+        })
+        expect(await helper.trustQuestion(path.join(dir, 'plain'))).toBeNull()
+
+        expect(await helper.answerTrust(project, 'Do not trust (this session only)')).toEqual({ trusted: false, saved: false })
+        expect(await helper.answerTrust(project, undefined)).toEqual({ trusted: false, saved: false })
+        expect(existsSync(path.join(dir, 'trust.json'))).toBe(false)
+        expect(await helper.answerTrust(project, question!.options[1])).toEqual({ trusted: true, saved: true })
+        expect(JSON.parse(await readFile(path.join(dir, 'trust.json'), 'utf8'))).toEqual({ [path.dirname(real)]: true })
+        expect(await helper.trustQuestion(project)).toBeNull()
+        await helper.answerTrust(project, 'Do not trust')
+        expect(JSON.parse(await readFile(path.join(dir, 'trust.json'), 'utf8'))).toEqual({ [path.dirname(real)]: true, [real]: false })
+
+        // defaultProjectTrust settles it without a question.
+        await rm(path.join(dir, 'trust.json'))
+        await writeFile(path.join(dir, 'settings.json'), JSON.stringify({ defaultProjectTrust: 'never' }))
+        expect(await helper.trustQuestion(project)).toBeNull()
+        await rm(path.join(dir, 'settings.json'))
     }, 30_000)
 
     it('saves an endpoint with its key, refuses taken ids, and puts models.json back when pi rejects it', async () => {

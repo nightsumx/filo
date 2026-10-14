@@ -1,16 +1,25 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { chmodSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server, type Socket } from "node:net";
+import { tmpdir } from "node:os";
 import { join as joinPath } from "node:path";
-import { getAgentDir, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { stripVTControlCharacters } from "node:util";
+import {
+	createLocalBashOperations,
+	CustomEditor,
+	getAgentDir,
+	SettingsManager,
+	type ExtensionAPI,
+	type ExtensionContext,
+	type ExtensionUIContext,
+} from "@earendil-works/pi-coding-agent";
+import type { EditorComponent } from "@earendil-works/pi-tui";
 import {
 	BRIDGE_HELLO,
 	BRIDGE_PIPE_SUFFIX,
 	BRIDGE_SOCKET_SUFFIX,
 	DIALOG_EVENTS,
 	ENV,
-	GUI_EVENTS,
-	GUI_STATUS,
 	PRESENCE_DIR,
 	type BridgePipe,
 	type DialogAnswer,
@@ -26,13 +35,22 @@ import { thinkingLevels } from "pi-capabilities/lib/thinking.ts";
 // connect (mode 0600 in their agent dir), the same ones that could start pi themselves. On Windows it
 // is a named pipe announced by a file there, and a client must first send that file's token.
 //
-// Built on the extension API, so some RPC commands have no equivalent here (fork, queue editing);
+// What the app sends goes in as if typed: through the TUI's own Enter, Alt+Enter, Alt+Up and Esc
+// (interactive-mode.js), taken from an editor it wired up. So `!cmd`, messages held during a
+// compaction, history and the input's source are the terminal's. Images go in as pasted ones do, a
+// pi-clipboard file whose path cc-input attaches. Some RPC commands have no equivalent here (fork);
 // they answer with an error and the app keeps those for its own pi.
+//
+// What the extensions show goes out as RPC mode would send it: every extension shares one ui object
+// (the runner's), so the bridge wraps it. Statuses, notices and text widgets reach the app; a
+// select, confirm or input opens on both sides and the first answer closes the other. An editor or
+// custom dialog only the terminal can show; the app hears that one is open.
 
 /** Unix socket paths are limited (104 bytes on macOS); a longer agent dir goes without a bridge. */
 const MAX_SOCKET_PATH = 100;
 
 type Json = Record<string, any>;
+type EditorFactory = NonNullable<ReturnType<ExtensionUIContext["getEditorComponent"]>>;
 
 interface ToolRun {
 	toolName: string;
@@ -94,6 +112,11 @@ function sessionStats(ctx: ExtensionContext): Json {
 	return { sessionFile: ctx.sessionManager.getSessionFile(), sessionId: ctx.sessionManager.getSessionId(), tokens, cost, contextUsage: ctx.getContextUsage() };
 }
 
+/** Marks the editor factory this bridge installed, so a second session_start does not wrap it again. */
+const OWN_FACTORY = Symbol("cc-bridge editor");
+/** Marks the ui object this bridge wrapped; a reload makes a new one. */
+const SHARED = Symbol("cc-bridge ui");
+
 export default function (pi: ExtensionAPI) {
 	// The desktop app's own pi processes already talk to it over RPC; subagents belong to their parent.
 	if (process.env[ENV.host] === "gui" || process.env[ENV.subagent]) return;
@@ -111,7 +134,18 @@ export default function (pi: ExtensionAPI) {
 	let streaming: any = null;
 	const tools = new Map<string, ToolRun>();
 	const statuses = new Map<string, string>();
-	const dialogs = new Map<string, DialogRequest>();
+	const widgets = new Map<string, Json>();
+	/** Open dialogs, as RPC's extension_ui_request; a capability's (DIALOG_EVENTS) or one this bridge offers. */
+	const dialogs = new Map<string, Json>();
+	/** Answers from the app for the dialogs this bridge offers. */
+	const answers = new Map<string, (response: Json) => void>();
+	/** pi's steering and follow-up queues, as the input event announces them and delivery empties them. */
+	const queue: { steering: string[]; followUp: string[] } = { steering: [], followUp: [] };
+	/** A `!cmd` is running (until pi records it, or its shell ends). */
+	let bash = false;
+	let compacting = false;
+	/** An editor the TUI wired up: its onSubmit and actions are the TUI's own, whichever editor shows. */
+	let editor: EditorComponent | null = null;
 
 	const line = (record: Json) => `${JSON.stringify(record)}\n`;
 	const broadcast = (record: Json) => {
@@ -120,14 +154,90 @@ export default function (pi: ExtensionAPI) {
 		for (const client of clients) client.write(text);
 	};
 	const statusEvent = (key: string, text: string | undefined): Json => ({ type: "extension_ui_request", id: randomUUID(), method: "setStatus", statusKey: key, statusText: text });
-	const setStatus = (key: string, text: string | undefined) => {
+	const setStatusOut = (key: string, text: string | undefined) => {
 		if (text) statuses.set(key, text);
 		else statuses.delete(key);
 		broadcast(statusEvent(key, text));
 	};
 
+	const sendQueue = () => broadcast({ type: "queue_update", steering: [...queue.steering], followUp: [...queue.followUp] });
+	const clearQueued = () => {
+		if (!queue.steering.length && !queue.followUp.length) return;
+		queue.steering = [];
+		queue.followUp = [];
+		sendQueue();
+	};
+
+	/** A dialog the app is told about until `run` settles. */
+	const shown = async <T>(request: Json, run: (id: string) => Promise<T>): Promise<T> => {
+		const id = randomUUID();
+		const dialog = { type: "extension_ui_request", id, ...request };
+		dialogs.set(id, dialog);
+		broadcast(dialog);
+		try {
+			return await run(id);
+		} finally {
+			dialogs.delete(id);
+			answers.delete(id);
+			broadcast({ type: "extension_ui_cancel", id });
+		}
+	};
+	/** A terminal dialog the app may answer too: the first answer wins and closes the other side. */
+	const offered = <T>(request: Json, local: (signal: AbortSignal) => Promise<T>, fromApp: (response: Json) => T, signal?: AbortSignal): Promise<T> => {
+		const close = new AbortController();
+		let answer: { value: T } | undefined;
+		return shown(request, async (id) => {
+			answers.set(id, (response) => {
+				if (close.signal.aborted) return;
+				answer = { value: fromApp(response) };
+				close.abort();
+			});
+			const value = await local(signal ? AbortSignal.any([signal, close.signal]) : close.signal);
+			return answer ? answer.value : value;
+		});
+	};
+	/** What the extensions show, sent on as RPC mode sends it. */
+	const share = (ui: ExtensionUIContext) => {
+		if (SHARED in ui) return;
+		const { select, confirm, input, editor: edit, custom, notify, setStatus: status, setWidget } = ui;
+		const value = (response: Json) => (response.cancelled ? undefined : response.value);
+		// Capability dialogs with an app side of their own: approval (DIALOG_EVENTS), ask and plan (/gui-… commands).
+		const covered = () => dialogs.size > 0 || [...tools.values()].some((run) => run.toolName === "ask" || run.toolName === "propose_plan");
+		Object.assign(ui, {
+			[SHARED]: true,
+			select: (title: string, options: string[], opts?: Json) =>
+				offered({ method: "select", title, options, timeout: opts?.timeout }, (signal) => select(title, options, { ...opts, signal }), value, opts?.signal),
+			confirm: (title: string, message: string, opts?: Json) =>
+				offered({ method: "confirm", title, message, timeout: opts?.timeout }, (signal) => confirm(title, message, { ...opts, signal }), (response) => !response.cancelled && response.confirmed === true, opts?.signal),
+			input: (title: string, placeholder?: string, opts?: Json) =>
+				offered({ method: "input", title, placeholder, timeout: opts?.timeout }, (signal) => input(title, placeholder, { ...opts, signal }), value, opts?.signal),
+			// pi's editor dialog cannot be closed from outside, and a custom one is the terminal's own drawing.
+			editor: (title: string, prefill?: string) => shown({ method: "terminal", title }, () => edit(title, prefill)),
+			// Not pi's method: the app says the terminal is asking something only it can show.
+			custom: (factory: any, options?: any) => (covered() ? custom(factory, options) : shown({ method: "terminal" }, () => custom(factory, options))),
+			notify: (message: string, type?: "info" | "warning" | "error") => {
+				notify(message, type);
+				broadcast({ type: "extension_ui_request", id: randomUUID(), method: "notify", message, notifyType: type });
+			},
+			setStatus: (key: string, text: string | undefined) => {
+				status(key, text);
+				setStatusOut(key, text);
+			},
+			// As RPC mode: text widgets only; a drawn one leaves the app without this key.
+			setWidget: (key: string, content: any, options?: any) => {
+				setWidget(key, content, options);
+				const lines = Array.isArray(content) ? content : undefined;
+				const widget = { type: "extension_ui_request", id: randomUUID(), method: "setWidget", widgetKey: key, widgetLines: lines, widgetPlacement: options?.placement };
+				if (lines) widgets.set(key, widget);
+				else widgets.delete(key);
+				broadcast(widget);
+			},
+		});
+	};
+
 	const catchUp = (): Json[] => {
-		const out: Json[] = [...[...statuses].map(([key, text]) => statusEvent(key, text))];
+		const out: Json[] = [...[...statuses].map(([key, text]) => statusEvent(key, text)), ...widgets.values()];
+		if (queue.steering.length || queue.followUp.length) out.push({ type: "queue_update", steering: [...queue.steering], followUp: [...queue.followUp] });
 		if (running) {
 			out.push({ type: "agent_start" });
 			for (const [toolCallId, run] of tools) {
@@ -136,7 +246,7 @@ export default function (pi: ExtensionAPI) {
 			}
 			if (streaming) out.push(...replayMessage(streaming));
 		}
-		for (const dialog of dialogs.values()) out.push({ type: "extension_ui_request", ...dialog });
+		out.push(...dialogs.values());
 		return out;
 	};
 
@@ -151,7 +261,24 @@ export default function (pi: ExtensionAPI) {
 	pi.on("message_start", (e, c) => {
 		ctx = c;
 		if (e.message.role === "assistant") streaming = e.message;
+		// pi takes a delivered message off its queue by its text, steering first (agent-session.js).
+		if (e.message.role === "user") {
+			const content = e.message.content;
+			const text = typeof content === "string" ? content : content.map((part) => (part.type === "text" ? part.text : "")).join("");
+			const kind = queue.steering.includes(text) ? "steering" : queue.followUp.includes(text) ? "followUp" : undefined;
+			if (kind) {
+				queue[kind].splice(queue[kind].indexOf(text), 1);
+				sendQueue();
+			}
+		}
+		// Taken back in the terminal (Alt+Up), or a text an extension changed on its way in.
+		if (!c.hasPendingMessages()) clearQueued();
 		broadcast({ type: "message_start", message: e.message });
+	});
+	pi.on("input", (e) => {
+		if (!e.streamingBehavior) return;
+		queue[e.streamingBehavior === "steer" ? "steering" : "followUp"].push(e.text);
+		sendQueue();
 	});
 	pi.on("message_update", (e) => {
 		streaming = e.message;
@@ -175,31 +302,90 @@ export default function (pi: ExtensionAPI) {
 		broadcast({ type: "tool_execution_end", toolCallId: e.toolCallId, toolName: e.toolName, result: e.result, isError: e.isError });
 	});
 	pi.on("agent_end", () => broadcast({ type: "agent_end" }));
-	pi.on("agent_settled", () => {
+	pi.on("agent_settled", (_e, c) => {
+		if (!c.hasPendingMessages()) clearQueued();
 		running = false;
 		streaming = null;
 		tools.clear();
 		broadcast({ type: "agent_settled" });
 	});
 	pi.on("session_before_compact", (e) => {
+		compacting = true;
 		broadcast({ type: "compaction_start", reason: e.reason });
 	});
-	pi.on("session_compact", (e) => broadcast({ type: "compaction_end", reason: e.reason }));
-	pi.on("session_compact_failed", (e) => broadcast({ type: "compaction_end", reason: e.reason, aborted: e.aborted, errorMessage: e.aborted ? undefined : e.errorMessage }));
+	pi.on("session_compact", (e) => {
+		compacting = false;
+		broadcast({ type: "compaction_end", reason: e.reason });
+	});
+	pi.on("session_compact_failed", (e) => {
+		compacting = false;
+		broadcast({ type: "compaction_end", reason: e.reason, aborted: e.aborted, errorMessage: e.aborted ? undefined : e.errorMessage });
+	});
+	// pi records a `!cmd` without an event (agent-session.js recordBashResult; during a run, at its end).
+	// While the app is here, it runs through pi's own local shell with its output copied out, as RPC's
+	// bash_execution_update; the start and end around it, and the id, are not pi's.
+	pi.on("user_bash", (e, c) => {
+		const seen = c.sessionManager.getEntries().length;
+		const file = c.sessionManager.getSessionFile();
+		const id = clients.size ? randomUUID() : undefined;
+		bash = true;
+		const timer = setInterval(() => {
+			if (ctx?.sessionManager.getSessionFile() !== file) {
+				bash = false;
+				return clearInterval(timer);
+			}
+			const entries = c.sessionManager.getEntries() as any[];
+			const found = entries.slice(seen).find((entry) => entry.type === "message" && entry.message?.role === "bashExecution" && entry.message.command === e.command);
+			if (!found) return;
+			clearInterval(timer);
+			bash = false;
+			broadcast({ type: "message_start", message: found.message });
+			broadcast({ type: "message_end", message: found.message, bashId: id });
+		}, 200);
+		if (!id) return;
+		broadcast({ type: "bash_execution_start", id, command: e.command, excludeFromContext: e.excludeFromContext });
+		const local = createLocalBashOperations({ shellPath: SettingsManager.create(c.cwd, getAgentDir(), { projectTrusted: c.isProjectTrusted() }).getShellPath() });
+		const decoder = new TextDecoder();
+		return {
+			operations: {
+				exec: async (command, cwd, options) => {
+					try {
+						const result = await local.exec(command, cwd, {
+							...options,
+							onData: (data) => {
+								options.onData(data);
+								// As pi cleans it (bash-executor.js): no escapes, no control characters but tab and newline.
+								const delta = [...stripVTControlCharacters(decoder.decode(data, { stream: true }))]
+									.filter((ch) => {
+										const code = ch.charCodeAt(0);
+										return code === 9 || code === 10 || (code > 31 && (code < 0xfff9 || code > 0xfffb));
+									})
+									.join("");
+								if (delta) broadcast({ type: "bash_execution_update", id, delta });
+							},
+						});
+						broadcast({ type: "bash_execution_end", id, exitCode: options.signal?.aborted ? undefined : (result.exitCode ?? undefined), cancelled: !!options.signal?.aborted });
+						return result;
+					} catch (error) {
+						broadcast({ type: "bash_execution_end", id, cancelled: !!options.signal?.aborted });
+						throw error;
+					} finally {
+						bash = false;
+					}
+				},
+			},
+		};
+	});
 	pi.on("session_info_changed", (e) => broadcast({ type: "session_info_changed", name: e.name }));
 	pi.on("thinking_level_select", (e) => broadcast({ type: "thinking_level_changed", level: e.level }));
 	// Not pi's: the app re-reads get_state (the model shows in its picker).
 	pi.on("model_select", () => broadcast({ type: "state_changed" }));
 
-	// Mode state: the capabilities publish it as events next to their (terminal-only) statuses.
-	pi.events.on(GUI_EVENTS.approvalMode, (mode) => setStatus(GUI_STATUS.approval, typeof mode === "string" ? mode : undefined));
-	pi.events.on(GUI_EVENTS.planMode, (on) => setStatus(GUI_STATUS.plan, on === true ? "on" : undefined));
-
-	// Terminal dialogs the app may answer too (approval prompts).
+	// A capability's own terminal dialog the app may answer too (approval prompts).
 	pi.events.on(DIALOG_EVENTS.open, (data) => {
 		const dialog = data as DialogRequest;
 		if (!dialog?.id) return;
-		dialogs.set(dialog.id, dialog);
+		dialogs.set(dialog.id, { type: "extension_ui_request", ...dialog });
 		broadcast({ type: "extension_ui_request", ...dialog });
 	});
 	pi.events.on(DIALOG_EVENTS.close, (data) => {
@@ -217,14 +403,27 @@ export default function (pi: ExtensionAPI) {
 		model: c.model,
 		thinkingLevel: pi.getThinkingLevel(),
 		isStreaming: !c.isIdle(),
-		isCompacting: false,
+		isCompacting: compacting,
 		sessionFile: c.sessionManager.getSessionFile(),
 		sessionId: c.sessionManager.getSessionId(),
 		sessionName: pi.getSessionName(),
 		messageCount: c.sessionManager.getEntries().filter((e: any) => e.type === "message").length,
-		pendingMessageCount: c.hasPendingMessages() ? 1 : 0,
+		pendingMessageCount: queue.steering.length + queue.followUp.length,
 		terminalPid: process.pid,
 	});
+
+	// Duck-typed as pi does: instanceof fails across jiti module boundaries.
+	const action = (name: string): (() => unknown) | undefined => {
+		const handlers = editor && "actionHandlers" in editor ? editor.actionHandlers : undefined;
+		return handlers instanceof Map ? handlers.get(name) : undefined;
+	};
+
+	/** The TUI clears its editor as it takes input; what the user was typing there stays. */
+	const keepDraft = (c: ExtensionContext, use: () => unknown) => {
+		const draft = c.ui.getEditorText();
+		void use();
+		if (c.ui.getEditorText() !== draft) c.ui.setEditorText(draft);
+	};
 
 	const prompt = (c: ExtensionContext, command: Json): Json => {
 		const text = String(command.message ?? "");
@@ -233,9 +432,41 @@ export default function (pi: ExtensionAPI) {
 		const name = text.startsWith("/") ? text.slice(1).split(/\s/, 1)[0] : "";
 		const isCommand = !!name && pi.getCommands().some((cmd) => cmd.source === "extension" && cmd.name === name);
 		const deliverAs = command.type === "steer" ? "steer" : command.type === "follow_up" ? "followUp" : busy ? (command.streamingBehavior === "steer" ? "steer" : "followUp") : undefined;
-		// expandPromptTemplates runs extension commands, templates and skills, as typed in the terminal.
-		pi.sendUserMessage(images.length ? [{ type: "text", text }, ...images] : text, { deliverAs, expandPromptTemplates: true });
-		return { disposition: isCommand ? "handled" : busy ? "queued" : "started" };
+		const disposition = isCommand || text.startsWith("!") ? "handled" : busy ? "queued" : "started";
+		const submit = editor?.onSubmit;
+		const followUp = action("app.message.followUp");
+		// Commands (the app's hidden /gui-… ones among them) skip the editor, so its history only has what the user typed.
+		if (!submit || isCommand || (deliverAs === "followUp" && !followUp)) {
+			// expandPromptTemplates runs extension commands, templates and skills, as typed in the terminal.
+			pi.sendUserMessage(images.length ? [{ type: "text", text }, ...images] : text, { deliverAs, expandPromptTemplates: true });
+			return { disposition };
+		}
+		const paths = images.map((image: any) => {
+			const file = joinPath(tmpdir(), `pi-clipboard-${randomUUID()}.${String(image.mimeType ?? "image/png").split("/")[1] ?? "png"}`);
+			writeFileSync(file, Buffer.from(String(image.data ?? ""), "base64"));
+			return file;
+		});
+		const full = [text, ...paths].filter(Boolean).join(" ");
+		if (deliverAs === "followUp" && followUp)
+			keepDraft(c, () => {
+				c.ui.setEditorText(full);
+				return followUp();
+			});
+		else keepDraft(c, () => submit(full));
+		return { disposition };
+	};
+
+	/** Alt+Up: the TUI puts the whole queue in its editor; the app takes it from there. */
+	const clearQueue = (c: ExtensionContext): Json => {
+		const dequeue = action("app.message.dequeue");
+		if (!dequeue) return { steering: [], followUp: [] };
+		const draft = c.ui.getEditorText();
+		c.ui.setEditorText("");
+		dequeue();
+		const taken = c.ui.getEditorText();
+		c.ui.setEditorText(draft);
+		clearQueued();
+		return { steering: taken ? [taken] : [], followUp: [] };
 	};
 
 	const handle = async (command: Json): Promise<Json | undefined> => {
@@ -257,12 +488,23 @@ export default function (pi: ExtensionAPI) {
 			case "steer":
 			case "follow_up":
 				return ok(id, type, prompt(c, command));
+			case "bash": {
+				const submit = editor?.onSubmit;
+				if (!submit) return fail(id, type, "The terminal's editor is not available");
+				keepDraft(c, () => submit(`${command.excludeFromContext ? "!!" : "!"}${command.command}`));
+				return ok(id, type);
+			}
+			case "abort_bash": {
+				// The TUI's Esc: idle, it cancels the running `!cmd` (mid-run it stops the run instead).
+				const escape = editor && "onEscape" in editor ? editor.onEscape : undefined;
+				if (bash && c.isIdle() && typeof escape === "function") escape();
+				return ok(id, type);
+			}
 			case "abort":
 				c.abort();
 				return ok(id, type);
 			case "clear_queue":
-				// The extension API cannot take queued messages back; they stay queued in the terminal.
-				return ok(id, type, { steering: [], followUp: [] });
+				return ok(id, type, clearQueue(c));
 			case "set_model": {
 				const model = c.modelRegistry.find(command.provider, command.modelId);
 				if (!model) return fail(id, type, `Model not found: ${command.provider}/${command.modelId}`);
@@ -299,8 +541,10 @@ export default function (pi: ExtensionAPI) {
 			return;
 		}
 		if (record?.type === "extension_ui_response") {
-			if (typeof record.id === "string" && dialogs.has(record.id))
-				pi.events.emit(DIALOG_EVENTS.answer, { id: record.id, value: record.cancelled ? undefined : record.value } satisfies DialogAnswer);
+			if (typeof record.id !== "string" || !dialogs.has(record.id)) return;
+			const answer = answers.get(record.id);
+			if (answer) answer(record);
+			else pi.events.emit(DIALOG_EVENTS.answer, { id: record.id, value: record.cancelled ? undefined : record.value } satisfies DialogAnswer);
 			return;
 		}
 		if (typeof record?.type !== "string") return;
@@ -336,7 +580,7 @@ export default function (pi: ExtensionAPI) {
 					void onLine(client, text);
 					continue;
 				}
-				let hello: Json;
+				let hello: Json | null;
 				try {
 					hello = JSON.parse(text);
 				} catch {
@@ -378,7 +622,18 @@ export default function (pi: ExtensionAPI) {
 		if (c.mode !== "tui") return;
 		ctx = c;
 		running = !c.isIdle();
+		compacting = false;
 		stop();
+		share(c.ui);
+		// An editor another extension set stays; this only keeps a hold of what the TUI builds.
+		const prev = c.ui.getEditorComponent();
+		if (!prev || !(OWN_FACTORY in prev)) {
+			const factory: EditorFactory = (tui, theme, keybindings) => {
+				editor = prev ? prev(tui, theme, keybindings) : new CustomEditor(tui, theme, keybindings, { embedWorkingStatus: true });
+				return editor;
+			};
+			c.ui.setEditorComponent(Object.assign(factory, { [OWN_FACTORY]: true }));
+		}
 		const dir = joinPath(getAgentDir(), PRESENCE_DIR);
 		const windows = process.platform === "win32";
 		const path = windows
@@ -423,5 +678,9 @@ export default function (pi: ExtensionAPI) {
 		streaming = null;
 		tools.clear();
 		dialogs.clear();
+		answers.clear();
+		widgets.clear();
+		queue.steering = [];
+		queue.followUp = [];
 	});
 }

@@ -1,6 +1,6 @@
 // pi's settings.json as the app reads and writes it. Compaction as pi resolves it
 // (core/settings-manager.js getCompactionSettings): global ~/.pi/agent/settings.json deep-merged with
-// <cwd>/.pi/settings.json, then compaction.modelOverrides["provider/id"] over compaction.*, then pi's
+// <cwd>/.pi/settings.json when pi trusts the project, then compaction.modelOverrides["provider/id"] over compaction.*, then pi's
 // defaults. The capability choice (SETTINGS_KEY), shared with pi-cc-tui. And a watch on the file, which
 // pi in a terminal writes too.
 import type { CapabilityState } from '@shared/capabilities'
@@ -10,7 +10,7 @@ import { THINKING_LEVELS } from '@shared/pi'
 import type { FSWatcher } from 'node:fs'
 import { capabilityChoice, capabilityState } from '@shared/capabilities'
 import { watch } from 'node:fs'
-import { readFile } from 'node:fs/promises'
+import { readFile, realpath } from 'node:fs/promises'
 import { SettingsWriteError, updateSettings, writeCapabilityChoice } from 'pi-capabilities/lib/settings.ts'
 import os from 'node:os'
 import path from 'node:path'
@@ -56,11 +56,27 @@ export function resolveCompaction(settings: Record<string, any>, modelKey?: stri
 export const agentDir = () => process.env.PI_CODING_AGENT_DIR || path.join(os.homedir(), '.pi', 'agent')
 const globalSettingsPath = () => path.join(agentDir(), 'settings.json')
 
+/**
+ * The global settings and <cwd>/.pi/settings.json as pi outside its TUI applies them (main.js
+ * createRuntime, core/project-trust.js): the project's only when trust.json trusts it, the nearest
+ * folder's decision winning, or with no decision when defaultProjectTrust is "always". Only the TUI
+ * asks; an untrusted project's settings are ignored by the pi a thread runs.
+ */
+async function settingsFor(cwd: unknown): Promise<{ global: Record<string, any>, project: Record<string, any> }> {
+    const global = await readJson(globalSettingsPath())
+    if (typeof cwd !== 'string' || !path.isAbsolute(cwd))
+        return { global, project: {} }
+    const [project, trust] = await Promise.all([readJson(path.join(cwd, '.pi', 'settings.json')), readJson(path.join(agentDir(), 'trust.json'))])
+    for (let dir = await realpath(cwd).catch(() => cwd); ; dir = path.dirname(dir)) {
+        if (typeof trust[dir] === 'boolean')
+            return { global, project: trust[dir] ? project : {} }
+        if (path.dirname(dir) === dir)
+            return { global, project: global.defaultProjectTrust === 'always' ? project : {} }
+    }
+}
+
 export async function compactionInfo(cwd: string, modelKey?: string): Promise<CompactionInfo> {
-    const [global, project] = await Promise.all([
-        readJson(globalSettingsPath()),
-        path.isAbsolute(cwd) ? readJson(path.join(cwd, '.pi', 'settings.json')) : Promise.resolve({}),
-    ])
+    const { global, project } = await settingsFor(cwd)
     return resolveCompaction(merge(global, project), modelKey)
 }
 
@@ -147,10 +163,7 @@ function validPatch(patch: unknown): GlobalCompactionPatch {
 }
 
 export async function globalCompaction(cwd?: string): Promise<GlobalCompaction> {
-    const [global, project] = await Promise.all([
-        readJson(globalSettingsPath()),
-        cwd && path.isAbsolute(cwd) ? readJson(path.join(cwd, '.pi', 'settings.json')) : Promise.resolve({}),
-    ])
+    const { global, project } = await settingsFor(cwd)
     return readGlobalCompaction(global, project)
 }
 
@@ -201,10 +214,7 @@ export async function setCacheWarming(mode: unknown): Promise<void> {
 }
 
 async function mergedSettings(cwd: unknown): Promise<Record<string, any>> {
-    const [global, project] = await Promise.all([
-        readJson(globalSettingsPath()),
-        typeof cwd === 'string' && path.isAbsolute(cwd) ? readJson(path.join(cwd, '.pi', 'settings.json')) : Promise.resolve({}),
-    ])
+    const { global, project } = await settingsFor(cwd)
     return merge(global, project)
 }
 

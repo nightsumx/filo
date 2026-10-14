@@ -4,9 +4,12 @@
 //     whole queue (with its images) back into the editor, and the run goes on
 //   - Alt+Enter queues a follow-up; what was taken back never reaches the model
 //   - a message typed during a compaction is held, then sent once it ends
+//   - `!cmd` runs in pi at once (mid-run too), streams, Esc cancels it; `!!cmd` stays out of the context
+//   - a project with its own pi resources: the thread asks pi's trust question before pi starts, a
+//     session-only answer stays with the thread, a saved one goes into pi's trust.json
 //
 //   bun run build && bun run e2e:queue
-import { mkdir, rm, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import process from 'node:process'
 import { check, launch, until, windows, workDir } from './app'
@@ -18,6 +21,9 @@ const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAMAAAACCAIAAAASFvFNAAAAFElEQVR4nGO8o6HBAAZ
 async function main() {
     await rm(WORK, { recursive: true, force: true })
     const repo = path.join(WORK, 'repo')
+    const trusting = path.join(WORK, 'trusting')
+    await mkdir(path.join(trusting, '.pi', 'extensions'), { recursive: true })
+    await writeFile(path.join(trusting, '.pi', 'extensions', 'mine.ts'), `export default function (pi) { pi.registerCommand('from-project', { handler: async () => {} }) }`)
     const userData = path.join(WORK, 'userdata')
     const agentDir = path.join(WORK, 'agent')
     await Promise.all([repo, userData, agentDir].map(d => mkdir(d, { recursive: true })))
@@ -37,7 +43,7 @@ async function main() {
     }))
     await writeFile(path.join(agentDir, 'settings.json'), JSON.stringify({ defaultProvider: 'mock', defaultModel: 'mock-1', defaultThinkingLevel: 'off', compaction: { keepRecentTokens: 1 } }))
     await writeFile(path.join(userData, 'state.json'), JSON.stringify({
-        projects: [repo],
+        projects: [repo, trusting],
         hiddenProjects: [],
         tabs: {},
         activeTabs: {},
@@ -46,7 +52,7 @@ async function main() {
         lang: 'en',
         transcriptLang: 'en',
         capabilities: [],
-        windows: [{ projects: [repo] }],
+        windows: [{ projects: [repo, trusting] }],
     }))
 
     const stop = await launch({ PI_GUI_USER_DATA: userData, PI_CODING_AGENT_DIR: agentDir, PI_GUI_TEST: '1' })
@@ -112,6 +118,54 @@ async function main() {
         await until('sent once compaction ends', () => page.evaluate<boolean>(`!${T}.compacting && ${T}.compactionQueue.length === 0`), 20_000)
         await until('it reaches the model', async () => seen().includes('after compaction'), 20_000)
         check(JSON.stringify(llm.requests.find(r => JSON.stringify(r.messages).includes('after compaction'))?.messages.at(-1)).includes('image_url'), 'and goes in once compaction ends, with its image')
+
+        // ---------------------------------------------------------------- `!cmd`, as pi's TUI runs it
+        await until('idle', () => page.evaluate<boolean>(`!${T}.running && !${T}.compacting`), 20_000)
+        const asked = llm.requests.length
+        const bashes = () => page.evaluate<any[]>(`${T}.live.filter(l => l.message.role === 'bashExecution').map(l => ({ ...l.message }))`)
+        await send('!echo bang-out')
+        await until('!cmd ran', async () => (await bashes()).some(b => b.output === 'bang-out\n' && b.exitCode === 0))
+        check(llm.requests.length === asked, '`!cmd` runs in pi without a turn')
+        check(await page.evaluate<boolean>(`document.body.innerText.includes('echo bang-out')`), 'and shows as `$ command` with its output')
+        await send('!!echo hidden-out')
+        await until('!!cmd ran', async () => (await bashes()).some(b => b.output === 'hidden-out\n'))
+        await send('!echo started; sleep 30')
+        await until('its output streams', () => page.evaluate<boolean>(`!!${T}.bash?.output.includes('started')`))
+        check(true, 'its output streams in while it runs')
+        await key({ key: 'Escape', code: 'Escape' })
+        await until('Esc cancels it', async () => (await bashes()).some(b => b.command === 'echo started; sleep 30' && b.cancelled) && !(await page.evaluate<boolean>(`!!${T}.bash`)))
+        check(true, 'Esc cancels it, as in the terminal')
+        await send('slow with bash')
+        await until('running', () => page.evaluate<boolean>(`${T}.running`))
+        await send('!echo mid-run')
+        await until('!cmd mid-run', async () => (await bashes()).some(b => b.output === 'mid-run\n'))
+        check(await steering() === '', 'mid-run it runs at once, not queued')
+        await until('slow run done', () => page.evaluate<boolean>(`!${T}.running`), 20_000)
+        const context = JSON.stringify(llm.requests.at(-1)?.messages)
+        check(context.includes('bang-out') && !context.includes('hidden-out'), '`!` output reaches the model, `!!` output does not')
+
+        // ---------------------------------------------------------------- project trust, as pi's TUI asks it
+        const question = async () => JSON.parse(await page.evaluate<string>(`JSON.stringify(${T}.uiRequests[0] ?? null)`))
+        const projectCommand = () => page.evaluate<boolean>(`${T}.commands.some(c => c.name === 'from-project')`)
+        const answer = (label: string) => page.evaluate(`(() => { const t = ${T}; t.respondUi(t.uiRequests[0], { value: ${JSON.stringify(label)} }); return true })()`)
+        await page.evaluate(`(() => { window.__app.newThread(${JSON.stringify(trusting)}); return true })()`)
+        const trustAsked = await until('pi\'s trust question', question)
+        check(trustAsked.title === 'Trust project folder?' && trustAsked.options.includes('Trust (this session only)') && trustAsked.options.includes('Do not trust'), 'a project with its own extensions asks pi\'s trust question first')
+        check(await page.evaluate<string>(`${T}.agentStatus`) === 'starting' && !(await page.evaluate<string | null>(`${T}.agentId`)), 'and pi waits for the answer')
+        await answer('Trust (this session only)')
+        await until('pi ready, trusting', async () => (await page.evaluate<string>(`${T}.agentStatus`)) === 'ready' && await projectCommand())
+        check(true, 'trusted for this session: pi loads the project\'s extension')
+        const trustFile = path.join(agentDir, 'trust.json')
+        check(!(await readFile(trustFile, 'utf8').catch(() => '')), 'and nothing is saved')
+        await page.evaluate(`(async () => { await window.__app.closeTab(${T}.key); window.__app.newThread(${JSON.stringify(trusting)}); return true })()`)
+        await until('asked again in a new thread', question)
+        await answer('Do not trust')
+        await until('pi ready, not trusting', async () => (await page.evaluate<string>(`${T}.agentStatus`)) === 'ready')
+        check(!(await projectCommand()), 'not trusted: the project\'s extension stays off')
+        check(JSON.parse(await readFile(trustFile, 'utf8'))[await realpath(trusting)] === false, 'the choice is in pi\'s trust.json, as its TUI saves it')
+        await page.evaluate(`(async () => { await window.__app.closeTab(${T}.key); window.__app.newThread(${JSON.stringify(trusting)}); return true })()`)
+        await until('a third thread starts', async () => (await page.evaluate<string>(`${T}.agentStatus`)) === 'ready')
+        check(!(await question()), 'a saved choice is not asked again')
 
         console.log('\nall queue checks passed')
     }

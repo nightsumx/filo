@@ -7,11 +7,14 @@
 //   in   { id, op: 'list' | 'login' | 'logout' | 'setKey' | 'apiKey' | 'routeCatalog' | 'routeTarget' | 'nativeApis', ... }   → out { id, result } | { id, error, cancelled? }
 //   in   { id, op: 'probeModels' | 'probe', ... }   channel test: a provider's models, one request
 //   in   { id, op: 'prices' }   every model's price and cache lifetime (pi-capabilities/lib/prices PriceList)
+//   in   { id, op: 'trust' | 'answerTrust', cwd, label? }   pi's project trust question, and the choice made (→ { trusted, saved })
 //   in   { op: 'answer', login, promptId, value } | { op: 'cancel', login } | { op: 'probeCancel', probe }
 //   out  { update: LoginUpdate }   while a login runs (prompts and notices)
 import type * as Pi from '@earendil-works/pi-coding-agent'
 import type { AuthMethod, LoginNotice, LoginPrompt, LoginUpdate, ProviderInfo, ProviderList } from '../shared/providers.ts'
+import { realpathSync } from 'node:fs'
 import os from 'node:os'
+import path from 'node:path'
 import process from 'node:process'
 import { pathToFileURL } from 'node:url'
 
@@ -308,6 +311,48 @@ async function probe(id: string, providerId: string, modelId: string, request: R
     }
 }
 
+// ---------------------------------------------------------------- project trust
+
+/** pi's choices for its trust question (core/trust-manager.js getProjectTrustOptions, session-only ones included). */
+function trustOptions(cwd: string): { label: string, trusted: boolean, updates: Pi.ProjectTrustUpdate[] }[] {
+    let real = path.resolve(cwd)
+    try {
+        real = realpathSync(real)
+    }
+    catch {}
+    const parent = path.dirname(real)
+    return [
+        { label: 'Trust', trusted: true, updates: [{ path: real, decision: true }] },
+        ...(parent === real ? [] : [{ label: `Trust parent folder (${parent})`, trusted: true, updates: [{ path: parent, decision: true }, { path: real, decision: null }] }]),
+        { label: 'Trust (this session only)', trusted: true, updates: [] },
+        { label: 'Do not trust', trusted: false, updates: [{ path: real, decision: false }] },
+        { label: 'Do not trust (this session only)', trusted: false, updates: [] },
+    ]
+}
+
+/** What pi's TUI asks before it starts in `cwd` (core/project-trust.js), or null when it would not ask. */
+function trustQuestion(cwd: string): { title: string, message: string, options: string[] } | null {
+    if (!pi.hasTrustRequiringProjectResources(cwd) || new pi.ProjectTrustStore(pi.getAgentDir()).get(cwd) !== null)
+        return null
+    if (pi.SettingsManager.create(cwd, pi.getAgentDir()).getDefaultProjectTrust() !== 'ask')
+        return null
+    return {
+        title: 'Trust project folder?',
+        message: `${cwd}
+
+This allows pi to load ${pi.CONFIG_DIR_NAME} settings and resources, install missing project packages, and execute project extensions.`,
+        options: trustOptions(cwd).map(o => o.label),
+    }
+}
+
+/** Saves the choice as pi's TUI does; no choice is not trusting, for this session. */
+function answerTrust(cwd: string, label: string | undefined): { trusted: boolean, saved: boolean } {
+    const option = trustOptions(cwd).find(o => o.label === label)
+    if (option?.updates.length)
+        new pi.ProjectTrustStore(pi.getAgentDir()).setMany(option.updates)
+    return { trusted: option?.trusted ?? false, saved: !!option?.updates.length }
+}
+
 // ---------------------------------------------------------------- loop
 
 async function handle(message: Record<string, any>) {
@@ -347,6 +392,10 @@ async function handle(message: Record<string, any>) {
             result = await prices()
         else if (op === 'nativeApis')
             result = await nativeApis(Array.isArray(message.models) ? message.models.map(String) : [])
+        else if (op === 'trust')
+            result = trustQuestion(String(message.cwd))
+        else if (op === 'answerTrust')
+            result = answerTrust(String(message.cwd), typeof message.label === 'string' ? message.label : undefined)
         else if (op === 'apiKey')
             result = (await (await pi.ModelRuntime.create()).getAuth(String(message.provider)).catch(() => undefined))?.auth.apiKey ?? null
         else

@@ -48,7 +48,9 @@ export interface BashExecutionMessage {
     exitCode: number | undefined
     cancelled: boolean
     truncated: boolean
+    fullOutputPath?: string
     timestamp: number
+    excludeFromContext?: boolean
 }
 /** Extension message; `details` is the extension's own data (review reports and feedback carry theirs). */
 export interface CustomMessage { role: 'custom', customType: string, content: string | (TextContent | ImageContent)[], display: boolean, details?: unknown, timestamp: number }

@@ -56,6 +56,8 @@ class PiAgent implements ManagedAgent {
         const args = ['--mode', 'rpc', ...hostExtensionArgs(extensionsDir), ...(extra.args ?? []), ...capabilityArgs(options.capabilities, extensionsDir)]
         if (options.sessionPath)
             args.push('--session', options.sessionPath)
+        if (typeof options.trust === 'boolean')
+            args.push(options.trust ? '--approve' : '--no-approve')
         const command = piCommand(env, args)
         this.child = spawn(command.file, command.args, {
             cwd: options.cwd,

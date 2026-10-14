@@ -176,13 +176,17 @@ export interface PiSession {
  * Starts pi in a throwaway agent dir whose only model is the mock (`model` adds to its models.json
  * entry: a price, a cache lifetime), so user settings, extensions and credentials are never read.
  */
-export async function startPi(env: PiEnv, llm: MockLlm, capabilities: CapabilityId[], options: { approvalMode?: ApprovalMode, settings?: Record<string, unknown>, hostEnv?: Record<string, string>, model?: Record<string, unknown> } = {}): Promise<PiSession> {
+export async function startPi(env: PiEnv, llm: MockLlm, capabilities: CapabilityId[], options: { approvalMode?: ApprovalMode, settings?: Record<string, unknown>, hostEnv?: Record<string, string>, model?: Record<string, unknown>, trust?: boolean, project?: Record<string, string> } = {}): Promise<PiSession> {
     // Resolved: Windows' temp folder can be an 8.3 name (C:\Users\RUNNER~1), git prints the long one.
     const root = await realpath(await mkdtemp(path.join(os.tmpdir(), 'pi-gui-test-')))
     const agentDir = path.join(root, 'agent')
     const cwd = path.join(root, 'project')
     await mkdir(agentDir, { recursive: true })
     await mkdir(cwd, { recursive: true })
+    for (const [file, text] of Object.entries(options.project ?? {})) {
+        await mkdir(path.dirname(path.join(cwd, file)), { recursive: true })
+        await writeFile(path.join(cwd, file), text)
+    }
     await writeFile(path.join(agentDir, 'models.json'), JSON.stringify({
         providers: { mock: { baseUrl: llm.baseUrl, api: 'openai-completions', apiKey: 'mock', models: [{ id: 'mock-1', contextWindow: 100_000, maxTokens: 1000, ...options.model }] } },
     }))
@@ -210,7 +214,7 @@ export async function startPi(env: PiEnv, llm: MockLlm, capabilities: Capability
     // piSpawnEnv copies process.env at spawn time.
     const previous = process.env.PI_CODING_AGENT_DIR
     process.env.PI_CODING_AGENT_DIR = agentDir
-    const id = manager.start(env, { cwd, capabilities })
+    const id = manager.start(env, { cwd, capabilities, trust: options.trust })
     if (previous === undefined)
         delete process.env.PI_CODING_AGENT_DIR
     else

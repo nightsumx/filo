@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import process from 'node:process'
@@ -100,14 +100,24 @@ async function inAgentDir(body: (dir: string, file: string) => Promise<void>) {
 const FULL = ['todo', 'ask', 'approval', 'plan', 'subagent', 'review', 'autopilot', 'budget', 'terminal']
 
 describe('new-session defaults', () => {
-    it('reads them as pi merges them for a project, and writes them as its TUI saves them', () => inAgentDir(async (dir, file) => {
+    it('reads them as pi merges them for a project it trusts, and writes them as its TUI saves them', () => inAgentDir(async (dir, file) => {
         const project = path.join(dir, 'project')
         expect(await piDefaults(project)).toEqual({ model: undefined, thinkingLevel: 'medium' })
 
         await writeFile(file, JSON.stringify({ theme: 'dark', defaultProvider: 'a', defaultModel: 'one', enabledModels: ['a/one', 'b/*'] }))
         await mkdir(path.join(project, '.pi'), { recursive: true })
         await writeFile(path.join(project, '.pi', 'settings.json'), JSON.stringify({ defaultModel: 'two', defaultThinkingLevel: 'high' }))
+        expect(await piDefaults(project)).toEqual({ model: 'a/one', thinkingLevel: 'medium' })
+        const real = await realpath(project)
+        const trust = path.join(dir, 'trust.json')
+        await writeFile(trust, JSON.stringify({ [path.dirname(real)]: true }))
         expect(await piDefaults(project)).toEqual({ model: 'a/two', thinkingLevel: 'high' })
+        await writeFile(trust, JSON.stringify({ [path.dirname(real)]: true, [real]: false }))
+        expect((await piDefaults(project)).model).toBe('a/one')
+        await writeFile(trust, '{}')
+        await writeFile(file, JSON.stringify({ theme: 'dark', defaultProvider: 'a', defaultModel: 'one', enabledModels: ['a/one', 'b/*'], defaultProjectTrust: 'always' }))
+        expect(await piDefaults(project)).toEqual({ model: 'a/two', thinkingLevel: 'high' })
+        await writeFile(file, JSON.stringify({ theme: 'dark', defaultProvider: 'a', defaultModel: 'one', enabledModels: ['a/one', 'b/*'] }))
         expect(await piDefaults('relative')).toEqual({ model: 'a/one', thinkingLevel: 'medium' })
 
         // A model the scope does not name joins it; one it names leaves it as it is.

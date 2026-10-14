@@ -177,6 +177,16 @@ export class ProviderHelper {
         return this.call({ op: 'apiKey', provider })
     }
 
+    /** The question pi's TUI asks before it starts in a project it has no trust decision for, or null. */
+    trustQuestion(cwd: string): Promise<{ title: string, message: string, options: string[] } | null> {
+        return this.call({ op: 'trust', cwd })
+    }
+
+    /** Saves a trust choice as pi's TUI does: whether pi trusts the project this time, and whether trust.json has it now. */
+    answerTrust(cwd: string, label: string | undefined): Promise<{ trusted: boolean, saved: boolean }> {
+        return this.call({ op: 'answerTrust', cwd, label })
+    }
+
     /** The API of each model id pi knows from its maker. */
     nativeApis(models: string[]): Promise<Record<string, string>> {
         return this.call({ op: 'nativeApis', models })

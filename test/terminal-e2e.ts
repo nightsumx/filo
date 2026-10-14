@@ -2,6 +2,7 @@
 //   - with pi-cc-tui's bridge, the thread joins the terminal pi instead of starting its own: a run
 //     typed in the terminal streams into the app, a prompt sent from the app runs in the terminal,
 //     and the session file stays one line of conversation
+//   - a `!command` from the app runs in the terminal, streams into the app, and Esc cancels it
 //   - quitting the terminal pi leaves the thread as it was, on its own again
 //   - a terminal pi without the bridge: the thread follows the file it writes, and its own pi reads
 //     those turns before the next prompt from the app
@@ -97,6 +98,16 @@ async function main() {
         check(new Set(parents).size === parents.length, 'the session file is one line of conversation, no branches')
         if (SHOTS)
             await page.screenshot(path.join(SHOTS, 'terminal-joined.png'))
+
+        // A `!command` sent from the app: the terminal runs it, the app shows its output as it comes, Esc stops it.
+        const bashes = () => page.evaluate<any[]>(`${thread}.live.filter(l => l.message.role === 'bashExecution').map(l => ({ ...l.message }))`)
+        await page.evaluate(`(() => { const t = ${thread}; t.draft = '!echo started; sleep 30'; void t.send(); return true })()`)
+        await until('bridged output streams', () => page.evaluate<boolean>(`!!${thread}.bash?.output.includes('started')`))
+        check(true, 'a terminal `!command` streams into the app')
+        await until('running in the terminal', async () => (await bridged.pane()).includes('echo started; sleep 30'))
+        await page.evaluate(`${thread}.abort()`)
+        await until('Esc stops it', async () => !(await page.evaluate<boolean>(`!!${thread}.bash`)) && (await bashes()).some(b => b.command === 'echo started; sleep 30' && b.cancelled))
+        check((await bashes()).filter(b => b.command === 'echo started; sleep 30').length === 1, 'Esc in the app cancels it in the terminal, shown once')
 
         // The terminal pi quits: the thread keeps everything and is on its own again.
         await bridged.kill()

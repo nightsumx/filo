@@ -5,7 +5,7 @@
 //     and a plan (todo card); Allow lets the edit through
 //   - the session is listed with its agent, and a reopened tab replays it from the agent
 //   - pi-only actions (fork, compaction) stay hidden
-//   - Claude Code and Grok Build are offered too; a Claude thread carries its own label
+//   - Claude Code and Grok Build are offered too; a Claude thread carries its own label (its runs: e2e:claude-tui)
 //   - a session the agent lists itself (started in a terminal) shows up and opens
 //   - ACP threads are in session search and in the changes panel's edit log
 //   - typing mid-run queues a follow-up; /compact, fork and delete-from-agent go to the agent
@@ -227,11 +227,8 @@ async function main() {
         await js(`${T}.setAgent('claude')`)
         await until('Claude ready', () => js<boolean>(`${T}.agent === 'claude' && ${T}.agentStatus === 'ready'`))
         check(await js<string>(`document.querySelector('textarea').placeholder`) === 'Ask Claude Code to do something, or type / for commands', 'a Claude Code thread names its agent')
-        await js(`(() => { const t = ${T}; t.draft = 'hi claude'; void t.send(); return true })()`)
-        await until('Claude answers', () => js<boolean>(`(() => { const t = ${T}; return !t.running && t.persisted && t.key.startsWith('acp:claude:') && JSON.stringify(t.turns.at(-1).steps).includes('echo: hi claude') })()`), 20_000)
-        check(true, 'a Claude Code session runs and is keyed acp:claude:…')
-        await until('Claude listed', () => js<boolean>(`[...document.querySelectorAll('[role=treeitem]')].some(r => r.textContent.includes('hi claude') && r.textContent.includes('Claude Code'))`))
-        check(true, 'its sidebar row says Claude Code')
+        // It runs Claude Code's own TUI, not ACP: test/claude-tui-e2e.ts runs it against the real CLI.
+        await js(`window.__app.closeTab(${T}.key)`)
 
         // Cursor is not installed: the picker offers to install it, and picking it does.
         await js(`(() => { window.__app.newThread(${R}); return true })()`)

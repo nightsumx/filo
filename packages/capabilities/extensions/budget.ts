@@ -7,7 +7,6 @@
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent'
 import { getAgentDir } from '@earendil-works/pi-coding-agent'
 import process from 'node:process'
-import { mirrored } from '../lib/mirror'
 import { readCapabilityState } from '../lib/settings'
 import { ENV } from '../protocol'
 
@@ -38,9 +37,7 @@ export default function (pi: ExtensionAPI) {
         const stop = '停止'
         const title = `${process.env[ENV.subagent] ? '这个子 Agent' : '这次提问'}已经花了 $${spent.toFixed(2)}，超过了上限 $${limit}。继续吗？`
         const options = [go, always, stop]
-        const choice = ctx.mode === 'tui'
-            ? await mirrored(pi, { title, options }, signal => ctx.ui.select(title, options, { signal }), ctx.signal)
-            : await ctx.ui.select(title, options, { signal: ctx.signal })
+        const choice = await ctx.ui.select(title, options, { signal: ctx.signal })
         if (choice === go) {
             allowed = spent
             return

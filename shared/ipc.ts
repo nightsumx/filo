@@ -371,6 +371,15 @@ export interface AgentStartOptions {
     capabilities?: CapabilityId[]
     /** The thread's own routing choice (composer), when its agent runs through the gateway. */
     route?: ThreadRoute
+    /** pi's `--approve` / `--no-approve`: the answer to its trust question, for a project trust.json has none for. */
+    trust?: boolean
+}
+
+/** pi's trust question (its TUI's select), as the thread asks it. */
+export interface PiTrustQuestion {
+    title: string
+    message: string
+    options: string[]
 }
 
 export interface AgentExitInfo {
@@ -509,6 +518,10 @@ export interface PiBridge {
     setWebAccess: (enabled: boolean) => Promise<PiSettingsState>
     setCacheWarming: (mode: CacheWarming) => Promise<PiSettingsState>
     piDefaults: (cwd: string) => Promise<PiDefaults>
+    /** What pi's TUI would ask before starting in `cwd`; null when it would not ask, or the session's terminal pi is joined instead. */
+    piTrust: (cwd: string, sessionPath?: string) => Promise<PiTrustQuestion | null>
+    /** Saves the choice in pi's trust.json as its TUI does: whether pi trusts the project this time, and whether it was saved. */
+    answerPiTrust: (cwd: string, label?: string) => Promise<{ trusted: boolean, saved: boolean }>
     /** pi's `defaultProvider` + `defaultModel`, as its TUI's "set as default" writes them. */
     setDefaultModel: (cwd: string, provider: string, model: string) => Promise<PiDefaults>
     /** pi's `defaultThinkingLevel`. */
@@ -678,6 +691,8 @@ export const IPC = {
     setWebAccess: 'pi:set-web-access',
     setCacheWarming: 'pi:set-cache-warming',
     piDefaults: 'pi:defaults',
+    piTrust: 'pi:trust',
+    answerPiTrust: 'pi:answer-trust',
     setDefaultModel: 'pi:set-default-model',
     setDefaultThinkingLevel: 'pi:set-default-thinking-level',
     gitStatus: 'git:status',

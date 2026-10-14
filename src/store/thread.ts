@@ -7,6 +7,7 @@ import type { Presence } from '@shared/capabilities'
 import type {
     AgentMessage,
     AssistantMessage,
+    BashExecutionMessage,
     ImageContent,
     PiEvent,
     PiModel,
@@ -41,7 +42,8 @@ export type AgentStatus = 'none' | 'starting' | 'ready' | 'exited' | 'error'
 
 export interface UiRequest {
     id: string
-    method: 'select' | 'confirm' | 'input' | 'editor'
+    /** `terminal`: a joined terminal pi asks something only it can show (cc-bridge). */
+    method: 'select' | 'confirm' | 'input' | 'editor' | 'terminal'
     title?: string
     message?: string
     options?: string[]
@@ -112,6 +114,14 @@ export class Thread {
     /** Exact block start / end times seen while streaming; kept for the app session so reloads stay exact. */
     blockTimes = observable.map<string, BlockTime>()
     pendingPrompt: { text: string, images: ImageContent[], timestamp: number } | null = null
+    /** The `!command` running, its output streaming in. */
+    bash: BashExecutionMessage | null = null
+    /** A trust choice for this session only, as pi's TUI keeps one for its process (`--approve` / `--no-approve`). */
+    private sessionTrust: boolean | undefined = undefined
+    /** Questions the app asks itself (pi's trust question), answered here instead of by the agent. */
+    private ownQuestions = new Map<string, (value: string | undefined) => void>()
+    /** A joined terminal pi's `!commands` shown before it records them, by cc-bridge's id. */
+    private bridgedBash = new Map<string, BashExecutionMessage>()
     loaded = false
     /** A chat its agent continues only in a terminal (Cursor's own CLI chats): the command that does. */
     terminalOnly: string | undefined = undefined
@@ -389,6 +399,8 @@ export class Thread {
     async setAgent(agent: AgentKind) {
         if (agent === this.agent || !this.agentSwitchable)
             return
+        // A process still starting is the old agent's too.
+        await this.startPromise?.catch(() => {})
         const old = this.agentId
         if (old) {
             await this.stopAgent()
@@ -676,9 +688,20 @@ export class Thread {
         const resumable = this.persisted ? this.sessionPath : undefined
         const capabilities = this.host.enabledCapabilities
         await this.settleRoute(resumable)
+        // As pi's TUI does at startup, before the process (pi asks nobody in RPC mode and leaves the project untrusted).
+        const question = this.agent === 'pi' && this.sessionTrust === undefined ? await api().piTrust(this.cwd, resumable).catch(() => null) : null
+        if (question) {
+            const label = await new Promise<string | undefined>(resolve => runInAction(() => {
+                const id = `pi-trust-${uid()}`
+                this.ownQuestions.set(id, resolve)
+                this.uiRequests.push({ id, method: 'select', ...question })
+            }))
+            const answer = await api().answerPiTrust(this.cwd, label)
+            this.sessionTrust = answer.saved ? undefined : answer.trusted
+        }
         this.loadedConfig = this.configKey()
         this.restartPending = false
-        const agentId = await api().agentStart({ cwd: this.cwd, agent: this.agent, sessionPath: resumable, capabilities, route: toJS(this.route) })
+        const agentId = await api().agentStart({ cwd: this.cwd, agent: this.agent, sessionPath: resumable, capabilities, route: toJS(this.route), trust: this.sessionTrust })
         runInAction(() => {
             this.agentId = agentId
             this.stopping = false
@@ -863,6 +886,44 @@ export class Thread {
     }
 
     private async submit(text: string, images: ImageContent[], mode: 'steer' | 'followUp') {
+        // As pi's TUI runs `!cmd` (`!!cmd` kept out of the model's context): at once, mid-run or compaction too, recorded in the session.
+        if (this.agent === 'pi' && text.startsWith('!') && !images.length) {
+            const excludeFromContext = text.startsWith('!!')
+            const command = text.slice(excludeFromContext ? 2 : 1).trim()
+            if (!command)
+                return
+            if (this.bash) {
+                runInAction(() => this.restore([text], new Map()))
+                toast.error(tr('已有命令在运行，先按 Esc 取消它', 'A bash command is already running. Press Esc to cancel it first.'))
+                return
+            }
+            // A terminal pi shows its own as it records it.
+            const message = this.terminalPid ? null : observable<BashExecutionMessage>({ role: 'bashExecution', command, output: '', exitCode: undefined, cancelled: false, truncated: false, timestamp: Date.now() })
+            if (message) {
+                runInAction(() => {
+                    this.bash = message
+                    this.pushLive(message)
+                })
+            }
+            try {
+                const response = await this.request<Omit<BashExecutionMessage, 'role' | 'command' | 'timestamp'>>({ type: 'bash', command, excludeFromContext })
+                if (message && response.data)
+                    runInAction(() => Object.assign(message, response.data))
+            }
+            catch (error: any) {
+                runInAction(() => {
+                    this.live = this.live.filter(l => l.message !== message)
+                    this.restore([text], new Map())
+                })
+                toast.error(error.message)
+            }
+            finally {
+                // A terminal pi's is cc-bridge's to end.
+                if (message)
+                    runInAction(() => (this.bash = null))
+            }
+            return
+        }
         // An extension command (pi's /tree, /fork… among them) is no turn: its questions show as the idle thread's.
         const space = text.indexOf(' ')
         const command = text.startsWith('/') && this.commands.some(c => c.source === 'extension' && c.name === text.slice(1, space < 0 ? undefined : space))
@@ -936,6 +997,11 @@ export class Thread {
         if (!this.agentId)
             return
         try {
+            // As the TUI's Esc: mid-run it stops the run, and the command goes on.
+            if (this.bash && !this.running) {
+                await this.request({ type: 'abort_bash' })
+                return
+            }
             const queued = await this.takeQueue()
             runInAction(() => this.restore([...queued.steering, ...queued.followUp], queued.images))
             await this.request({ type: 'abort' })
@@ -1423,6 +1489,12 @@ export class Thread {
 
     respondUi(request: UiRequest, payload: { value?: string, confirmed?: boolean, cancelled?: boolean }) {
         this.uiRequests = this.uiRequests.filter(r => r.id !== request.id)
+        const own = this.ownQuestions.get(request.id)
+        if (own) {
+            this.ownQuestions.delete(request.id)
+            own(payload.value)
+            return
+        }
         if (this.agentId)
             void api().agentSend(this.agentId, { type: 'extension_ui_response', id: request.id, ...payload })
     }
@@ -1496,8 +1568,31 @@ export class Thread {
             case 'message_update':
                 this.applyDelta(event.assistantMessageEvent)
                 break
+            // Not pi's: cc-bridge's, around a terminal `!command` it runs while the app is here.
+            case 'bash_execution_start': {
+                const message = observable<BashExecutionMessage>({ role: 'bashExecution', command: event.command, output: '', exitCode: undefined, cancelled: false, truncated: false, timestamp: Date.now(), excludeFromContext: event.excludeFromContext })
+                this.bridgedBash.set(event.id, message)
+                this.bash = message
+                this.pushLive(message)
+                break
+            }
+            case 'bash_execution_update':
+                if (this.bash)
+                    this.bash.output += event.delta
+                break
+            case 'bash_execution_end':
+                if (this.bash === this.bridgedBash.get(event.id))
+                    this.bash = null
+                Object.assign(this.bridgedBash.get(event.id) ?? {}, { exitCode: event.exitCode, cancelled: event.cancelled })
+                break
             case 'message_end': {
                 const message = event.message as AgentMessage
+                const shown = this.bridgedBash.get(event.bashId)
+                if (shown) {
+                    this.bridgedBash.delete(event.bashId)
+                    Object.assign(shown, message)
+                    break
+                }
                 if (message.role === 'assistant')
                     this.streaming = null
                 if (message.role === 'user') {
@@ -1679,7 +1774,8 @@ export class Thread {
             case 'select':
             case 'confirm':
             case 'input':
-            case 'editor': {
+            case 'editor':
+            case 'terminal': {
                 const request: UiRequest = {
                     id: event.id,
                     method: event.method,

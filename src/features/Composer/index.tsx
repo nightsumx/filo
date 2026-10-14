@@ -261,7 +261,7 @@ const ComposerEditor = observer(({ thread }: { thread: Thread }) => {
                 submit(e.altKey ? 'followUp' : 'steer')
             return
         }
-        if (e.key === 'Escape' && thread.running) {
+        if (e.key === 'Escape' && (thread.running || thread.bash)) {
             e.preventDefault()
             void thread.abort()
             return
