@@ -8,7 +8,8 @@ const homes: string[] = []
 afterEach(() => homes.splice(0).forEach(h => rmSync(h, { recursive: true, force: true })))
 
 function home() {
-    const h = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'skills-')))
+    // Native: on Windows the temp folder can be an 8.3 name (RUNNER~1), and realpath in skills.ts gives the long one.
+    const h = realpathSync.native(mkdtempSync(path.join(os.tmpdir(), 'skills-')))
     homes.push(h)
     return h
 }

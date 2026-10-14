@@ -10,7 +10,7 @@ import pkg from './package.json'
 const external = Object.keys(pkg.dependencies)
 // vite-plugin-electron builds main/preload with their own config, so aliases are repeated there.
 const nodeResolve = { alias: { '@shared': resolve('shared') } }
-// Dev reads the workspace build. Packaged builds keep vendor/lite-monaco-*.tgz.
+// Dev reads the workspace build when it is checked out next to this one; builds, CI and tests without it use vendor/lite-monaco-*.tgz.
 const litcodeDev = resolve('../text-suite/litcode')
 
 // The dev server needs an inline React refresh preamble; production builds do not, so drop it there.
@@ -75,7 +75,7 @@ export default defineConfig(({ command }) => {
             alias: {
                 '@': resolve('src'),
                 '@shared': resolve('shared'),
-                ...(isBuild ? {} : { 'lite-monaco': resolve(litcodeDev, 'src/index.ts') }),
+                ...(isBuild || !existsSync(litcodeDev) ? {} : { 'lite-monaco': resolve(litcodeDev, 'src/index.ts') }),
             },
         },
         server: { port: 5288, fs: { allow: [searchForWorkspaceRoot(process.cwd()), ...modules, litcodeDev] } },
