@@ -1,6 +1,6 @@
 // The setup assistant, in the manner of macOS Setup Assistant: one window-filling page per step. Shown
 // once (existing users too, see SETUP_VERSION) and again from Settings → Agents.
-//   1. Tools: Node.js, pi for the terminal, Claude Code, Codex, Grok. Each installs with its official
+//   1. Tools: Node.js, pi, Claude Code, Codex, Grok. Each installs with its official
 //      installer in a terminal shown on the page, so every step (and any question it asks) is visible.
 //   2. The default agent for new threads; only an installed one can be picked.
 import type { AgentKind } from '@shared/agents'
@@ -24,7 +24,7 @@ const AGENT_NAMES: Record<string, string> = { pi: 'Pi', codex: 'Codex', claude: 
 function purpose(id: SetupToolId): string {
     switch (id) {
         case 'node': return tr('很多命令行工具和 npm 包需要它。', 'Many command-line tools and npm packages need it.')
-        case 'pi': return tr('在终端里用 pi，和 Filo 共用设置、模型和会话。', 'pi in your terminal, sharing settings, models and sessions with Filo.')
+        case 'pi': return tr('Filo 运行的就是它，终端里的 pi 和 Filo 共用设置、模型和会话。', 'Filo runs it; pi in your terminal shares settings, models and sessions with Filo.')
         case 'claude': return tr('Anthropic 的编程 agent，用你自己的账号登录。', 'Anthropic\'s coding agent, signed in with your own account.')
         case 'codex': return tr('OpenAI 的编程 agent，用 ChatGPT 账号或 API key 登录。', 'OpenAI\'s coding agent, signed in with ChatGPT or an API key.')
         case 'grok': return tr('xAI 的编程 agent（Grok Build），用 xAI 账号登录。', 'xAI\'s coding agent (Grok Build), signed in with your xAI account.')
@@ -94,7 +94,6 @@ const ToolsPage = observer(() => {
 
 const ToolRow = observer(({ tool }: { tool: SetupTool }) => {
     const running = setupStore.terminal?.tool === tool.id && setupStore.installing
-    const pi = setupStore.probe?.pi
     const installed = !!tool.path
     return (
         <div className="flex items-center gap-4 py-3" data-setup-tool={tool.id} data-installed={installed}>
@@ -104,9 +103,6 @@ const ToolRow = observer(({ tool }: { tool: SetupTool }) => {
                     {installed && tool.version && <span className="text-[12px] tabular-nums text-[var(--jb-comment)]">{tool.version}</span>}
                 </div>
                 <Comment className="mt-0.5">{purpose(tool.id)}</Comment>
-                {tool.id === 'pi' && !installed && pi && 'bundled' in pi && pi.bundled && (
-                    <Comment className="mt-0.5">{tr(`Filo 自带 pi ${pi.version}，现在就能用；这里装的是终端里用的那份。`, `Filo ships pi ${pi.version}, ready to use now; this installs the one for your terminal.`)}</Comment>
-                )}
                 {installed && <Comment className="mt-0.5 font-mono [overflow-wrap:anywhere]">{tool.path}</Comment>}
                 {!installed && setupStore.notFound.includes(tool.id) && (
                     <Comment className="mt-0.5 text-amber-600 dark:text-amber-400">
@@ -180,8 +176,8 @@ const InstallTerminal = observer(() => {
 })
 
 const AgentPage = observer(() => {
-    const available = (agent: AgentKind) => agent === 'pi' || !!setupStore.tool(AGENT_TOOL[agent]!)?.path
-    const [choice, setChoice] = useState<AgentKind>(() => available(appStore.defaultAgent) ? appStore.defaultAgent : 'pi')
+    const available = (agent: AgentKind) => !!setupStore.tool(AGENT_TOOL[agent]!)?.path
+    const [choice, setChoice] = useState<AgentKind>(() => available(appStore.defaultAgent) ? appStore.defaultAgent : DEFAULT_AGENT_CHOICES.find(available) ?? 'pi')
     const finish = async () => {
         await setupStore.close()
         appStore.finishSetup(choice)
@@ -211,14 +207,9 @@ const AgentPage = observer(() => {
                 {DEFAULT_AGENT_CHOICES.map((agent) => {
                     const tool = setupStore.tool(AGENT_TOOL[agent]!)
                     const ok = available(agent)
-                    const pi = setupStore.probe?.pi
-                    const note = agent === 'pi'
-                        ? tool?.path
-                            ? tr(`终端版 ${tool.version ?? ''}`.trim(), `Terminal install ${tool.version ?? ''}`.trim())
-                            : pi && 'bundled' in pi ? tr(`Filo 自带 ${pi.version}`, `Ships with Filo, ${pi.version}`) : tr('Filo 自带', 'Ships with Filo')
-                        : ok
-                            ? tr(`已安装 ${tool?.version ?? ''}`.trim(), `Installed ${tool?.version ?? ''}`.trim())
-                            : tr('未安装，可回上一步安装', 'Not installed; go back to install it')
+                    const note = ok
+                        ? tr(`已安装 ${tool?.version ?? ''}`.trim(), `Installed ${tool?.version ?? ''}`.trim())
+                        : tr('未安装，可回上一步安装', 'Not installed; go back to install it')
                     const checked = choice === agent
                     return (
                         <button

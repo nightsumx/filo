@@ -15,7 +15,6 @@ import { SessionFollower } from './follow'
 import { PresenceWatcher, presenceDir } from './presence'
 import { DEFAULT_THEME, IPC, THEME_PREFS } from '@shared/ipc'
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, net, Notification, shell } from 'electron'
-import { setAppNode } from './acp/node'
 import { AcpService } from './acp/service'
 import { AgentManager } from './agents'
 import { BACKGROUND, reveal } from './background'
@@ -30,7 +29,7 @@ import { agentDir, compactionInfo, globalCompaction, piDefaults, piSettingsState
 import { ChannelTests } from './channelTests'
 import { priceList, readPricesFrom, refreshPrices } from './prices'
 import { endpointSaveOf, helperLaunch, ProviderHelper, ProviderService } from './providers'
-import { resolvePiEnv, setBundledPi } from './pi-env'
+import { resolvePiEnv } from './pi-env'
 import { installCommand, liveSetupDeps, probeSetup, SETUP_LABELS } from './setup'
 import { assertInSessionsDir, listSessions, readSession, sessionsDir } from './sessions'
 import { readLedger } from 'pi-capabilities/lib/ledger.ts'
@@ -54,20 +53,6 @@ const store = new StateFile(() => path.join(app.getPath('userData'), 'state.json
 // pi loads capability extensions from real files, so packaged builds keep the pi-capabilities package
 // (extensions plus the helpers they import) outside the asar, as Resources/capabilities.
 const extensionsDir = app.isPackaged ? path.join(process.resourcesPath, 'capabilities', 'extensions') : path.join(__dirname, '../../packages/capabilities/extensions')
-
-// The pi shipped for users without one (electron/pi-env.ts): Resources/pi, installed by
-// scripts/bundle-pi.sh; in development the pi devDependency.
-const PI_CLI = path.join('node_modules', '@earendil-works', 'pi-coding-agent', 'dist', 'bundle', 'cli.js')
-setBundledPi(app.isPackaged
-    ? { cli: path.join(process.resourcesPath, 'pi', PI_CLI), launcher: path.join(process.resourcesPath, 'piLauncher.mjs') }
-    : { cli: path.join(__dirname, '../..', PI_CLI), launcher: path.join(__dirname, '../../electron/piLauncher.mjs') })
-// node and npm for the agents the app installs when the Mac has no Node.js (electron/acp/node.ts):
-// this Electron (its Helper on macOS, platform.nodeRuntime), and the npm shipped next to the bundled pi.
-setAppNode({
-    dir: path.join(app.getPath('userData'), 'node'),
-    electron: platform.nodeRuntime(process.execPath),
-    npm: app.isPackaged ? path.join(process.resourcesPath, 'pi', 'node_modules', 'npm') : path.join(__dirname, '../../bundled-pi/node_modules/npm'),
-})
 
 const agents = new AgentManager({
     onEvent: (agentId, event) => {

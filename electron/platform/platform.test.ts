@@ -1,11 +1,10 @@
 import { spawnSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
-import { createRequire } from 'node:module'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { platform } from '.'
-import { darwin, macNodeRuntime } from './darwin'
+import { darwin } from './darwin'
 import { linux } from './linux'
 import { cmdArgument, shimScript, win32 } from './win32'
 import { below, foregroundOf, parseRows } from './win32-processes'
@@ -105,9 +104,8 @@ describe('win32', () => {
         try {
             const echo = path.join(dir, 'echo args.cjs')
             writeFileSync(echo, 'console.log(JSON.stringify(process.argv.slice(2)))')
-            const launcher = win32.launcher('probe', {}, [process.execPath, echo])
-            const file = path.join(dir, launcher.file)
-            writeFileSync(file, launcher.text)
+            const file = path.join(dir, 'probe.cmd')
+            writeFileSync(file, `@echo off\r\n"${process.execPath}" "${echo}" %*\r\n`)
             const args = ['two words', 'a&b|c', '100%', '"quoted"', 'trail\\', '^caret', '!bang!', '']
             const command = win32.command(file, args)
             const out = spawnSync(command.file, [...command.args, '--plain'], { windowsVerbatimArguments: command.windowsVerbatimArguments, encoding: 'utf8' })
@@ -118,7 +116,7 @@ describe('win32', () => {
         }
     })
 
-    // The app's node is a batch file (launcher): a shim found with only that on PATH runs through it.
+    // A node that is a batch file: a shim found with only that on PATH runs through it.
     it.runIf(platform.id === 'win32')('runs an npm shim with the node on the PATH it is given', () => {
         const dir = mkdtempSync(path.join(os.tmpdir(), 'filo shim '))
         try {
@@ -127,8 +125,7 @@ describe('win32', () => {
             mkdirSync(path.dirname(pkg), { recursive: true })
             mkdirSync(bin)
             writeFileSync(pkg, 'console.log(process.env.VIA_APP_NODE, JSON.stringify(process.argv.slice(2)))')
-            const launcher = win32.launcher('node', { VIA_APP_NODE: 'yes' }, [process.execPath])
-            writeFileSync(path.join(bin, launcher.file), launcher.text)
+            writeFileSync(path.join(bin, 'node.cmd'), `@echo off\r\nsetlocal\r\nset "VIA_APP_NODE=yes"\r\n"${process.execPath}" %*\r\n`)
             const shim = path.join(dir, 'x.cmd')
             writeFileSync(shim, '@ECHO off\r\n"%_prog%"  "%dp0%\\node_modules\\x\\cli.js" %*\r\n')
             const command = win32.command(shim, ['a b'], bin)
@@ -149,40 +146,6 @@ describe('win32', () => {
         expect(foregroundOf(rows, 12)).toBe('esbuild')
         expect(foregroundOf(rows, 13)).toBe('')
     })
-
-    it('writes launchers as batch files', () => {
-        const l = win32.launcher('node', { ELECTRON_RUN_AS_NODE: '1' }, ['C:\\Program Files\\Filo\\Filo.exe', '--require', 'C:\\100%\\preload.cjs'])
-        expect(l.file).toBe('node.cmd')
-        expect(l.text.split('\r\n')).toEqual([
-            '@echo off',
-            ':: The app\'s Electron as node, for agents it installed (electron/acp/node.ts).',
-            'setlocal',
-            'set "ELECTRON_RUN_AS_NODE=1"',
-            '"C:\\Program Files\\Filo\\Filo.exe" "--require" "C:\\100%%\\preload.cjs" %*',
-            '',
-        ])
-    })
-})
-
-describe('darwin', () => {
-    it('runs Electron as node through its Helper, which stays out of the Dock', () => {
-        const app = '/Applications/Filo.app/Contents'
-        const helper = `${app}/Frameworks/Filo Helper.app/Contents/MacOS/Filo Helper`
-        expect(macNodeRuntime(`${app}/MacOS/Filo`, file => file === helper)).toBe(helper)
-        // No Helper, or not an app bundle: the binary itself.
-        expect(macNodeRuntime(`${app}/MacOS/Filo`, () => false)).toBe(`${app}/MacOS/Filo`)
-        expect(macNodeRuntime('/usr/local/bin/node', () => true)).toBe('/usr/local/bin/node')
-        expect(linux.nodeRuntime('/opt/Filo/filo')).toBe('/opt/Filo/filo')
-        expect(win32.nodeRuntime('C:\\Filo\\Filo.exe')).toBe('C:\\Filo\\Filo.exe')
-    })
-
-    it.runIf(platform.id === 'darwin')('the electron package\'s Helper runs as node', () => {
-        const electron = createRequire(import.meta.url)('electron') as unknown as string
-        const helper = darwin.nodeRuntime(electron)
-        expect(helper).toMatch(/\/Electron Helper\.app\/Contents\/MacOS\/Electron Helper$/)
-        const run = spawnSync(helper, ['-p', 'process.versions.node'], { env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' } })
-        expect(run.stdout.toString().trim()).toMatch(/^\d+\.\d+\.\d+$/)
-    })
 })
 
 describe('posix', () => {
@@ -191,11 +154,5 @@ describe('posix', () => {
         if (platform.id !== 'win32')
             expect(darwin.ipcPath('/Users/a/Library/Application Support/pi-gui', 't.sock')).toBe('/Users/a/Library/Application Support/pi-gui/t.sock')
         expect(linux.ipcPath(`/home/${'x'.repeat(120)}`, 't.sock').length).toBeLessThan(100)
-    })
-
-    it('writes launchers as sh scripts', () => {
-        const l = darwin.launcher('npm', { A: 'it\'s' }, ['/a b/node', 'cli.js'])
-        expect(l.file).toBe('npm')
-        expect(l.text.split('\n').slice(2)).toEqual([`A='it'\\''s' exec '/a b/node' 'cli.js' "$@"`, ''])
     })
 })

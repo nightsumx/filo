@@ -47,20 +47,6 @@ function findSync(name: string, dirs: readonly string[]): string | undefined {
     return undefined
 }
 
-/** A batch file: `set` for the variables (local to it), then the command with its arguments. */
-function batchLauncher(name: string, env: Record<string, string>, argv: readonly string[]) {
-    // In a batch file % starts a variable; %% is a literal one.
-    const arg = (s: string) => `"${s.replaceAll('%', '%%')}"`
-    const lines = [
-        '@echo off',
-        ':: The app\'s Electron as node, for agents it installed (electron/acp/node.ts).',
-        'setlocal',
-        ...Object.entries(env).map(([k, v]) => `set "${k}=${v.replaceAll('%', '%%')}"`),
-        `${argv.map(arg).join(' ')} %*`,
-    ]
-    return { file: `${name}.cmd`, text: `${lines.join('\r\n')}\r\n` }
-}
-
 const pathDirs = () => (process.env.PATH ?? '').split(path.delimiter)
 
 /**
@@ -103,7 +89,7 @@ function command(file: string, args: readonly string[], searchPath?: string): Co
     const script = readShim(file)
     if (script) {
         // The shim prefers a node.exe next to it, as cmd-shim does, then the node on the child's
-        // PATH: the user's, or the app's node.cmd (electron/acp/node.ts), itself a batch file.
+        // PATH, which may itself be a batch file.
         const local = path.join(path.dirname(file), 'node.exe')
         const dirs = searchPath === undefined ? pathDirs() : searchPath.split(path.delimiter)
         const node = isFile(local) ? local : findSync('node', dirs)
@@ -153,8 +139,6 @@ export const win32: Platform = {
     shellArgs,
     findIn: async (name, dirs) => findSync(name, dirs),
     command,
-    nodeRuntime: electron => electron,
-    launcher: batchLauncher,
     // Windows environment names are case-insensitive: one key, or the child sees two PATHs.
     withPath: (env, value) => {
         const out: Record<string, string> = {}

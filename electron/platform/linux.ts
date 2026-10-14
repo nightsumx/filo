@@ -7,7 +7,7 @@ import { open } from 'node:fs/promises'
 import process from 'node:process'
 import path from 'node:path'
 import { promisify } from 'node:util'
-import { chmodPtyHelper, descendants, clearSocket, directCommand, findExecutable, loginShellEnv, posixShell, posixShellArgs, posixStopTree, restrictSocket, shLauncher, socketPath } from './posix'
+import { chmodPtyHelper, descendants, clearSocket, directCommand, findExecutable, loginShellEnv, posixShell, posixShellArgs, posixStopTree, restrictSocket, socketPath } from './posix'
 
 const execFileAsync = promisify(execFile)
 
@@ -39,8 +39,6 @@ export const linux: Platform = {
     findIn: findExecutable,
     command: directCommand,
     withPath: (env, value) => ({ ...env, PATH: value }),
-    nodeRuntime: electron => electron,
-    launcher: shLauncher,
 
     descendants: pid => descendants(pid, 'ps'),
     // node-pty reports the foreground program's argv[0], which can be a path (/bin/bash).

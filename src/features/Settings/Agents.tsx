@@ -1,4 +1,4 @@
-// Settings → Agents: the coding agents a thread can run. pi is built in; the others are ACP agents,
+// Settings → Agents: the coding agents a thread can run. pi is the user's own; the others are ACP agents,
 // the user's own install (PATH) or one the app installs into its own folder (Install / Update).
 // Sign-in stays with each agent, so the page says how instead of holding credentials.
 import type { AgentAvailability } from '@shared/agents'
@@ -55,9 +55,11 @@ export const AgentsPage = observer(() => {
             />
             <SettingRow
                 title="pi"
-                description={tr('内置。模型和 API key 在「供应商」里设置。', 'Built in. Models and API keys are set in Providers.')}
-                control={() => <Status label={tr('内置', 'Built in')} tone="ok" />}
-            />
+                description={appStore.env && !appStore.env.ok ? appStore.env.error : tr('模型和 API key 在「供应商」里设置。', 'Models and API keys are set in Providers.')}
+                control={() => <Status label={appStore.env?.ok ? tr(`已安装 ${appStore.env.env.version}`, `Installed ${appStore.env.env.version}`) : tr('未安装', 'Not installed')} tone={appStore.env?.ok ? 'ok' : 'off'} />}
+            >
+                {appStore.env?.ok && <Comment className="mt-1 font-mono [overflow-wrap:anywhere]">{appStore.env.env.piPath}</Comment>}
+            </SettingRow>
             {ACP_AGENTS.map((spec) => {
                 const agent = loaded ? agentsStore.get(spec.id) : undefined
                 const s = status(agent)

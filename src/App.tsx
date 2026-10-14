@@ -26,7 +26,10 @@ const EnvError = observer(({ error }: { error: string }) => (
         <AlertTriangle size={28} className="text-amber-500" />
         <h1 className="!text-lg !font-semibold">{tr('没有找到可用的 pi', 'No working pi found')}</h1>
         <p className="max-w-md whitespace-pre-wrap text-[13px] text-gray-500 select-text">{error}</p>
-        <Button variant="primary" onClick={() => void appStore.retryEnv()}>{tr('重试', 'Retry')}</Button>
+        <div className="flex gap-2">
+            <Button variant="outline" onClick={() => appStore.openSetup()}>{tr('打开设置向导', 'Open setup assistant')}</Button>
+            <Button variant="primary" onClick={() => void appStore.retryEnv()}>{tr('重试', 'Retry')}</Button>
+        </div>
     </div>
 ))
 
@@ -203,8 +206,8 @@ export const App = observer(() => {
                         <Loader2 size={20} className="animate-spin text-gray-400" />
                     </div>
                 )}
-                {env && !env.ok && <EnvError error={env.error} />}
-                {env?.ok && appStore.setupOpen && (
+                {env && !env.ok && !appStore.setupOpen && <EnvError error={env.error} />}
+                {env && appStore.setupOpen && (
                     <>
                         <header className="app-drag h-[38px] shrink-0" />
                         <Setup />

@@ -7,10 +7,8 @@
 // (acp/node.ts writes `npm` and `node` for it), at the end of PATH so the user's own npm still wins.
 import type { PiPackageState } from '@shared/ipc'
 import { spawn } from 'node:child_process'
-import { withAppNode } from './acp/node'
 import { tr } from './i18n'
 import { piCommand, piSpawnEnv, resolvePiEnv } from './pi-env'
-import { platform } from './platform'
 
 const isObject = (v: unknown): v is Record<string, any> => !!v && typeof v === 'object' && !Array.isArray(v)
 
@@ -63,10 +61,9 @@ export async function installPackage(source = WEB_ACCESS.source): Promise<void> 
     if (!resolved.ok)
         throw new Error(resolved.error)
     const env = piSpawnEnv(resolved.env)
-    const withNpm = platform.withPath(env, await withAppNode(env.PATH ?? ''))
     const command = piCommand(resolved.env, ['install', source])
     await new Promise<void>((resolve, reject) => {
-        const child = spawn(command.file, command.args, { env: withNpm, stdio: ['ignore', 'pipe', 'pipe'], windowsVerbatimArguments: command.windowsVerbatimArguments })
+        const child = spawn(command.file, command.args, { env, stdio: ['ignore', 'pipe', 'pipe'], windowsVerbatimArguments: command.windowsVerbatimArguments })
         let output = ''
         const keep = (chunk: Buffer) => {
             output = (output + chunk.toString()).slice(-4000)

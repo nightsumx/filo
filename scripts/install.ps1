@@ -5,8 +5,8 @@
 # %LOCALAPPDATA%\Programs\Filo with Start menu and desktop shortcuts. The installer is not signed;
 # a file fetched here carries no mark of the web, so SmartScreen does not stop it, whereas a
 # browser download asks once ("More info", then "Run anyway"). The download is checked against the
-# release's SHA-256. The app runs the user's pi when PATH has one and its own built-in pi
-# otherwise, so neither Node.js nor the pi CLI is needed.
+# release's SHA-256. The app runs the user's pi (the one on PATH); its setup assistant installs one
+# if there is none.
 #
 # FILO_URL and FILO_INSTALL_DIR override the download and the target folder (used by tests);
 # with FILO_URL the checksum is FILO_URL.sha256 unless FILO_SHA256 gives it.

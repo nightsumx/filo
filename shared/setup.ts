@@ -12,7 +12,7 @@ export const SETUP_TOOL_IDS: readonly SetupToolId[] = ['node', 'pi', 'claude', '
 /** The agents the assistant offers as the default for new threads, in its order. */
 export const DEFAULT_AGENT_CHOICES: readonly AgentKind[] = ['pi', 'codex', 'claude', 'grok']
 
-/** The tool behind an agent choice (pi's is the terminal one; the app has its own pi as well). */
+/** The tool behind an agent choice. */
 export const AGENT_TOOL: Partial<Record<AgentKind, SetupToolId>> = { pi: 'pi', codex: 'codex', claude: 'claude', grok: 'grok' }
 
 export interface SetupTool {
@@ -27,6 +27,4 @@ export interface SetupTool {
 
 export interface SetupProbe {
     tools: SetupTool[]
-    /** The pi threads start: the user's own, or the copy shipped with the app; `error` when neither runs. */
-    pi: { bundled: boolean, version: string } | { error: string }
 }

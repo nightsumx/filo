@@ -51,7 +51,7 @@ jobs:
         with:
           bun-version: 1.4.2
 
-      # npm for scripts/bundle-pi.sh (npm ci of the shipped pi); node for vitest.
+      # node for vitest and for the pi the tests run.
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
@@ -59,9 +59,13 @@ jobs:
       - name: Install
         run: bun install --frozen-lockfile
 
+      # The tests run a real pi: the devDependency, as the user's own (electron/pi-env.ts).
       - name: Type check and unit tests
         run: |
           bun run typecheck
+          # Native paths: on Windows bash's $PWD and `command -v` are /d/… ones.
+          export PI_GUI_NODE="$(node -p process.execPath)"
+          export PI_GUI_PI="$(node -p "require('path').resolve('node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js')")"
           node node_modules/vitest/vitest.mjs run
 
       - name: Build
@@ -70,7 +74,6 @@ jobs:
           # vite runs on after a tsc error; the app needs both outputs.
           test -f dist/index.html
           test -f dist-electron/main/main.js
-          scripts/bundle-pi.sh
 
       - name: Package
         run: |

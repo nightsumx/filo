@@ -10,7 +10,7 @@ import path from 'node:path'
 import process from 'node:process'
 import { acpAgent } from '@shared/agents'
 import { SETUP_TOOL_IDS } from '@shared/setup'
-import { refreshShellPath, resolvePiEnv } from './pi-env'
+import { refreshShellPath } from './pi-env'
 import { platform } from './platform'
 
 /** The Node.js LTS the macOS installer package is for (nodejs.org/dist/index.tab, 2026-10-09). */
@@ -51,8 +51,6 @@ export interface SetupDeps {
     findIn: (name: string, dirs: readonly string[]) => Promise<string | undefined>
     /** `file --version`'s first line, run with PATH `searchPath`; undefined when it fails. */
     version: (file: string, searchPath: string) => Promise<string | undefined>
-    /** The pi threads start, looked up again. */
-    pi: () => Promise<SetupProbe['pi']>
     /** Tests: an install command per tool (PI_GUI_SETUP_INSTALL_<ID>). */
     override?: (id: SetupToolId) => string | undefined
 }
@@ -89,15 +87,12 @@ export function parseVersion(line: string | undefined): string | undefined {
 export async function probeSetup(deps: SetupDeps): Promise<SetupProbe> {
     const searchPath = await deps.searchPath()
     const dirs = searchPath.split(path.delimiter).filter(Boolean)
-    const [tools, pi] = await Promise.all([
-        Promise.all(SETUP_TOOL_IDS.map(async (id): Promise<SetupTool> => {
-            const found = await deps.findIn(binOf(id), [...dirs, ...extraDirs(id, deps.home)])
-            const version = found ? parseVersion(await deps.version(found, searchPath)) : undefined
-            return { id, label: LABELS[id], path: found, version, install: await installCommand(id, deps, searchPath) }
-        })),
-        deps.pi(),
-    ])
-    return { tools, pi }
+    const tools = await Promise.all(SETUP_TOOL_IDS.map(async (id): Promise<SetupTool> => {
+        const found = await deps.findIn(binOf(id), [...dirs, ...extraDirs(id, deps.home)])
+        const version = found ? parseVersion(await deps.version(found, searchPath)) : undefined
+        return { id, label: LABELS[id], path: found, version, install: await installCommand(id, deps, searchPath) }
+    }))
+    return { tools }
 }
 
 /** `file --version`, through the platform's way of starting it (a Windows .cmd shim runs under node). */
@@ -112,7 +107,7 @@ function runVersion(file: string, searchPath: string): Promise<string | undefine
     })
 }
 
-/** This machine: the login shell asked again, the pi env resolved again. */
+/** This machine: the login shell asked again (which resolves the pi env again too). */
 export function liveSetupDeps(): SetupDeps {
     return {
         os: platform.id,
@@ -120,10 +115,6 @@ export function liveSetupDeps(): SetupDeps {
         searchPath: refreshShellPath,
         findIn: platform.findIn,
         version: runVersion,
-        pi: async () => {
-            const env = await resolvePiEnv()
-            return env.ok ? { bundled: !!env.env.bundled, version: env.env.version } : { error: env.error }
-        },
         override: id => process.env.PI_GUI_TEST === '1' ? process.env[`PI_GUI_SETUP_INSTALL_${id.toUpperCase()}`] || undefined : undefined,
     }
 }

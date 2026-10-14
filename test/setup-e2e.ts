@@ -1,9 +1,10 @@
 // End-to-end check of the setup assistant in the built app, on a machine made empty for the run: a
 // throwaway HOME and a login shell (zsh, ZDOTDIR) whose PATH has none of the tools.
-//   - it shows on first launch (here an existing user's, over a project window); every tool reads as not installed; pi says Filo's own copy runs now
+//   - it shows on first launch (here an existing user's, over a project window), with no pi on the machine; every tool reads as not installed
 //   - Install runs the installer in the page's terminal; it asks a question, answered by typing into
 //     that terminal; when it ends the login shell is asked again and the tool shows as installed
 //   - an installer that fails says so, and the tool stays not installed
+//   - installing pi makes it the pi the app runs
 //   - page 2 offers only installed agents; the choice is saved, new threads start with it
 //   - Settings → Agents shows the default and opens the assistant again
 // The installers are stand-ins (PI_GUI_SETUP_INSTALL_<ID>); the real ones are checked in a clean VM.
@@ -61,6 +62,7 @@ async function main() {
         SHELL: '/bin/zsh',
         ZDOTDIR: zdot,
         PI_GUI_SETUP_INSTALL_CODEX: codexInstaller,
+        PI_GUI_SETUP_INSTALL_PI: `printf '#!/bin/sh\\necho 1.0.4\\n' > "${bin}/pi" && chmod +x "${bin}/pi"`,
         PI_GUI_SETUP_INSTALL_CLAUDE: 'echo "network is down" && exit 7',
         // Succeeds, but puts grok nowhere the shell looks.
         PI_GUI_SETUP_INSTALL_GROK: 'echo "installed somewhere else"',
@@ -89,7 +91,7 @@ async function main() {
         await until('the probe', () => js(`document.querySelectorAll('[data-setup-tool]').length === 5`), 20_000)
         for (const id of ['node', 'pi', 'claude', 'codex', 'grok'])
             check(!await installed(id), `${id} reads as not installed on an empty machine`)
-        check(await js(`${row('pi')}.textContent.includes('Filo ships pi')`), 'pi: the app\'s own copy runs now')
+        check(await js(`window.__app.env?.ok === false`), 'there is no pi to run yet')
         check(await js(`(${row('node')}.querySelector('button')?.title ?? '').includes('nodejs.org') || (${row('node')}.querySelector('button')?.title ?? '').startsWith('brew')`), 'Node.js installs from nodejs.org (no Homebrew on this PATH)')
 
         check(await clickIn(row('codex'), 'Install'), 'Install starts Codex\'s installer')
@@ -115,6 +117,11 @@ async function main() {
         check(await js(`document.querySelector('main section [role="status"]').textContent`) === 'Codex installer finished', 'the terminal says it finished')
         const agents = await js(`window.pi.listAgents()`)
         check(agents.find((a: any) => a.id === 'codex')?.available === true, 'the rest of the app finds the new codex (PATH asked again)')
+
+        check(await clickIn(row('pi'), 'Install'), 'Install starts pi\'s installer')
+        await until('pi installed', () => installed('pi'), 20_000)
+        await until('the app runs it', () => js(`window.__app.env?.ok === true && window.__app.env.env.piPath === ${JSON.stringify(path.join(bin, 'pi'))}`), 10_000)
+        check(true, 'the installed pi is the one the app runs')
 
         check(await clickIn(row('claude'), 'Install'), 'Install starts Claude Code\'s installer')
         await until('claude failed', () => js(`/failed \\(exit code 7\\)/.test(document.querySelector('main section [role="status"]')?.textContent ?? '')`), 20_000)

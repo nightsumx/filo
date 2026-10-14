@@ -39,7 +39,6 @@ describe.runIf(posix)('setup assistant probe', () => {
             searchPath: async () => `${bin}:/usr/bin:/bin`,
             findIn: platform.findIn,
             version: live.version,
-            pi: async () => ({ bundled: true, version: '1.0.3' }),
             ...over,
         }
     }
@@ -59,7 +58,6 @@ describe.runIf(posix)('setup assistant probe', () => {
         expect(byId.grok).toMatchObject({ path: path.join(home, '.grok/bin/grok'), version: '1.0.46' })
         expect(byId.codex.path).toBeUndefined()
         expect(byId.codex.install).toBe('curl -fsSL https://chatgpt.com/codex/install.sh | sh')
-        expect(probe.pi).toEqual({ bundled: true, version: '1.0.3' })
     })
 
     it('reads PATH again on every probe, so a tool installed in between shows up', async () => {
@@ -98,7 +96,6 @@ describe('setup assistant installers', () => {
         searchPath: async () => '/usr/bin:/bin',
         findIn: async () => undefined,
         version: async () => undefined,
-        pi: async () => ({ error: '' }),
     }
 
     it('runs each agent\'s official installer', async () => {

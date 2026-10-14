@@ -40,17 +40,12 @@ const ThemeMenu = observer(() => {
     )
 })
 
-/** Which pi runs and why: the user's own, or the one shipped in the app. */
+/** Which pi runs. */
 function piTitle(env: PiEnvResult | null | undefined) {
     const app = `${APP_INFO.name} ${__APP_VERSION__} · ${tr(APP_INFO.tagline)}`
     if (!env?.ok)
         return env ? `${app}\n${env.error}` : app
-    if (!env.env.bundled)
-        return `${app}\n${tr(`使用你安装的 pi：${env.env.piPath}`, `Using your pi: ${env.env.piPath}`)}`
-    const why = env.env.note
-        ? tr(`你安装的 pi 无法启动，暂用 Filo 自带的版本。\n${env.env.note}`, `Your pi failed to start, so the one built into Filo is used.\n${env.env.note}`)
-        : tr('没有找到你安装的 pi，使用 Filo 自带的版本。安装 pi 后会改用你的。', 'No pi installed, so the one built into Filo is used. Install pi and Filo switches to it.')
-    return `${app}\n${why}`
+    return `${app}\n${tr(`使用你安装的 pi：${env.env.piPath}`, `Using your pi: ${env.env.piPath}`)}`
 }
 
 /** The focused editor's caret and file format, as on the right of WebStorm's status bar. */
@@ -136,7 +131,7 @@ export const StatusBar = observer(() => {
                 </button>
             )}
             <span className={cn(widget, 'cursor-default')} title={piTitle(env)}>
-                {env?.ok ? `pi ${env.env.version}${env.env.bundled ? tr(' · 内置', ' · built-in') : ''}` : env ? tr('pi 不可用', 'pi unavailable') : tr('正在查找 pi…', 'Looking for pi…')}
+                {env?.ok ? `pi ${env.env.version}` : env ? tr('pi 不可用', 'pi unavailable') : tr('正在查找 pi…', 'Looking for pi…')}
             </span>
             <ThemeMenu />
             <button type="button" className={widget} aria-label={tr('设置', 'Settings')} title={tr(`设置（${keys('⌘,')}）`, `Settings (${keys('⌘,')})`)} onClick={() => appStore.setSettingsOpen(true)}>

@@ -11,34 +11,19 @@ import { platform } from './platform'
 const execFileAsync = promisify(execFile)
 
 /**
- * Which pi the app runs. The user's own pi always wins: it is what they run in the terminal, at the
- * version they chose. Without one (the app installed on its own, no Node), the pi shipped in the app
- * runs on the app's Electron as node. Both read and write the same ~/.pi/agent (sign-ins, models,
- * settings, sessions), so installing pi later changes nothing but the program.
+ * Which pi the app runs: the user's own, the one they run in the terminal, at the version they chose.
+ * Both read and write the same ~/.pi/agent (sign-ins, models, settings, sessions).
  *
  * GUI apps on macOS and Linux do not inherit the user's shell PATH, so a login shell is asked once
  * and the PATH it had remembered (platform.shellEnv; Windows apps do get the user's environment).
  *
- * PI_GUI_PI / PI_GUI_NODE pick a pi explicitly; PI_GUI_PI=bundled forces the shipped one.
+ * PI_GUI_PI / PI_GUI_NODE pick a pi explicitly.
  */
 let cached: Promise<PiEnvResult> | undefined
 let shellPath = process.env.PATH ?? ''
 
-/**
- * The shipped pi's CLI and the launcher that starts it, set by main at startup. `runtime` is the
- * Electron binary that runs it, by default this process's (tests pass the electron package's); on
- * macOS its Helper runs it (platform.nodeRuntime).
- */
-interface BundledPi { cli: string, launcher: string, runtime?: string }
-let bundledPi: BundledPi | undefined
-
-export function setBundledPi(paths: BundledPi | undefined) {
-    bundledPi = paths
-    cached = undefined
-}
-
 export function resolvePiEnv(): Promise<PiEnvResult> {
-    cached ??= resolveUncached().catch(error => ({ ok: false as const, error: String(error?.message ?? error) }))
+    cached ??= resolveLocal().catch(error => ({ ok: false as const, error: String(error?.message ?? error) }))
     return cached
 }
 
@@ -46,16 +31,10 @@ export function resetPiEnv() {
     cached = undefined
 }
 
-/**
- * Environment for spawned pi processes: login-shell PATH with the real node bin dir first. The
- * bundled pi gets the shell's PATH as it is, and runs Electron as node (its launcher drops the flag
- * again for what pi starts).
- */
+/** Environment for spawned pi processes: login-shell PATH with the real node bin dir first. */
 export function piSpawnEnv(env: PiEnv): Record<string, string> {
     const base = { ...process.env as Record<string, string> }
     delete base.ELECTRON_RUN_AS_NODE
-    if (env.bundled)
-        return { ...platform.withPath(base, shellPath), ELECTRON_RUN_AS_NODE: '1' }
     const nodeBin = path.dirname(env.nodePath)
     const parts = [nodeBin, ...shellPath.split(path.delimiter).filter(p => p && p !== nodeBin)]
     return platform.withPath(base, parts.join(path.delimiter))
@@ -63,37 +42,9 @@ export function piSpawnEnv(env: PiEnv): Record<string, string> {
 
 /** pi's bin is usually a JS file run by node; a compiled binary is spawned directly. */
 export function piCommand(env: PiEnv, args: string[]): Command {
-    if (env.bundled)
-        return { file: env.nodePath, args: [env.bundled.launcher, env.piPath, ...args] }
     return /\.[cm]?js$/.test(env.piPath)
         ? { file: env.nodePath, args: [env.piPath, ...args] }
         : platform.command(env.piPath, args)
-}
-
-async function resolveUncached(): Promise<PiEnvResult> {
-    const forced = process.env.PI_GUI_PI === 'bundled'
-    const { found, ...local } = forced ? { found: false, ok: false as const, error: '' } : await resolveLocal()
-    if (local.ok)
-        return local
-    const shipped = await resolveBundled()
-    if (shipped?.ok) {
-        if (found)
-            shipped.env.note = local.error
-        return shipped
-    }
-    // A pi of the user's that fails says more than the shipped one failing too.
-    if (found || !shipped)
-        return local.error ? local : { ok: false, error: tr('这个版本没有附带 pi。', 'This build does not include pi.') }
-    return shipped
-}
-
-/** The pi shipped in the app, run by the app's Electron as node; undefined when there is none. */
-async function resolveBundled(): Promise<PiEnvResult | undefined> {
-    if (!bundledPi || !existsSync(bundledPi.cli) || !existsSync(bundledPi.launcher))
-        return undefined
-    if (!process.env.PI_GUI_PI)
-        await loadShellPath()
-    return checkVersion({ nodePath: platform.nodeRuntime(bundledPi.runtime ?? process.execPath), piPath: bundledPi.cli, version: '', bundled: { launcher: bundledPi.launcher } })
 }
 
 /** `pi --version` through the same command and environment the threads use. */
@@ -113,7 +64,12 @@ let shellLoaded = false
 
 /** The login shell's PATH (asked once), for finding other agents' commands. */
 export async function loginShellPath(): Promise<string> {
-    await loadShellPath()
+    if (!shellLoaded) {
+        shellLoaded = true
+        const fromShell = await platform.shellEnv().catch(() => undefined)
+        if (fromShell?.path)
+            shellPath = fromShell.path
+    }
     return shellPath
 }
 
@@ -130,18 +86,7 @@ export async function refreshShellPath(): Promise<string> {
     return shellPath
 }
 
-/** The login shell's PATH, for the bundled pi when no local one was looked up. */
-async function loadShellPath() {
-    if (shellLoaded)
-        return
-    shellLoaded = true
-    const fromShell = await platform.shellEnv().catch(() => undefined)
-    if (fromShell?.path)
-        shellPath = fromShell.path
-}
-
-/** The user's own pi; `found` tells a pi that failed to start from no pi at all. */
-async function resolveLocal(): Promise<PiEnvResult & { found?: boolean }> {
+async function resolveLocal(): Promise<PiEnvResult> {
     let nodePath = process.env.PI_GUI_NODE ?? ''
     let piPath = process.env.PI_GUI_PI ?? ''
 
@@ -155,8 +100,8 @@ async function resolveLocal(): Promise<PiEnvResult & { found?: boolean }> {
     }
 
     if (!piPath || !existsSync(piPath))
-        return { ok: false, error: tr('找不到 pi 命令。请先安装：npm install -g @earendil-works/pi-coding-agent，或设置环境变量 PI_GUI_PI。', 'pi command not found. Install it with npm install -g @earendil-works/pi-coding-agent, or set PI_GUI_PI.') }
+        return { ok: false, error: tr('找不到 pi 命令。用设置向导安装，或设置环境变量 PI_GUI_PI。', 'pi command not found. Install it with the setup assistant, or set PI_GUI_PI.') }
     if (/\.[cm]?js$/.test(piPath) && (!nodePath || !existsSync(nodePath)))
-        return { ok: false, found: true, error: tr('找不到 node。pi 需要 Node.js 22.19 以上，或设置环境变量 PI_GUI_NODE。', 'node not found. pi needs Node.js 22.19 or later; or set PI_GUI_NODE.') }
-    return { ...await checkVersion({ nodePath, piPath, version: '' }), found: true }
+        return { ok: false, error: tr('找不到 node。pi 需要 Node.js 22.19 以上，或设置环境变量 PI_GUI_NODE。', 'node not found. pi needs Node.js 22.19 or later; or set PI_GUI_NODE.') }
+    return checkVersion({ nodePath, piPath, version: '' })
 }

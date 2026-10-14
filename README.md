@@ -26,7 +26,7 @@ The scripts download the latest release from filoapp.dev and check it before ins
 - Linux: checks the SHA-256 and puts the AppImage in `~/.local/share/filo`, with an app menu entry and a `~/.local/bin/filo` command. AppImages need FUSE (`fuse3`), which most distributions have.
 - Windows: checks the SHA-256 and runs the installer silently for your user (`%LOCALAPPDATA%\Programs\Filo`, Start menu and desktop shortcuts).
 
-No Node.js or pi CLI needed: Filo comes with its own pi, and uses yours if your login shell has one. On first launch a setup assistant offers Node.js, pi for your terminal, Claude Code, Codex and Grok Build, each with its official installer in a terminal inside the window (you type any password or answer its prompts there), then asks which agent new threads start with. Settings → Agents changes that and reopens the assistant. Sign in to a subscription, add an API key or connect a local model under Settings → Providers. It all goes to pi's own `~/.pi/agent`.
+Filo runs the pi your login shell has, the same one as in your terminal. On first launch a setup assistant offers Node.js, pi, Claude Code, Codex and Grok Build, each with its official installer in a terminal inside the window (you type any password or answer its prompts there), then asks which agent new threads start with. Settings → Agents changes that and reopens the assistant. Sign in to a subscription, add an API key or connect a local model under Settings → Providers. It all goes to pi's own `~/.pi/agent`.
 
 [filoapp.dev](https://filoapp.dev) has the `.dmg`, the AppImages and `Filo-Setup-x64.exe` for a manual install. The macOS app is not notarized, so macOS blocks its first launch from a browser download: open it once, then System Settings → Privacy & Security → Open Anyway. The Windows installer is not signed, so SmartScreen asks once: More info → Run anyway.
 
@@ -54,7 +54,6 @@ App features that need the agent's cooperation (approvals, questions, plan mode,
 | `shared/` | Types and constants used on both sides (IPC, pi's RPC, agents, providers) |
 | `packages/capabilities` | pi extensions shared by the app and pi-cc-tui; `protocol.ts` is the contract between them |
 | `packages/pi-cc-tui` | Claude Code look for pi's terminal UI, published to npm |
-| `bundled-pi/` | The pi version the app ships (lockfile), installed by `scripts/bundle-pi.sh` |
 | `site/` | filoapp.dev, a Cloudflare Worker with static assets |
 | `test/` | Vitest suites and end-to-end scripts that drive the built app over CDP |
 
@@ -83,7 +82,7 @@ The app runs in the background during these scripts (`PI_GUI_BACKGROUND=1`): no 
 Packaging and release:
 
 ```bash
-bun run dist             # bundles pi, builds the .dmg and .zip into release/
+bun run dist             # builds the .dmg and .zip into release/
 scripts/release.sh       # builds the committed HEAD and publishes GitHub release v<version>
 bun run deploy:site      # deploys site/ with wrangler
 ```

@@ -7,8 +7,7 @@
 # "Open Anyway".
 # Linux (x64, arm64): the AppImage goes to ~/.local/share/filo, with `filo` in ~/.local/bin and an
 # app menu entry; the download is checked against the release's SHA-256. No root needed.
-# The app runs the user's pi when the login shell has one, and its own built-in pi otherwise, so
-# neither Node nor the pi CLI is needed.
+# The app runs the user's pi (the login shell's); its setup assistant installs one if there is none.
 #
 # FILO_URL and FILO_INSTALL_DIR override the download and the target folder (used by tests); on
 # Linux the checksum is read from FILO_URL.sha256.
