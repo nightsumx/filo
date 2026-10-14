@@ -1216,6 +1216,9 @@ export class Thread {
             }
             await this.request({ type: 'set_model', provider: model.provider, modelId: model.id })
             this.chosenModel = modelKey(model)
+            // Picking is pi's Ctrl+S: new sessions start on it too. Not a group: a terminal's pi has no such provider.
+            if (this.agent === 'pi' && model.provider !== ROUTES_PROVIDER)
+                void api().setDefaultModel(this.cwd, model.provider, model.id).catch(error => toast.error(tr('默认模型没有保存', 'Default model not saved'), { description: ipcMessage(error) }))
             await Promise.all([this.syncState(), this.refreshModels(), this.refreshStats()])
         }
         catch (error: any) {
@@ -1227,6 +1230,8 @@ export class Thread {
         try {
             // pi clamps the level to what the model has: show the one it took.
             await this.request({ type: 'set_thinking_level', level })
+            if (this.agent === 'pi')
+                void api().setDefaultThinkingLevel(this.cwd, level).catch(error => toast.error(tr('默认思考强度没有保存', 'Default thinking level not saved'), { description: ipcMessage(error) }))
             await this.syncState()
         }
         catch (error: any) {

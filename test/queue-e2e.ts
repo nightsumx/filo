@@ -39,7 +39,7 @@ async function main() {
         return prompt.startsWith('slow') ? { text: 'slow done', delayMs: 4000 } : { text: `echo: ${prompt}` }
     })
     await writeFile(path.join(agentDir, 'models.json'), JSON.stringify({
-        providers: { mock: { baseUrl: llm.baseUrl, api: 'openai-completions', apiKey: 'mock', models: [{ id: 'mock-1', input: ['text', 'image'], contextWindow: 100_000, maxTokens: 1000 }] } },
+        providers: { mock: { baseUrl: llm.baseUrl, api: 'openai-completions', apiKey: 'mock', models: [{ id: 'mock-1', input: ['text', 'image'], contextWindow: 100_000, maxTokens: 1000 }, { id: 'mock-2', reasoning: true, contextWindow: 100_000, maxTokens: 1000 }] } },
     }))
     await writeFile(path.join(agentDir, 'settings.json'), JSON.stringify({ defaultProvider: 'mock', defaultModel: 'mock-1', defaultThinkingLevel: 'off', compaction: { keepRecentTokens: 1 } }))
     await writeFile(path.join(userData, 'state.json'), JSON.stringify({
@@ -166,6 +166,15 @@ async function main() {
         await page.evaluate(`(async () => { await window.__app.closeTab(${T}.key); window.__app.newThread(${JSON.stringify(trusting)}); return true })()`)
         await until('a third thread starts', async () => (await page.evaluate<string>(`${T}.agentStatus`)) === 'ready')
         check(!(await question()), 'a saved choice is not asked again')
+
+        // ---------------------------------------------------------------- picking is pi's Ctrl+S
+        const settings = async () => JSON.parse(await readFile(path.join(agentDir, 'settings.json'), 'utf8'))
+        await page.evaluate(`(async () => { await ${T}.setModel(${T}.models.find(m => m.id === 'mock-2')); await ${T}.setThinkingLevel('high'); return true })()`)
+        await until('the default saved', async () => (await settings()).defaultModel === 'mock-2' && (await settings()).defaultThinkingLevel === 'high')
+        check((await settings()).compaction?.keepRecentTokens === 1, 'a picked model and level become pi\'s defaults, the other settings kept')
+        await page.evaluate(`(async () => { await window.__app.closeTab(${T}.key); window.__app.newThread(${JSON.stringify(repo)}); return true })()`)
+        await until('a new thread on the picked model', () => page.evaluate<boolean>(`${T}.agentStatus === 'ready' && ${T}.state?.model?.id === 'mock-2' && ${T}.state?.thinkingLevel === 'high'`), 30_000)
+        check(true, 'a new thread starts on them')
 
         console.log('\nall queue checks passed')
     }

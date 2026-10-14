@@ -8,7 +8,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { cn, formatTokens, ipcMessage } from '@/lib/utils'
 import { AgentIcon } from '@/components/AgentIcon'
-import { Brain, Check, ChevronDown, ClipboardList, Cpu, Download, FilePen, KeyRound, Loader2, Pin, Plane, Plus, Route, Settings2, ShieldCheck, SlidersHorizontal, Undo2, Zap } from 'lucide-react'
+import { Brain, Check, ChevronDown, ClipboardList, Cpu, Download, FilePen, KeyRound, Loader2, Plane, Plus, Route, Settings2, ShieldCheck, SlidersHorizontal, Undo2, Zap } from 'lucide-react'
 import { observable, runInAction } from 'mobx'
 import { observer } from 'mobx-react-lite'
 import { useEffect, useRef, useState } from 'react'
@@ -21,7 +21,6 @@ import { AGENT_APIS, memberKey, ROUTED_AGENT_LABELS, ROUTES_PROVIDER, TERMINAL_A
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { flatFieldClass } from '@/components/ui/form'
-import { toast } from 'sonner'
 
 const pill = 'flex h-6 items-center gap-1 rounded-md px-1.5 text-[12px] text-gray-600 outline-none transition-colors hover:bg-black/[0.06] hover:text-gray-900 data-[state=open]:bg-black/[0.08] disabled:opacity-50'
 
@@ -147,13 +146,6 @@ export const ModelPicker = observer(({ thread }: { thread: Thread }) => {
                             ))}
                         </div>
                     ))}
-                    {/* As in pi's TUI: picking switches this session; new ones start on the default in settings.json. */}
-                    {thread.agent === 'pi' && defaults && current && modelKey(current) !== defaults.model && (
-                        <DropdownMenuItem onSelect={() => void window.pi.setDefaultModel(thread.cwd, current.provider, current.id).then(setDefaults, error => toast.error(tr('默认模型没有保存', 'Default model not saved'), { description: ipcMessage(error) }))}>
-                            <Pin size={13} />
-                            <span className="flex-1 truncate">{tr(`把 ${current.name} 设为新会话的默认`, `Start new sessions on ${current.name}`)}</span>
-                        </DropdownMenuItem>
-                    )}
                     {!!channelAgent && (
                         <>
                             {!!byProvider.size && <DropdownMenuSeparator />}
@@ -387,18 +379,12 @@ const EffortSlider = observer(function EffortSlider({ levels, value, onChange }:
 })
 
 export const ThinkingPicker = observer(({ thread }: { thread: Thread }) => {
-    const [defaults, setDefaults] = useState<PiDefaults>()
     const levels = thread.thinkingLevels
     const current = thread.state?.thinkingLevel
     if (levels.length <= 1)
         return null
     return (
-        <Popover
-            onOpenChange={(open) => {
-                if (open && thread.agent === 'pi')
-                    void window.pi.piDefaults(thread.cwd).then(setDefaults, () => setDefaults(undefined))
-            }}
-        >
+        <Popover>
             <PopoverTrigger className={pill}>
                 <Brain size={13} />
                 <span>{current ? levelLabel(current) : tr('思考', 'Thinking')}</span>
@@ -406,21 +392,6 @@ export const ThinkingPicker = observer(({ thread }: { thread: Thread }) => {
             </PopoverTrigger>
             <PopoverContent align="start" sideOffset={6} className="w-[300px] px-4 pt-3 pb-2.5">
                 <EffortSlider levels={levels} value={current} onChange={level => thread.setThinkingLevel(level)} />
-                {/* As in pi's TUI: the level is this session's; new ones start on defaultThinkingLevel. */}
-                {thread.agent === 'pi' && defaults && current && (
-                    <div className="mt-2 flex h-6 items-center justify-between border-t border-black/[0.06] pt-2 text-[11.5px] text-gray-500">
-                        <span>{tr(`新会话：${levelLabel(defaults.thinkingLevel)}`, `New sessions: ${levelLabel(defaults.thinkingLevel)}`)}</span>
-                        {current !== defaults.thinkingLevel && (
-                            <button
-                                type="button"
-                                className="text-ide-accent hover:underline"
-                                onClick={() => void window.pi.setDefaultThinkingLevel(thread.cwd, current).then(setDefaults, error => toast.error(tr('默认思考强度没有保存', 'Default thinking level not saved'), { description: ipcMessage(error) }))}
-                            >
-                                {tr('设为默认', 'Make default')}
-                            </button>
-                        )}
-                    </div>
-                )}
             </PopoverContent>
         </Popover>
     )
