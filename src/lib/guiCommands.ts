@@ -34,6 +34,8 @@ export const GUI_HAS: Record<string, Localized> = {
     review: { zh: '审查（Filo 自己的）', en: 'Review (the app\'s own)' },
     'review-apply': { zh: '审查报告上的按钮', en: 'the buttons on a review report' },
     autopilot: { zh: '输入框里的 Autopilot 开关', en: 'the Autopilot switch' },
+    // The terminal's list of every session's waiting cards: here each thread shows its own, and the sidebar marks the threads that wait.
+    inbox: { zh: '线程里的 Autopilot 卡片，侧栏标出等你的线程', en: 'the Autopilot cards in each thread, the sidebar marks the ones waiting' },
 }
 
 /** What the picker lists: the agent's commands without the ones the app has a control for. */
