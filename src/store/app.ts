@@ -152,6 +152,8 @@ class AppStore implements ThreadHost {
     paneCapacity = 1
     /** Bumped to move keyboard focus into a thread's composer. */
     composerFocus = { key: '', n: 0 }
+    /** Bumped to open a thread's model menu (the /model command of agents whose terminal has one). */
+    modelMenu = { key: '', n: 0 }
 
     reviewOpen = false
     sidebarOpen = true
@@ -1635,6 +1637,10 @@ class AppStore implements ThreadHost {
             if (entryId)
                 this.reveal = { key: summary.path, entryId, n: (this.reveal?.n ?? 0) + 1 }
         })
+    }
+
+    openModelMenu(key: string) {
+        this.modelMenu = { key, n: this.modelMenu.n + 1 }
     }
 
     toggleReview() {

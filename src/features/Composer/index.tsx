@@ -61,10 +61,17 @@ const followUpKeys = keys('⌥↩')
 /** pi's editor commands (core/slash-commands.ts in pi 1.0.4). RPC neither lists nor runs them; extensions/builtins.ts serves the session ones as extension commands. */
 const PI_BUILTINS = ['settings', 'model', 'tree', 'thinking', 'scoped-models', 'export', 'import', 'share', 'bug', 'copy', 'name', 'session', 'changelog', 'hotkeys', 'fork', 'clone', 'trust', 'login', 'logout', 'new', 'compact', 'resume', 'reload', 'quit']
 
+/** The app commands that every agent has (the rest of APP_COMMANDS are pi's). */
+const SHARED_APP_COMMANDS = ['new', 'resume', 'diff', 'model']
+
 /** pi's editor commands whose GUI is the app's own: a tab, the search, Settings, the clipboard. */
-const APP_COMMANDS: { name: string, description: Localized, run: (thread: Thread) => Promise<unknown> | void }[] = [
+const APP_COMMANDS: { name: string, description: Localized, piHas?: false, run: (thread: Thread) => Promise<unknown> | void }[] = [
     { name: 'new', description: { zh: '新线程', en: 'New thread' }, run: thread => appStore.newThread(thread.cwd) },
     { name: 'resume', description: { zh: '打开别的会话（搜索）', en: 'Open another session (search)' }, run: () => appStore.setSearchOpen(true) },
+    // Codex's /diff, and what the others' terminals show for it: the changes panel. pi has no /diff.
+    { name: 'diff', description: { zh: '打开或关闭改动面板', en: 'Toggle the changes panel' }, piHas: false, run: () => appStore.toggleReview() },
+    // Codex's /model: its model menu. pi's own /model (a builtin) is a different command.
+    { name: 'model', description: { zh: '选择模型', en: 'Choose the model' }, piHas: false, run: thread => appStore.openModelMenu(thread.key) },
     { name: 'settings', description: { zh: '打开设置', en: 'Open Settings' }, run: () => appStore.openSettings('appearance') },
     { name: 'login', description: { zh: '登录供应商（设置 → 供应商）', en: 'Sign in to a provider (Settings → Providers)' }, run: () => appStore.openSettings('providers') },
     { name: 'logout', description: { zh: '退出供应商（设置 → 供应商）', en: 'Sign out of a provider (Settings → Providers)' }, run: () => appStore.openSettings('providers') },
@@ -168,7 +175,9 @@ const ComposerEditor = observer(({ thread }: { thread: Thread }) => {
     const [slashIndex, setSlashIndex] = useState(0)
     const [slashDismissed, setSlashDismissed] = useState(false)
 
-    const appCommands: SlashCommand[] = thread.agent === 'pi' ? APP_COMMANDS.map(c => ({ name: c.name, description: tr(c.description), source: 'builtin' })) : []
+    const appCommands: SlashCommand[] = (thread.agent === 'pi' ? APP_COMMANDS.filter(c => c.piHas !== false) : thread.agent === 'claude' ? [] : APP_COMMANDS.filter(c => SHARED_APP_COMMANDS.includes(c.name)))
+        .filter(c => !thread.commands.some(own => own.name === c.name))
+        .map(c => ({ name: c.name, description: tr(c.description), source: 'builtin' }))
     const slashQuery = /^\/(\S*)$/.exec(thread.draft)?.[1]
     const slashMatches = slashQuery == null || slashDismissed
         ? []
@@ -217,9 +226,25 @@ const ComposerEditor = observer(({ thread }: { thread: Thread }) => {
         const text = thread.draft.trim()
         const space = text.indexOf(' ')
         const name = text.startsWith('/') ? text.slice(1, space < 0 ? undefined : space) : ''
+        // Another agent's own /compact is the click on the context figure: the same compacting state and note, not a bare prompt.
+        if (thread.agent !== 'pi' && text === '/compact' && thread.features.compaction && !thread.running && !thread.compacting) {
+            thread.draft = ''
+            return void thread.compact()
+        }
+        // The other agents' commands are theirs: /new and /resume are the app's; one an agent does not list
+        // would reach the model as plain text (Codex's /status, OpenCode's /undo), so say so instead.
+        if (thread.agent !== 'pi' && thread.agent !== 'claude' && /^[\w:.-]+$/.test(name) && !thread.commands.some(c => c.name === name)) {
+            const app = SHARED_APP_COMMANDS.includes(name) ? APP_COMMANDS.find(c => c.name === name) : undefined
+            if (app) {
+                thread.draft = ''
+                return void Promise.resolve(app.run(thread)).catch((error: any) => toast.error(error.message))
+            }
+            if (thread.agent === 'codex' || thread.commands.length)
+                return void toast(tr(`${thread.agentLabel} 没有 /${name} 命令，它的终端里才有的在终端里用`, `${thread.agentLabel} has no /${name} command here; its terminal-only ones are in its terminal`))
+        }
         if (thread.agent !== 'pi' || !PI_BUILTINS.includes(name) || thread.commands.some(c => c.name === name))
             return void thread.send(mode)
-        const app = APP_COMMANDS.find(c => c.name === name)
+        const app = APP_COMMANDS.find(c => c.name === name && c.piHas !== false)
         if (!app)
             return void toast(tr(`/${name} 只在终端里的 pi 可用`, `/${name} is only in pi in a terminal`))
         thread.draft = ''
@@ -242,9 +267,12 @@ const ComposerEditor = observer(({ thread }: { thread: Thread }) => {
                 setSlashIndex(i => (i + step + slashMatches.length) % slashMatches.length)
                 return
             }
-            if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) {
+            const picked = slashMatches[slashIndex] ?? slashMatches[0]
+            // A command typed out in full is sent by Enter, as in the TUIs; Tab (and Enter on a partial name) completes it.
+            const typedOut = e.key === 'Enter' && !e.altKey && canSend && picked.name === slashQuery
+            if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey && !typedOut)) {
                 e.preventDefault()
-                pickCommand(slashMatches[slashIndex] ?? slashMatches[0])
+                pickCommand(picked)
                 return
             }
             if (e.key === 'Escape') {
