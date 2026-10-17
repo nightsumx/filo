@@ -9,7 +9,7 @@
 // edit / delete per file with the unified diff as the edit's patch.
 
 import type { AcpAgentCaps, AcpAgentSpec, AcpConfigOption } from '@shared/agents'
-import type { SessionItem } from '@shared/ipc'
+import type { CodexMarketplace, CodexPlugin, CodexPluginChange, CodexPlugins, SessionItem } from '@shared/ipc'
 import type { AgentMessage, ImageContent, PiEvent, PiModel, RpcResponse, ToolCall } from '@shared/pi'
 import type { ApprovalChoice, ApprovalRequest, AskAnswer, AskQuestion, AskResponse, PlanDecision, SubagentDetails } from '@shared/capabilities'
 import type { AgentAdapter, AgentAdapterCallbacks, AgentAdapterOptions } from '../acp/adapter'
@@ -2036,4 +2036,54 @@ export function setCodexFeature(launch: CodexLaunch, name: string, enabled: bool
     return withAppServer(launch, async (rpc) => {
         await rpc('config/batchWrite', { edits: [{ keyPath: `features.${name}`, value: enabled, mergeStrategy: 'replace' }] })
     })
+}
+
+// ---------------------------------------------------------------- plugins (/plugins)
+
+/** The plugins of the marketplaces Codex knows (its own, the home ones, and the project's), with their state. */
+export function codexPlugins(launch: CodexLaunch, cwd: string): Promise<CodexPlugins> {
+    return withAppServer(launch, rpc => listPlugins(rpc, cwd))
+}
+
+async function listPlugins(rpc: (method: string, params: unknown) => Promise<any>, cwd: string): Promise<CodexPlugins> {
+    const result = await rpc('plugin/list', { cwds: [cwd] })
+    const marketplaces = (Array.isArray(result?.marketplaces) ? result.marketplaces : []).filter(isObject).map((m: Record<string, any>): CodexMarketplace => ({
+        name: String(m.name),
+        path: typeof m.path === 'string' ? m.path : undefined,
+        plugins: (Array.isArray(m.plugins) ? m.plugins : []).filter(isObject).map((p: Record<string, any>): CodexPlugin => ({
+            id: String(p.id),
+            name: (isObject(p.interface) && typeof p.interface.displayName === 'string' && p.interface.displayName) || String(p.name),
+            description: isObject(p.interface) && typeof p.interface.shortDescription === 'string' ? p.interface.shortDescription : '',
+            version: typeof p.localVersion === 'string' ? p.localVersion : typeof p.version === 'string' ? p.version : '',
+            installed: p.installed === true,
+            enabled: p.enabled === true,
+            available: p.availability === 'AVAILABLE' && p.installPolicy !== 'NOT_AVAILABLE',
+        })),
+    }))
+    const errors = (Array.isArray(result?.marketplaceLoadErrors) ? result.marketplaceLoadErrors : []).filter(isObject).map((e: Record<string, any>) => `${e.marketplacePath}: ${e.message}`)
+    return { marketplaces, errors }
+}
+
+/** One change to the plugins, then the list again. */
+export function changeCodexPlugins(launch: CodexLaunch, cwd: string, change: CodexPluginChange): Promise<CodexPlugins> {
+    return withAppServer(launch, async (rpc) => {
+        switch (change.action) {
+            case 'install':
+                await rpc('plugin/install', { marketplacePath: change.marketplacePath, pluginName: change.name })
+                break
+            case 'uninstall':
+                await rpc('plugin/uninstall', { pluginId: change.id })
+                break
+            case 'enable':
+                await rpc('config/batchWrite', { edits: [{ keyPath: `plugins.${change.id}.enabled`, value: change.enabled, mergeStrategy: 'replace' }] })
+                break
+            case 'addMarketplace':
+                await rpc('marketplace/add', { source: change.source })
+                break
+            case 'removeMarketplace':
+                await rpc('marketplace/remove', { marketplaceName: change.name })
+                break
+        }
+        return listPlugins(rpc, cwd)
+    }, 120_000)
 }

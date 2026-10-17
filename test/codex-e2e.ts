@@ -352,6 +352,33 @@ async function main() {
             await js(`(() => { window.__app.setSettingsOpen(false); return true })()`)
         }
 
+        // Settings → Codex plugins (/plugins): a marketplace in the project, installed, switched off and uninstalled.
+        {
+            const toml = () => readFile(path.join(home, 'config.toml'), 'utf8')
+            await mkdir(path.join(repo, '.agents', 'plugins'), { recursive: true })
+            await mkdir(path.join(repo, 'plugins', 'hello', '.codex-plugin'), { recursive: true })
+            await writeFile(path.join(repo, '.agents', 'plugins', 'marketplace.json'), JSON.stringify({ name: 'local-test', plugins: [{ name: 'hello', source: { source: 'local', path: './plugins/hello' }, policy: { installation: 'AVAILABLE' } }] }))
+            await writeFile(path.join(repo, 'plugins', 'hello', '.codex-plugin', 'plugin.json'), JSON.stringify({ name: 'hello', version: '1.0.0', description: 'A test plugin' }))
+            await js(`(() => { window.__app.openSettings('codex'); return true })()`)
+            const plugin = `document.querySelector('[data-plugin="hello@local-test"]')`
+            await until('the project\'s marketplace listed', () => js<boolean>(`!!${plugin}`))
+            check(await js<boolean>(`!${plugin}.querySelector('[role="switch"]') && ${plugin}.textContent.includes('Install')`), 'a plugin of the project\'s marketplace is listed, not installed yet')
+            const buttonOf = (label: string) => `[...${plugin}.querySelectorAll('button')].find(b => b.textContent.trim() === ${JSON.stringify(label)})`
+            await js(`(() => { ${buttonOf('Install')}.click(); return true })()`)
+            await until('installed', () => js<boolean>(`!!${plugin}?.querySelector('[role="switch"]')`))
+            check(await js<boolean>(`${plugin}.querySelector('[role="switch"]').getAttribute('aria-checked') === 'true' && !!${buttonOf('Uninstall')}`), 'Install runs plugin/install: it shows as enabled, with Uninstall')
+            await js(`(() => { ${plugin}.querySelector('[role="switch"]').click(); return true })()`)
+            await until('plugins.hello@local-test disabled in config.toml', async () => /hello@local-test[^\n]*\]\s*\n\s*enabled = false/.test(await toml()))
+            await until('the switch off', () => js<boolean>(`${plugin}.querySelector('[role="switch"]').getAttribute('aria-checked') === 'false'`))
+            check(true, 'its switch writes plugins.<id>.enabled in config.toml')
+            if (SHOTS)
+                await page.screenshot(path.join(SHOTS, 'codex-plugins.png'))
+            await js(`(() => { ${buttonOf('Uninstall')}.click(); return true })()`)
+            await until('uninstalled', () => js<boolean>(`!!${plugin} && !${plugin}.querySelector('[role="switch"]') && ${plugin}.textContent.includes('Install')`))
+            check(true, 'Uninstall runs plugin/uninstall')
+            await js(`(() => { window.__app.setSettingsOpen(false); return true })()`)
+        }
+
         // Fork the whole thread (tab menu).
         const copy = await js<string>(`${T}.forkSession()`)
         check(!!copy && copy.startsWith('acp:codex:') && copy !== key, `Fork session copies the thread (${copy})`)

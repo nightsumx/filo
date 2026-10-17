@@ -17,9 +17,9 @@ import { DEFAULT_THEME, IPC, THEME_PREFS } from '@shared/ipc'
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, net, Notification, shell } from 'electron'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { codexFeatures, codexMcpServers, setCodexFeature, writeCodexMcp } from './native/codex'
+import { changeCodexPlugins, codexFeatures, codexPlugins, codexMcpServers, setCodexFeature, writeCodexMcp } from './native/codex'
 import { AcpService } from './acp/service'
-import { claudeMcpServers, codexMcpTable, codexServerName, claudeMemory, setClaudeAutoMemory, mcpAddArgs, mcpRemoveArgs } from './claudeSettings'
+import { claudeMcpServers, codexMcpTable, codexPluginChange, codexServerName, claudeMemory, setClaudeAutoMemory, mcpAddArgs, mcpRemoveArgs } from './claudeSettings'
 import { AgentManager } from './agents'
 import { BACKGROUND, reveal } from './background'
 import { applySave, savedWindows, StateFile } from './appState'
@@ -625,6 +625,8 @@ function registerIpc() {
         await writeCodexMcp(await codexLaunch(), codexServerName(name), null)
         return codexMcp(absolutePath(cwd))
     })
+    ipcMain.handle(IPC.codexPlugins, async (_e, cwd: unknown) => codexPlugins(await codexLaunch(), absolutePath(cwd)))
+    ipcMain.handle(IPC.changeCodexPlugins, async (_e, cwd: unknown, change: unknown) => changeCodexPlugins(await codexLaunch(), absolutePath(cwd), codexPluginChange(change)))
     ipcMain.handle(IPC.codexFeatures, async () => codexFeatures(await codexLaunch()))
     ipcMain.handle(IPC.setCodexFeature, async (_e, name: unknown, enabled: unknown) => {
         if (typeof enabled !== 'boolean')

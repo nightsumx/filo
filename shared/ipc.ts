@@ -456,6 +456,39 @@ export interface CodexMcpAdd {
     env?: string[]
 }
 
+export interface CodexPlugin {
+    /** `name@marketplace`, what uninstalling and `plugins.<id>` in config.toml use. */
+    id: string
+    name: string
+    description: string
+    version: string
+    installed: boolean
+    enabled: boolean
+    /** Whether it can be installed here: not blocked by policy or the workspace admin. */
+    available: boolean
+}
+
+export interface CodexMarketplace {
+    name: string
+    /** The marketplace file, when it is a local one. */
+    path?: string
+    plugins: CodexPlugin[]
+}
+
+/** The plugins of the marketplaces Codex knows (its own, the home ones, the project's) and the ones that failed to load. */
+export interface CodexPlugins {
+    marketplaces: CodexMarketplace[]
+    errors: string[]
+}
+
+/** One change to the plugins (Settings → Codex, Codex's /plugins). */
+export type CodexPluginChange
+    = { action: 'install', marketplacePath: string, name: string }
+    | { action: 'uninstall', id: string }
+    | { action: 'enable', id: string, enabled: boolean }
+    | { action: 'addMarketplace', source: string }
+    | { action: 'removeMarketplace', name: string }
+
 /** A beta feature Codex lists in its /experimental. */
 export interface CodexFeature {
     name: string
@@ -666,6 +699,8 @@ export interface PiBridge {
     codexMcp: (cwd: string) => Promise<CodexMcpServer[]>
     addCodexMcp: (input: CodexMcpAdd) => Promise<CodexMcpServer[]>
     removeCodexMcp: (cwd: string, name: string) => Promise<CodexMcpServer[]>
+    codexPlugins: (cwd: string) => Promise<CodexPlugins>
+    changeCodexPlugins: (cwd: string, change: CodexPluginChange) => Promise<CodexPlugins>
     codexFeatures: () => Promise<CodexFeature[]>
     setCodexFeature: (name: string, enabled: boolean) => Promise<CodexFeature[]>
     claudeMemory: (cwd: string) => Promise<ClaudeMemory>
@@ -867,6 +902,8 @@ export const IPC = {
     codexMcp: 'codex:mcp',
     addCodexMcp: 'codex:mcp-add',
     removeCodexMcp: 'codex:mcp-remove',
+    codexPlugins: 'codex:plugins',
+    changeCodexPlugins: 'codex:plugins-change',
     codexFeatures: 'codex:features',
     setCodexFeature: 'codex:set-feature',
     setClaudeAutoMemory: 'claude:set-auto-memory',

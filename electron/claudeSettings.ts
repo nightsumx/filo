@@ -3,7 +3,7 @@
 // `claude` reads the same. The user-level servers live in `.claude.json` (inside CLAUDE_CONFIG_DIR when set,
 // else in the home folder), a project's own in `.claude.json` under `projects.<folder>` (local) and in the
 // project's `.mcp.json` (project, for the team).
-import type { ClaudeMcpAdd, ClaudeMcpRemove, ClaudeMcpServer, ClaudeMemory } from '@shared/ipc'
+import type { ClaudeMcpAdd, CodexPluginChange, ClaudeMcpRemove, ClaudeMcpServer, ClaudeMemory } from '@shared/ipc'
 import { existsSync } from 'node:fs'
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import os from 'node:os'
@@ -192,4 +192,33 @@ export function codexServerName(name: unknown): string {
     if (typeof name !== 'string' || !/^\w[\w-]*$/.test(name))
         throw new Error(tr('名字以字母、数字或下划线开头，只能用字母、数字、下划线和连字符', 'The name starts with a letter, digit or underscore and has only letters, digits, underscores and dashes'))
     return name
+}
+
+/** A plugin change from the page, checked before it reaches Codex (a plugin id goes into a config.toml key path, so its parts are plain words). */
+export function codexPluginChange(value: unknown): CodexPluginChange {
+    const c = isObject(value) ? value : {}
+    const text = (v: unknown) => {
+        if (typeof v !== 'string' || !v.trim())
+            throw new Error('expected text')
+        return v
+    }
+    switch (c.action) {
+        case 'install':
+            if (!path.isAbsolute(text(c.marketplacePath)))
+                throw new Error('expected an absolute path')
+            return { action: 'install', marketplacePath: c.marketplacePath, name: text(c.name) }
+        case 'uninstall':
+            return { action: 'uninstall', id: text(c.id) }
+        case 'enable': {
+            if (typeof c.enabled !== 'boolean' || !/^[\w-]+@[\w-]+$/.test(text(c.id)))
+                throw new Error('unknown plugin')
+            return { action: 'enable', id: c.id, enabled: c.enabled }
+        }
+        case 'addMarketplace':
+            return { action: 'addMarketplace', source: text(c.source).trim() }
+        case 'removeMarketplace':
+            return { action: 'removeMarketplace', name: text(c.name) }
+        default:
+            throw new Error('unknown change')
+    }
 }

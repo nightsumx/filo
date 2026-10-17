@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { claudeJsonPath, claudeMcpServers, claudeMemory, codexMcpTable, codexServerName, commandWords, mcpAddArgs, mcpRemoveArgs, setClaudeAutoMemory } from './claudeSettings'
+import { claudeJsonPath, claudeMcpServers, claudeMemory, codexMcpTable, codexPluginChange, codexServerName, commandWords, mcpAddArgs, mcpRemoveArgs, setClaudeAutoMemory } from './claudeSettings'
 import { projectSlug } from './native/claudeTui'
 
 describe('commandWords', () => {
@@ -126,5 +126,21 @@ describe('codexMcpTable', () => {
         expect(() => codexMcpTable({ name: 'ok', transport: 'sse', target: 'x' })).toThrow()
         expect(() => codexServerName('a.b')).toThrow()
         expect(codexServerName('a-b_12')).toBe('a-b_12')
+    })
+})
+
+describe('codexPluginChange', () => {
+    it('takes the changes the page makes', () => {
+        expect(codexPluginChange({ action: 'install', marketplacePath: '/m/.agents/plugins/marketplace.json', name: 'hello' })).toEqual({ action: 'install', marketplacePath: '/m/.agents/plugins/marketplace.json', name: 'hello' })
+        expect(codexPluginChange({ action: 'uninstall', id: 'hello@local' })).toEqual({ action: 'uninstall', id: 'hello@local' })
+        expect(codexPluginChange({ action: 'enable', id: 'hello@local-test', enabled: false })).toEqual({ action: 'enable', id: 'hello@local-test', enabled: false })
+        expect(codexPluginChange({ action: 'addMarketplace', source: ' owner/repo ' })).toEqual({ action: 'addMarketplace', source: 'owner/repo' })
+        expect(codexPluginChange({ action: 'removeMarketplace', name: 'local-test' })).toEqual({ action: 'removeMarketplace', name: 'local-test' })
+    })
+    it('refuses the rest, and an id that would reach into other config keys', () => {
+        for (const bad of [null, 'install', { action: 'format' }, { action: 'install', marketplacePath: 'relative.json', name: 'x' }, { action: 'install', marketplacePath: '/m', name: '' },
+            { action: 'enable', id: 'a.b@c', enabled: true }, { action: 'enable', id: 'a@c', enabled: 'yes' }, { action: 'enable', id: 'a@b.c', enabled: true },
+            { action: 'addMarketplace', source: '  ' }, { action: 'uninstall' }])
+            expect(() => codexPluginChange(bad), JSON.stringify(bad)).toThrow()
     })
 })
