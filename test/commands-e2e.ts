@@ -37,21 +37,29 @@ function modelServer() {
                 return
             }
             if (req.url?.includes('/messages')) {
-                const message = { id: 'msg_fake', type: 'message', role: 'assistant', model: parsed.model || 'fake', content: [], stop_reason: null, usage: { input_tokens: 1200, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } }
-                const text = Array.isArray(parsed.tools) && parsed.tools.length >= 5 ? 'Hello from the fake model.' : 'Fake title'
-                if (!parsed.stream) {
-                    res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ ...message, content: [{ type: 'text', text }], stop_reason: 'end_turn' }))
+                const answer = () => {
+                    const message = { id: 'msg_fake', type: 'message', role: 'assistant', model: parsed.model || 'fake', content: [], stop_reason: null, usage: { input_tokens: 1200, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } }
+                    const text = Array.isArray(parsed.tools) && parsed.tools.length >= 5 ? 'Hello from the fake model.' : 'Fake title'
+                    if (!parsed.stream) {
+                        res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ ...message, content: [{ type: 'text', text }], stop_reason: 'end_turn' }))
+                        return
+                    }
+                    res.writeHead(200, { 'content-type': 'text/event-stream' })
+                    const ev = (name: string, data: Record<string, unknown>) => res.write(`event: ${name}\ndata: ${JSON.stringify({ type: name, ...data })}\n\n`)
+                    ev('message_start', { message })
+                    ev('content_block_start', { index: 0, content_block: { type: 'text', text: '' } })
+                    ev('content_block_delta', { index: 0, delta: { type: 'text_delta', text } })
+                    ev('content_block_stop', { index: 0 })
+                    ev('message_delta', { delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 20 } })
+                    ev('message_stop', {})
+                    res.end()
                     return
                 }
-                res.writeHead(200, { 'content-type': 'text/event-stream' })
-                const ev = (name: string, data: Record<string, unknown>) => res.write(`event: ${name}\ndata: ${JSON.stringify({ type: name, ...data })}\n\n`)
-                ev('message_start', { message })
-                ev('content_block_start', { index: 0, content_block: { type: 'text', text: '' } })
-                ev('content_block_delta', { index: 0, delta: { type: 'text_delta', text } })
-                ev('content_block_stop', { index: 0 })
-                ev('message_delta', { delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 20 } })
-                ev('message_stop', {})
-                res.end()
+                // Claude Code's /compact asks for a summary as the last message: real ones take many seconds.
+                if (JSON.stringify(parsed.messages?.at(-1)?.content ?? '').includes('detailed summary'))
+                    setTimeout(answer, 3000)
+                else
+                    answer()
                 return
             }
             res.writeHead(200, { 'content-type': 'text/event-stream' })
@@ -341,6 +349,27 @@ async function main() {
                 await shot(`${shotN++}-claude-${command.slice(1).replaceAll(' ', '-')}-chat`)
         }
 
+        // Claude Code's /compact takes a while: the thread shows it working (its PreCompact and PostCompact hooks),
+        // and leaves the summary note when it is done.
+        {
+            await js(`${T}.showTui(false)`)
+            await typeLine('/compact')
+            const workingLine = () => js<boolean>(`[...document.querySelectorAll('span')].some(e => e.children.length === 0 && e.textContent === 'Compacting context…')`)
+            const t0 = Date.now()
+            await until('the compacting line', workingLine, 8000)
+            const seen = Date.now() - t0
+            await shot(`${shotN++}-claude-compacting`)
+            await until('the summary note', () => js<boolean>(`${T}.turns.flatMap(t => t.steps).some(s => s.kind === 'note' && s.variant === 'compaction')`), 20_000)
+            check(!(await js<boolean>(`${T}.compacting`)) && !(await workingLine()), `/compact: "Compacting context…" showed ${seen}ms in, and gave way to the summary note`)
+            check(Date.now() - t0 > 2000, '/compact: the working line stayed for the whole compaction, not just a blink')
+            // After it settles: the command first, then the summary note, then what it printed; none of our hooks in it.
+            await until('what /compact printed', () => js<boolean>(`document.body.innerText.includes('Compacted (ctrl+o')`), 8000)
+            const text = await js<string>(`document.body.innerText`)
+            const at = (needle: string) => text.lastIndexOf(needle)
+            check(at('/compact') < at('Context compacted') && at('Context compacted') < at('Compacted (ctrl+o'), '/compact: the command, then the "Context compacted" note, then what Claude Code printed')
+            check(!text.includes('claude-hook'), '/compact: our hooks\' lines are not in what it printed')
+            await shot(`${shotN++}-claude-compacted`)
+        }
         // /cost's dialog took no keys from this prompt: the GUI closed it first, and the dialog's printout landed.
         await typeLine('still there')
         await settled('the answer after the commands', 'Hello from the fake model')
@@ -361,7 +390,7 @@ async function main() {
         names = (await menu()).join(' | ')
         check(['new', 'resume', 'settings', 'login', 'copy', 'export'].every(n => names.includes(n)), `pi's menu keeps every app command (${names.slice(0, 120)})`)
         check(!names.includes('diff'), 'and has no /diff, which pi\'s terminal does not either')
-        await shot('24-pi-slash-menu')
+        await shot('27-pi-slash-menu')
         await js(`${T}.draft = ''`)
         console.log(`all command checks passed; screenshots in ${SHOTS}`)
     }

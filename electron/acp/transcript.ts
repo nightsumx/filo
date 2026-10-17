@@ -454,7 +454,15 @@ export class AcpTranscript {
         this.closeAssistant('stop')
         this.userOpen = false
         const content: (TextContent | ImageContent)[] = [...(prompt ? [text(prompt)] : []), ...images]
-        this.push({ role: 'user', content, timestamp: this.now() })
+        // Claude Code writes the summary of a /compact before the command's own echo: the command goes first.
+        const last = this.messages.at(-1)
+        if (last?.message.role === 'compactionSummary' && /^\/compact(\s|$)/.test(prompt)) {
+            this.messages.splice(this.messages.length - 1, 0, { message: { role: 'user', content, timestamp: this.now() }, endedAt: this.now() })
+            this.emit({ type: 'message_end', message: { role: 'user', content, timestamp: this.now() } })
+        }
+        else {
+            this.push({ role: 'user', content, timestamp: this.now() })
+        }
         this.promptStart = this.messages.length
         this.command = /^\/[\w:.-]+(\s|$)/.exec(prompt)?.[0].trim() ?? ''
         this.requests.clear()

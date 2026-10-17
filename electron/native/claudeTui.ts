@@ -192,6 +192,8 @@ const paste = (text: string) => `\x1B[200~${text.replaceAll('\x1B[201~', '')}\x1
 const FOCUS_IN = `${String.fromCharCode(27)}[I`
 const FOCUS_OUT = `${String.fromCharCode(27)}[O`
 const ESC = '\x1B'
+/** How long the thread waits, after PostCompact, for the summary to reach the session file. */
+const SUMMARY_WAIT_MS = 8000
 const ENTER = '\r'
 /** How long the TUI gets to come up before the thread shows it (a question it asks first). */
 const STARTUP_GRACE_MS = 2500
@@ -239,6 +241,9 @@ export class ClaudeTuiAgent implements AgentAdapter {
     private slowStart = false
     /** Characters the user typed in the TUI's input since the last submit: a GUI prompt would join their line. */
     private dirty = 0
+    /** Between PreCompact and PostCompact: Claude Code is summarising the conversation. */
+    private compacting = false
+    private compactionsBefore = 0
     /** A command was answered on the TUI's screen, maybe in a dialog (/cost) that takes the next keys. */
     private screenDialog = false
     private lastPre: { name: string, input: string, id: string } | null = null
@@ -531,13 +536,51 @@ export class ClaudeTuiAgent implements AgentAdapter {
                 if (event.notification_type === 'elicitation_dialog')
                     this.emit({ type: 'tui_view', show: true, reason: 'dialog' })
                 break
+            case 'PreCompact':
+                this.compacting = true
+                this.compactionsBefore = this.log.fold.compactions
+                this.emit({ type: 'compaction_start', reason: event.trigger === 'auto' ? 'threshold' : 'manual' })
+                break
+            case 'PostCompact':
+                this.endCompaction(event.trigger === 'auto' ? 'threshold' : 'manual', true)
+                break
             case 'Stop':
             case 'StopFailure':
+                this.endCompaction('manual')
                 this.afterStop(name === 'StopFailure' ? String(event.error ?? event.message ?? '') : '')
                 break
             default:
                 break
         }
+    }
+
+    /**
+     * Compaction is over: PostCompact, or the turn it was part of ended without one (as when it failed).
+     * Claude Code writes the summary to the session file a little after PostCompact, and the thread reads
+     * it back when the compaction ends: so this waits (a few seconds at most) for the summary to be there.
+     */
+    private endCompaction(reason: 'manual' | 'threshold', waitForSummary = false) {
+        if (!this.compacting)
+            return
+        const done = () => {
+            if (!this.compacting)
+                return
+            this.compacting = false
+            this.emit({ type: 'compaction_end', reason, aborted: false })
+        }
+        const until = Date.now() + SUMMARY_WAIT_MS
+        const check = () => {
+            this.tail()
+            if (this.exited || !this.compacting)
+                return
+            if (this.log.fold.compactions > this.compactionsBefore || Date.now() > until)
+                return done()
+            setTimeout(check, 150)
+        }
+        if (waitForSummary)
+            check()
+        else
+            done()
     }
 
     /** Hooks that come are working, whatever the settings looked like. */
@@ -831,7 +874,7 @@ export class ClaudeTuiAgent implements AgentAdapter {
                     return ok({
                         model: this.piModel(),
                         isStreaming: this.running,
-                        isCompacting: false,
+                        isCompacting: this.compacting,
                         sessionFile: this.key,
                         sessionId: this.session,
                         sessionName: this.title(),
@@ -910,6 +953,10 @@ export class ClaudeTuiAgent implements AgentAdapter {
         this.tail()
         this.log.fold.settle()
         this.dispose()
+        if (this.compacting) {
+            this.compacting = false
+            this.emit({ type: 'compaction_end', reason: 'manual', aborted: true })
+        }
         if (this.running) {
             this.running = false
             this.emit({ type: 'agent_end' })

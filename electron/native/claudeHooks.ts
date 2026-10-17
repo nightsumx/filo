@@ -11,7 +11,7 @@ import { randomBytes } from 'node:crypto'
 import { createServer } from 'node:http'
 
 /** The events the adapter follows; tool events match every tool. */
-const EVENTS = ['SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'PostToolUseFailure', 'PermissionRequest', 'PermissionDenied', 'Notification', 'Stop', 'StopFailure', 'MessageDisplay', 'SessionEnd'] as const
+const EVENTS = ['SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'PostToolUseFailure', 'PermissionRequest', 'PermissionDenied', 'Notification', 'Stop', 'StopFailure', 'MessageDisplay', 'PreCompact', 'PostCompact', 'SessionEnd'] as const
 const MATCHED = new Set(['PreToolUse', 'PostToolUse', 'PostToolUseFailure', 'PermissionRequest', 'PermissionDenied'])
 const BODY_LIMIT = 4 * 1024 * 1024
 const PREFIX = '/claude-hook/'

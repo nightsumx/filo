@@ -44,6 +44,22 @@ describe('claude session file', () => {
         ])
     })
 
+    it('/compact: the command, then the summary note, then what it printed without our hooks', () => {
+        const old = prompt(null, 'before')
+        const boundary = rec('system', null, { subtype: 'compact_boundary', compactMetadata: { preTokens: 5000 } })
+        const summary = rec('user', boundary.uuid!, { isCompactSummary: true, message: { role: 'user', content: 'This session is being continued…' } })
+        const echo = rec('user', summary.uuid!, { message: { role: 'user', content: '<command-name>/compact</command-name>\n<command-message>compact</command-message>\n<command-args></command-args>' } })
+        const out = rec('user', echo.uuid!, { message: { role: 'user', content: '<local-command-stdout>\u001B[2mCompacted (ctrl+o to see full summary)\u001B[22m\nPreCompact [http://127.0.0.1:55364/claude-hook/TOKEN] completed successfully: {}\nPostCompact [curl -s -m 3 http://127.0.0.1:55364/claude-hook/TOKEN] completed successfully: {}</local-command-stdout>' } })
+        const log = new ClaudeLog('k:')
+        log.add([old, boundary, summary, echo, out])
+        expect(roles(log)).toEqual(['user', 'user', 'compactionSummary', 'custom'])
+        expect(log.transcript.messages.slice(1).map(m => m.message)).toMatchObject([
+            { role: 'user', content: [{ type: 'text', text: '/compact' }] },
+            { role: 'compactionSummary', tokensBefore: 5000 },
+            { role: 'custom', customType: '/compact', content: 'Compacted (ctrl+o to see full summary)' },
+        ])
+    })
+
     it('folds a turn: prompt, text, a command with its output, the closing text', () => {
         const a = prompt(null, 'BASH1 now')
         const b = reply(a.uuid!, 'msg_1', { type: 'text', text: 'Running command 1.' })
