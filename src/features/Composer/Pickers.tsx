@@ -20,6 +20,7 @@ import type { RouteModel, TerminalAgent } from '@shared/routes'
 import { AGENT_APIS, memberKey, ROUTED_AGENT_LABELS, ROUTES_PROVIDER, TERMINAL_AGENTS } from '@shared/routes'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
+import { confirm } from '@/lib/confirm'
 import { flatFieldClass } from '@/components/ui/form'
 
 const pill = 'flex h-6 items-center gap-1 rounded-md px-1.5 text-[12px] text-gray-600 outline-none transition-colors hover:bg-black/[0.06] hover:text-gray-900 data-[state=open]:bg-black/[0.08] disabled:opacity-50'
@@ -113,6 +114,16 @@ export const ModelPicker = observer(({ thread }: { thread: Thread }) => {
     // Other agents than pi restart onto a group or channel (or off it): not mid-run.
     const restarts = thread.agent !== 'pi'
     const busy = restarts && thread.running
+    const pick = async (model: PiModel) => {
+        // Claude Code re-reads the whole history on another model (slower, more tokens) and asks first: ask here.
+        if (thread.agent === 'claude' && thread.items.length && !await confirm({
+            title: tr('切换模型？', 'Switch model?'),
+            description: tr(`对话已经缓存在当前模型上。换成 ${model.name} 后，下一条消息要重新读一遍全部历史，更慢，也更费 token。`, `This conversation is cached for the current model. Switching to ${model.name} means the full history is re-read on your next message: slower, and more tokens.`),
+            confirmText: tr('切换', 'Switch'),
+        }))
+            return
+        await thread.setModel(model)
+    }
     const label = group
         ? `${group.name}${served ? ` · ${memberModel(served)}` : ''}`
         : current?.name ?? (onChannel ? channel.current!.model : thread.agentStatus === 'starting' ? tr('加载中…', 'Loading…') : tr('选择模型', 'Choose model'))
@@ -140,7 +151,7 @@ export const ModelPicker = observer(({ thread }: { thread: Thread }) => {
                         <div key={provider}>
                             <DropdownMenuLabel>{provider}</DropdownMenuLabel>
                             {models.map(model => (
-                                <DropdownMenuItem key={`${provider}/${model.id}`} disabled={busy && !!group} onSelect={() => void thread.setModel(model)}>
+                                <DropdownMenuItem key={`${provider}/${model.id}`} disabled={busy && !!group} onSelect={() => void pick(model)}>
                                     <span className="flex-1 truncate">{model.name}</span>
                                     {thread.agent === 'pi' && modelKey(model) === defaults?.model && <span className="text-[11px] text-gray-400">{tr('默认', 'default')}</span>}
                                     {model.contextWindow ? <span className="text-[11px] text-gray-400">{formatTokens(model.contextWindow)}</span> : null}

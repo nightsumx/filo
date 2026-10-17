@@ -156,6 +156,15 @@ export function hookSettings(dir: string, cwd: string, managed = managedDirs()):
  */
 const STRIP_ENV = ['CLAUDECODE', 'CLAUDE_CODE_ENTRYPOINT', 'CLAUDE_CODE_SSE_PORT', 'CLAUDE_CODE_CHILD_SESSION', 'CLAUDE_CODE_SESSION_ID', 'CLAUDE_CODE_SESSION_ATTENDED', 'CLAUDE_CODE_MESSAGING_SOCKET', 'CLAUDE_CODE_MESSAGING_TOKEN', 'CLAUDE_CODE_EXECPATH', 'CLAUDE_PID', 'AI_AGENT', 'ENABLE_IDE_INTEGRATION', 'TERMINAL_EMULATOR', 'ELECTRON_RUN_AS_NODE', '__CFBundleIdentifier']
 
+/**
+ * What `/model` and `/effort` take. The model names are the aliases Claude Code resolves itself (to whatever
+ * the current Opus, Sonnet, Haiku are), so they do not age with its releases; the efforts are its levels.
+ * Picking one types the command into the TUI, which also writes it to Claude Code's own settings.json, as it
+ * does in a terminal. Neither is validated by Claude Code (an unknown name is accepted), so only these are sent.
+ */
+const MODEL_ALIASES = [{ id: 'opus', name: 'Opus' }, { id: 'sonnet', name: 'Sonnet' }, { id: 'haiku', name: 'Haiku' }]
+const EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh']
+
 /** Claude Code's folder: CLAUDE_CONFIG_DIR, else ~/.claude. */
 export function claudeDir(env: Record<string, string | undefined> = process.env): string {
     return env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude')
@@ -271,6 +280,10 @@ export class ClaudeTuiAgent implements AgentAdapter {
     /** The process wrote to the session file: past sign-in and the folder-trust question. */
     private wrote = false
     private relaunching = false
+    /** A model picked in the app: shown until the session file shows the model that answered (its alias, not the full id). */
+    private picked?: { alias: string, over?: string }
+    /** The effort picked in the app, which Claude Code does not report back. */
+    private effort?: string
 
     constructor(readonly spec: AcpAgentSpec, private launch: { file: string, args: string[], env: Record<string, string> }, private options: AgentAdapterOptions, private callbacks: AgentAdapterCallbacks) {
         this.dir = claudeDir(launch.env)
@@ -848,6 +861,36 @@ export class ClaudeTuiAgent implements AgentAdapter {
         return true
     }
 
+    /** A prompt or command typed into the TUI; one that only draws on its screen (/cost, a dialog) puts the TUI in view. */
+    private async send(message: string, images: ImageContent[] = []): Promise<RpcResponse> {
+        const was = { running: this.running, submitted: this.submitted, prompts: this.log.fold.prompts }
+        await this.prompt(message, images)
+        // A command Claude Code answers on its screen only (/cost, /context in some versions) writes nothing
+        // to the session file and fires no hook, so the thread would wait for a turn that never comes.
+        if (!was.running && /^\/[\w:.-]+/.test(message.trim()) && !/^\/(compact|clear|exit)(\s|$)/.test(message.trim()) && await this.screenOnly(was)) {
+            this.screenDialog = true
+            this.emit({ type: 'tui_view', show: true, reason: 'command' })
+            return { type: 'response', command: 'prompt', success: true, data: { disposition: 'handled' } }
+        }
+        return { type: 'response', command: 'prompt', success: true, data: {} }
+    }
+
+    /** A command that may open a yes/no dialog (first option "Yes"): typed, then answered Yes if the dialog shows. */
+    private async typeAndConfirm(line: string, dialog: string) {
+        const printed = this.log.fold.outputs
+        await this.command(line)
+        for (let waited = 0; waited < 4000; waited += 100) {
+            await SLEEP(100)
+            if (this.terminal && terminals?.screen(this.terminal).includes(dialog)) {
+                terminals.inject(this.terminal, '1')
+                return
+            }
+            this.tail()
+            if (this.log.fold.outputs > printed)
+                return
+        }
+    }
+
     private async command(line: string) {
         if (this.running)
             throw new Error(tr('等这一轮结束', 'Wait for the turn to finish'))
@@ -884,6 +927,7 @@ export class ClaudeTuiAgent implements AgentAdapter {
                         sessionFile: this.key,
                         sessionId: this.session,
                         sessionName: this.title(),
+                        thinkingLevel: this.effort,
                         configOptions: [],
                         agentCaps: this.caps,
                         tuiTerminal: this.terminal || undefined,
@@ -891,9 +935,26 @@ export class ClaudeTuiAgent implements AgentAdapter {
                         permissionMode: this.permissionMode || this.log.meta.permissionMode,
                     })
                 case 'get_available_models':
-                    return ok({ models: [] })
+                    return ok({ models: MODEL_ALIASES.map(m => ({ ...m, provider: this.spec.label })) })
                 case 'get_available_thinking_levels':
-                    return ok({ levels: [] })
+                    return ok({ levels: EFFORT_LEVELS })
+                case 'set_model': {
+                    const alias = MODEL_ALIASES.find(m => m.id === command.modelId)
+                    if (!alias)
+                        throw new Error(tr(`Claude Code 的模型在终端里选（${String(command.modelId)}）`, `Pick that Claude Code model in its terminal (${String(command.modelId)})`))
+                    // With a history to re-read, Claude Code asks "Switch model?" first. The app asked the user already.
+                    await this.typeAndConfirm(`/model ${alias.id}`, 'Switch model?')
+                    this.picked = { alias: alias.id, over: this.log.meta.model }
+                    return ok()
+                }
+                case 'set_thinking_level': {
+                    const level = EFFORT_LEVELS.find(l => l === command.level)
+                    if (!level)
+                        throw new Error(tr(`Claude Code 没有「${String(command.level)}」这一档`, `Claude Code has no "${String(command.level)}" effort`))
+                    await this.typeAndConfirm(`/effort ${level}`, 'Switch effort?')
+                    this.effort = level
+                    return ok()
+                }
                 case 'get_commands':
                     // Its skills and custom commands, from the folders it reads. Its built-ins are on the app's own controls
                     // (and the terminal view); the TUI lists nothing a program can read.
@@ -904,16 +965,7 @@ export class ClaudeTuiAgent implements AgentAdapter {
                     const message = String(command.message ?? '')
                     if (this.guiCommand(message))
                         return ok({ disposition: 'handled' })
-                    const was = { running: this.running, submitted: this.submitted, prompts: this.log.fold.prompts }
-                    await this.prompt(message, Array.isArray(command.images) ? command.images as ImageContent[] : [])
-                    // A command Claude Code answers on its screen only (/cost, /context in some versions) writes nothing
-                    // to the session file and fires no hook, so the thread would wait for a turn that never comes.
-                    if (!was.running && /^\/[\w:.-]+/.test(message.trim()) && !/^\/(compact|clear|exit)(\s|$)/.test(message.trim()) && await this.screenOnly(was)) {
-                        this.screenDialog = true
-                        this.emit({ type: 'tui_view', show: true, reason: 'command' })
-                        return ok({ disposition: 'handled' })
-                    }
-                    return ok({})
+                    return this.send(message, Array.isArray(command.images) ? command.images as ImageContent[] : [])
                 }
                 case 'claude_enable_hooks':
                     await this.enableHooks()
@@ -952,9 +1004,13 @@ export class ClaudeTuiAgent implements AgentAdapter {
     }
 
     private piModel() {
-        const id = this.model || this.log.meta.model
+        // A model picked in the app stands in until Claude Code answers with another one.
+        if (this.picked && this.log.meta.model !== this.picked.over)
+            this.picked = undefined
+        // The model that answered last; the one SessionStart reported is only the start (it is not told of a /model).
+        const id = this.picked?.alias ?? (this.log.meta.model || this.model)
         const cacheTtl = this.log.meta.cacheTtl
-        return id ? { id, name: id, provider: this.spec.label, promptCache: cacheTtl ? { short: cacheTtl } : pricedModel(priceList(), 'claude', id)?.promptCache } as any : undefined
+        return id ? { id, name: this.picked ? MODEL_ALIASES.find(m => m.id === id)?.name ?? id : id, provider: this.spec.label, promptCache: cacheTtl ? { short: cacheTtl } : pricedModel(priceList(), 'claude', id)?.promptCache } as any : undefined
     }
 
     private processExited(exit: { code: number, signal?: number }) {

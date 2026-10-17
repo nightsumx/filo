@@ -341,6 +341,8 @@ export class ClaudeFold {
     /** The streamed message (MessageDisplay's message_id), and those whose record landed already. */
     private streamKey = ''
     private streamed = new Set<string>()
+    /** The reply texts of the records folded since the last prompt: a streamed piece of one of them is late, not new. */
+    private replies: string[] = []
 
     /** The time of the record being folded: messages carry the session's times, not the reader's. */
     private at = 0
@@ -370,7 +372,8 @@ export class ClaudeFold {
     /** Streamed text of the reply being written (MessageDisplay), before its record lands. */
     stream(delta: string, key = '') {
         // A late piece of a message whose record is in already would show twice.
-        if (!delta || (key && this.streamed.has(key)))
+        // MessageDisplay's id is not always the record's, and hooks can arrive after the record: compare the text too.
+        if (!delta || (key && this.streamed.has(key)) || this.replies.some(text => text.includes(delta)))
             return
         this.streamKey = key
         this.preview += delta
@@ -392,6 +395,7 @@ export class ClaudeFold {
         else if (r.type === 'attachment' && typeof (r.attachment as any)?.prompt === 'string') {
             this.endStream()
             const prompt: string = (r.attachment as any).prompt
+            this.replies = []
             this.transcript.userPrompt(prompt)
             this.prompts++
             if (!prompt.startsWith('/') && !prompt.startsWith('!'))
@@ -424,6 +428,7 @@ export class ClaudeFold {
                 // The streamed preview is the start of this text; only the rest is new.
                 const t = this.preview && b.text.startsWith(this.preview) ? b.text.slice(this.preview.length) : b.text
                 this.endStream()
+                this.replies.push(b.text)
                 if (t)
                     this.transcript.update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: t } })
             }
@@ -496,6 +501,7 @@ export class ClaudeFold {
         if (!text && !images.length)
             return
         this.endStream()
+        this.replies = []
         this.transcript.userPrompt(text, images)
         this.prompts++
         this.meta.firstPrompt ??= text

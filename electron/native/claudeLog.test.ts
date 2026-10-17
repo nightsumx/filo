@@ -203,6 +203,19 @@ describe('claude session file', () => {
         expect(deltas.join('')).toBe('Hello from the fake model.\nLine two.')
     })
 
+    it('a streamed piece that arrives after its record (under another id) is not shown again', () => {
+        const log = new ClaudeLog('k:')
+        const a = prompt(null, 'hi')
+        const r = reply(a.uuid!, 'msg_1', { type: 'text', text: 'Hello from the fake model.' })
+        log.add([a, r])
+        log.fold.stream('Hello from the fake model.', 'another-id')
+        expect(JSON.stringify(log.transcript.streaming?.content)).not.toContain('model.Hello')
+        log.fold.settle()
+        const second = prompt(r.uuid!, 'again')
+        log.add([second])
+        expect(log.transcript.messages.map(m => (m.message as any).role)).toEqual(['user', 'assistant', 'user'])
+    })
+
     it('reads a growing file from an offset, leaving a half-written line for later', () => {
         const dir = mkdtempSync(path.join(os.tmpdir(), 'claude-log-'))
         try {
