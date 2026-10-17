@@ -60,6 +60,16 @@ describe('claude session file', () => {
         ])
     })
 
+    it('a /compact that has nothing to compact still counts what it printed, so the adapter can tell it is over', () => {
+        const echo = rec('user', null, { message: { role: 'user', content: '<command-name>/compact</command-name>\n<command-message>compact</command-message>\n<command-args>keep it</command-args>' } })
+        const out = rec('user', echo.uuid!, { message: { role: 'user', content: '<local-command-stdout>Not enough messages to compact.</local-command-stdout>' } })
+        const log = new ClaudeLog('k:')
+        log.add([echo, out])
+        expect(log.fold.outputs).toBe(1)
+        expect(log.fold.compactions).toBe(0)
+        expect(log.transcript.messages.at(-1)?.message).toMatchObject({ role: 'custom', customType: '/compact', content: 'Not enough messages to compact.' })
+    })
+
     it('folds a turn: prompt, text, a command with its output, the closing text', () => {
         const a = prompt(null, 'BASH1 now')
         const b = reply(a.uuid!, 'msg_1', { type: 'text', text: 'Running command 1.' })

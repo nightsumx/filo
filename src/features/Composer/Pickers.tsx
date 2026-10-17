@@ -8,7 +8,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { cn, formatTokens, ipcMessage } from '@/lib/utils'
 import { AgentIcon } from '@/components/AgentIcon'
-import { Brain, Check, ChevronDown, ClipboardList, Cpu, Download, FilePen, KeyRound, Loader2, Plane, Plus, Route, Settings2, ShieldCheck, SlidersHorizontal, Undo2, Zap } from 'lucide-react'
+import { Brain, Check, ChevronDown, ClipboardList, Cpu, Shrink, Download, FilePen, KeyRound, Loader2, Plane, Plus, Route, Settings2, ShieldCheck, SlidersHorizontal, Undo2, Zap } from 'lucide-react'
 import { observable, runInAction } from 'mobx'
 import { observer } from 'mobx-react-lite'
 import { useEffect, useRef, useState } from 'react'
@@ -404,6 +404,58 @@ export const ThinkingPicker = observer(({ thread }: { thread: Thread }) => {
             </PopoverTrigger>
             <PopoverContent align="start" sideOffset={6} className="w-[300px] px-4 pt-3 pb-2.5">
                 <EffortSlider levels={levels} value={current} onChange={level => thread.setThinkingLevel(level)} />
+            </PopoverContent>
+        </Popover>
+    )
+})
+
+/**
+ * Compact the context: a button beside the pickers, not a number to find in the status line. Agents that take
+ * a note on what to keep (features.compactInstructions) get a field for it; for the others it is one click.
+ */
+export const CompactButton = observer(({ thread }: { thread: Thread }) => {
+    const [open, setOpen] = useState(false)
+    const [note, setNote] = useState('')
+    if (!thread.features.compaction)
+        return null
+    const busy = thread.running || thread.compacting
+    const run = () => {
+        setOpen(false)
+        const instructions = note
+        setNote('')
+        void thread.compact(instructions)
+    }
+    return (
+        <Popover open={open && !busy} onOpenChange={setOpen}>
+            <PopoverTrigger
+                className={pill}
+                disabled={busy}
+                aria-label={tr('压缩上下文', 'Compact context')}
+                title={thread.compacting ? tr('正在压缩上下文', 'Compacting context') : thread.running ? tr('等这一轮结束再压缩', 'Wait for the turn to end to compact') : tr('压缩上下文，腾出空间', 'Compact the context to free up room')}
+            >
+                {thread.compacting ? <Loader2 size={13} className="animate-spin" /> : <Shrink size={13} />}
+                <span>{thread.compacting ? tr('压缩中', 'Compacting') : tr('压缩', 'Compact')}</span>
+            </PopoverTrigger>
+            <PopoverContent align="start" sideOffset={6} className="w-[320px] p-3">
+                <div className="text-[12px] font-medium text-gray-800">{tr('压缩上下文', 'Compact context')}</div>
+                <p className="mt-1 text-[12px] text-gray-500">{tr('把前面的对话总结成一段，腾出上下文空间。', 'Summarizes the conversation so far to free up context.')}</p>
+                {thread.features.compactInstructions && (
+                    <input
+                        autoFocus
+                        value={note}
+                        onChange={e => setNote(e.target.value)}
+                        onKeyDown={(e) => {
+                            if (e.key === 'Enter' && !e.nativeEvent.isComposing)
+                                run()
+                        }}
+                        aria-label={tr('要保留什么（可选）', 'What to keep (optional)')}
+                        placeholder={tr('要保留什么（可选）', 'What to keep (optional)')}
+                        className={cn(flatFieldClass, 'mt-2 h-8 w-full px-2 text-[12px]')}
+                    />
+                )}
+                <div className="mt-2.5 flex justify-end">
+                    <Button size="sm" onClick={run}>{tr('压缩', 'Compact')}</Button>
+                </div>
             </PopoverContent>
         </Popover>
     )

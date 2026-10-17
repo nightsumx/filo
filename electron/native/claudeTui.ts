@@ -244,6 +244,7 @@ export class ClaudeTuiAgent implements AgentAdapter {
     /** Between PreCompact and PostCompact: Claude Code is summarising the conversation. */
     private compacting = false
     private compactionsBefore = 0
+    private outputsBefore = 0
     /** A command was answered on the TUI's screen, maybe in a dialog (/cost) that takes the next keys. */
     private screenDialog = false
     private lastPre: { name: string, input: string, id: string } | null = null
@@ -437,6 +438,9 @@ export class ClaudeTuiAgent implements AgentAdapter {
             for (const { delta, key } of this.early.splice(0))
                 this.log.fold.stream(delta, key)
         }
+        // The /compact command printed its result without a PostCompact (too little to compact): it is over.
+        if (this.compacting && this.log.fold.outputs > this.outputsBefore)
+            this.endCompaction('manual')
         this.watchSilence()
         this.syncRunning()
     }
@@ -539,6 +543,7 @@ export class ClaudeTuiAgent implements AgentAdapter {
             case 'PreCompact':
                 this.compacting = true
                 this.compactionsBefore = this.log.fold.compactions
+                this.outputsBefore = this.log.fold.outputs
                 this.emit({ type: 'compaction_start', reason: event.trigger === 'auto' ? 'threshold' : 'manual' })
                 break
             case 'PostCompact':
@@ -917,9 +922,12 @@ export class ClaudeTuiAgent implements AgentAdapter {
                     return ok()
                 case 'clear_queue':
                     return ok({ steering: [], followUp: [] })
-                case 'compact':
-                    await this.command('/compact')
+                case 'compact': {
+                    // The note goes on the command's line: one line, as the TUI's prompt takes it.
+                    const note = String(command.customInstructions ?? '').replace(/\s+/g, ' ').trim()
+                    await this.command(note ? `/compact ${note}` : '/compact')
                     return ok({})
+                }
                 case 'set_session_name': {
                     const name = String(command.name ?? '').trim().replace(/\s+/g, ' ')
                     if (!name)

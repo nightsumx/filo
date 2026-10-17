@@ -327,6 +327,8 @@ export class ClaudeFold {
     prompts = 0
     /** Compaction summaries read so far: the adapter waits for the next one after PostCompact. */
     compactions = 0
+    /** What local commands printed so far: a command that ends without a PostCompact ("Not enough messages to compact") is known by it. */
+    outputs = 0
     /**
      * Prompts that went to the model (not a local /command or !shell): each was a UserPromptSubmit,
      * so the adapter can tell hooks that never come.
@@ -479,6 +481,7 @@ export class ClaudeFold {
             return
         const output = commandOutput(r)
         if (output) {
+            this.outputs++
             this.transcript.commandOutput(output)
             return
         }
@@ -515,6 +518,7 @@ export class ClaudeFold {
             const output = commandOutput(r)
             const text = userText({ type: 'user', message: { content: r.content } })
             if (output) {
+                this.outputs++
                 this.transcript.commandOutput(output)
             }
             else if (text) {

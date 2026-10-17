@@ -23,6 +23,9 @@ const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 const FAKE_ACP = path.resolve(import.meta.dirname, 'fakeAcp.mjs')
 const FAKE_GROK = path.resolve(import.meta.dirname, 'fakeGrok.mjs')
 
+/** The last message of every summary request Claude Code's /compact sent (what it asked the model to keep). */
+const summaryAsks: string[] = []
+
 /** A model API that answers every request with a short text, for Codex (Responses) and Claude Code (Messages). */
 function modelServer() {
     return http.createServer((req, res) => {
@@ -56,8 +59,11 @@ function modelServer() {
                     return
                 }
                 // Claude Code's /compact asks for a summary as the last message: real ones take many seconds.
-                if (JSON.stringify(parsed.messages?.at(-1)?.content ?? '').includes('detailed summary'))
+                const last = JSON.stringify(parsed.messages?.at(-1)?.content ?? '')
+                if (last.includes('detailed summary')) {
+                    summaryAsks.push(last)
                     setTimeout(answer, 3000)
+                }
                 else
                     answer()
                 return
@@ -215,9 +221,9 @@ async function main() {
 
         await typeLine('hello again')
         await settled('a second answer', 'echo: hello again')
-        await until('the figure button', () => js<boolean>(`!!document.querySelector('button[title*="/compact"]')`))
+        await until('the figure button', () => js<boolean>(`!!document.querySelector('button[title^="Context usage"]')`))
         await shot('05-grok-context-figure')
-        await js(`(() => { document.querySelector('button[title*="/compact"]').click(); return true })()`)
+        await js(`(() => { document.querySelector('button[title^="Context usage"]').click(); return true })()`)
         await until('compacted again', async () => (await notes('Context compacted')) === 2, 15_000)
         check(true, 'clicking the context figure compacts too, with its own note')
         await shot('06-grok-compact-click')
@@ -231,6 +237,17 @@ async function main() {
         await shot('07-grok-compact-while-running')
         await until('the run ends', () => js<boolean>(`!${T}.running`), 40_000)
         check(await notes('Context compacted') === 2, 'and no third compaction note appeared')
+
+        // The compact button beside the pickers: Grok takes no note on what to keep, so the popover has no field for it.
+        const pill = `document.querySelector('button[aria-label="Compact context"]')`
+        await until('the compact button', () => js<boolean>(`!!${pill} && !${pill}.disabled`))
+        await js(`(() => { ${pill}.click(); return true })()`)
+        await until('the compact popover', () => js<boolean>(`!!document.querySelector('[role="dialog"] input') || !![...document.querySelectorAll('[role="dialog"] button')].find(b => b.textContent.trim() === 'Compact')`))
+        check(!(await js<boolean>(`!!document.querySelector('[role="dialog"] input')`)), 'Grok: the compact popover has no "what to keep" field, since Grok takes none')
+        await shot('06a-grok-compact-button')
+        await js(`(() => { [...document.querySelectorAll('[role="dialog"] button')].find(b => b.textContent.trim() === 'Compact').click(); return true })()`)
+        await until('compacted by the button', async () => (await notes('Context compacted')) === 3, 15_000)
+        check(true, 'Grok: the compact button compacts, and the popover closes')
 
         const t1 = await turns()
         await typeLine('/nonsense')
@@ -369,6 +386,32 @@ async function main() {
             check(at('/compact') < at('Context compacted') && at('Context compacted') < at('Compacted (ctrl+o'), '/compact: the command, then the "Context compacted" note, then what Claude Code printed')
             check(!text.includes('claude-hook'), '/compact: our hooks\' lines are not in what it printed')
             await shot(`${shotN++}-claude-compacted`)
+        }
+        // The compact button, with a note on what to keep: it is Claude Code's `/compact <note>`.
+        {
+            const pill = `document.querySelector('button[aria-label="Compact context"]')`
+            const compactWith = async (note: string, name: string) => {
+                await until('the compact button', () => js<boolean>(`!!${pill} && !${pill}.disabled`))
+                await js(`(() => { ${pill}.click(); return true })()`)
+                await until('the note field', () => js<boolean>(`!!document.querySelector('[role="dialog"] input')`))
+                await js(`(() => { const i = document.querySelector('[role="dialog"] input'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(i, ${JSON.stringify(note)}); i.dispatchEvent(new Event('input', { bubbles: true })); return true })()`)
+                if (name)
+                    await shot(name)
+                await js(`(() => { [...document.querySelectorAll('[role="dialog"] button')].find(b => b.textContent.trim() === 'Compact').click(); return true })()`)
+            }
+            // Just compacted: there is nothing more to compact. Claude Code says so, and the thread must not keep "Compacting…".
+            await compactWith('keep the API names', '')
+            await until('Claude Code said there is nothing to compact', () => js<boolean>(`document.body.innerText.includes('Not enough messages to compact')`), 15_000)
+            await until('the compacting state ends', () => js<boolean>(`!${T}.compacting`), 5000)
+            check(true, 'Claude Code: a /compact with nothing to compact ends the "Compacting context…" state instead of hanging')
+            // With something to compact the note reaches the summary request.
+            await typeLine('one more question')
+            await until('the answer', () => js<boolean>(`!${T}.running && JSON.stringify(${T}.turns.at(-1)).includes('one more question')`), 30_000)
+            const asked = summaryAsks.length
+            await compactWith('keep the API names', `${shotN++}-claude-compact-button`)
+            await until('Claude Code asked for a summary', async () => summaryAsks.length > asked, 15_000)
+            check(summaryAsks.at(-1)!.includes('keep the API names'), 'Claude Code: the note typed in the compact popover reaches the summary request (/compact <note>)')
+            await until('the compaction ends', () => js<boolean>(`!${T}.compacting`), 20_000)
         }
         // /cost's dialog took no keys from this prompt: the GUI closed it first, and the dialog's printout landed.
         await typeLine('still there')

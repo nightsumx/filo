@@ -16,12 +16,15 @@ describe('acpCaps', () => {
 
 describe('agentFeatures', () => {
     it('keeps pi-only features to pi; ACP ones follow the agent', () => {
-        expect(agentFeatures('pi')).toMatchObject({ capabilities: true, compaction: true, autoCompaction: true, fork: true, forkSession: false, images: true, configOptions: false, rename: true })
+        expect(agentFeatures('pi')).toMatchObject({ capabilities: true, compaction: true, compactInstructions: true, autoCompaction: true, fork: true, forkSession: false, images: true, configOptions: false, rename: true })
         const caps = { images: false, steering: false, fork: true, delete: false, list: true, rename: true, xai: true }
-        expect(agentFeatures('grok', caps, [{ name: 'compact' }])).toMatchObject({ capabilities: false, compaction: true, autoCompaction: false, fork: false, forkSession: true, images: false, configOptions: true, rename: true })
+        expect(agentFeatures('grok', caps, [{ name: 'compact' }])).toMatchObject({ capabilities: false, compaction: true, compactInstructions: false, autoCompaction: false, fork: false, forkSession: true, images: false, configOptions: true, rename: true })
         // The agent keeps no name: none to give.
         expect(agentFeatures('gemini', { ...caps, rename: false }).rename).toBe(false)
         expect(agentFeatures('codex', caps, [{ name: 'review' }]).compaction).toBe(false)
+        // Claude Code's /compact takes a note, Codex's compaction does not.
+        expect(agentFeatures('claude').compactInstructions).toBe(true)
+        expect(agentFeatures('codex').compactInstructions).toBe(false)
         // Unknown yet (agent not started): images allowed, fork not offered.
         expect(agentFeatures('codex')).toMatchObject({ images: true, forkSession: false })
     })

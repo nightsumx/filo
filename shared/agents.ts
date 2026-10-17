@@ -206,6 +206,8 @@ export interface AgentFeatures {
     capabilities: boolean
     /** Compact context on demand. */
     compaction: boolean
+    /** Compaction takes a note on what to keep (pi's customInstructions, Claude Code's `/compact <note>`); Codex and Grok take none. */
+    compactInstructions: boolean
     /** pi's own compaction point (settings, the status line's countdown). */
     autoCompaction: boolean
     /** Fork from any earlier prompt (pi). */
@@ -227,6 +229,7 @@ export function agentFeatures(kind: AgentKind, caps?: AcpAgentCaps, commands: re
         capabilities: pi,
         // ACP agents compact with their own /compact command, when they have one.
         compaction: pi || commands.some(c => c.name === 'compact'),
+        compactInstructions: pi || kind === 'claude',
         autoCompaction: pi,
         fork: pi || !!caps?.forkAt,
         forkSession: !pi && !!caps?.fork,

@@ -1360,9 +1360,11 @@ export class Thread {
         }
     }
 
-    async compact() {
+    /** `instructions`: what to keep, for the agents that take a note (features.compactInstructions). */
+    async compact(instructions?: string) {
         try {
-            await this.request({ type: 'compact' })
+            const note = this.features.compactInstructions ? instructions?.trim() : ''
+            await this.request({ type: 'compact', ...(note ? { customInstructions: note } : {}) })
             // ACP agents compact as a turn of their own: it streams in and settles like any other.
             if (this.agent !== 'pi')
                 return

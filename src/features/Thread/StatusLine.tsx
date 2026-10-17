@@ -114,7 +114,7 @@ export const StatusLine = observer(({ thread }: { thread: Thread }) => {
                         key="ctx"
                         type="button"
                         disabled={thread.running || thread.compacting}
-                        title={thread.compacting ? tr('正在压缩上下文', 'Compacting context') : tr('上下文用量，点击压缩（/compact）', 'Context usage; click to compact (/compact)')}
+                        title={thread.compacting ? tr('正在压缩上下文', 'Compacting context') : tr('上下文用量，点击压缩', 'Context usage; click to compact')}
                         onClick={() => void thread.compact()}
                         className="rounded-sm outline-none hover:underline focus-visible:ring-1 focus-visible:ring-gray-400 disabled:no-underline"
                     >

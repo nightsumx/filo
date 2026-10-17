@@ -13,7 +13,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { StatusLine } from '../Thread/StatusLine'
 import { CacheNotice } from './CacheNotice'
-import { AgentPicker, AutopilotToggle, ConfigPickers, installingAgentLabel, ModelPicker, ModePicker, NoModelNotice, ThinkingPicker } from './Pickers'
+import { AgentPicker, AutopilotToggle, CompactButton, ConfigPickers, installingAgentLabel, ModelPicker, ModePicker, NoModelNotice, ThinkingPicker } from './Pickers'
 import { TodoBar } from './TodoBar'
 import { tr } from '@/lib/i18n'
 import { keys, os } from '@/platform'
@@ -425,6 +425,7 @@ const ComposerEditor = observer(({ thread }: { thread: Thread }) => {
                         <ModePicker thread={thread} />
                         <AutopilotToggle thread={thread} />
                         <ConfigPickers thread={thread} />
+                        <CompactButton thread={thread} />
                         <span className="flex-1" />
                         {thread.running && !hasInput
                             ? (
