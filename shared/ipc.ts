@@ -377,6 +377,19 @@ export interface PiTrustQuestion {
     options: string[]
 }
 
+/** What pi's trust.json and defaultProjectTrust say of a project (Settings → Project trust). */
+export interface ProjectTrust {
+    cwd: string
+    /** The nearest folder at or above the project that trust.json decides for; null when there is none. */
+    decision: boolean | null
+    /** That folder, when it is above the project rather than the project itself. */
+    inheritedFrom?: string
+    /** pi's defaultProjectTrust: what applies when there is no decision. */
+    fallback: 'ask' | 'always' | 'never'
+    /** The project has something trust gates (.pi settings or extensions, .agents/skills); without it the decision changes nothing. */
+    gated: boolean
+}
+
 export interface AgentExitInfo {
     code: number | null
     signal: string | null
@@ -517,6 +530,10 @@ export interface PiBridge {
     piTrust: (cwd: string, sessionPath?: string) => Promise<PiTrustQuestion | null>
     /** Saves the choice in pi's trust.json as its TUI does: whether pi trusts the project this time, and whether it was saved. */
     answerPiTrust: (cwd: string, label?: string) => Promise<{ trusted: boolean, saved: boolean }>
+    /** What trust.json says of each project, by pi's own rules (the nearest folder's decision, else defaultProjectTrust). */
+    projectTrust: (cwds: string[]) => Promise<ProjectTrust[]>
+    /** Writes a project's decision through pi's ProjectTrustStore (null forgets it). Threads already running keep the trust they started with. */
+    setProjectTrust: (cwd: string, decision: boolean | null) => Promise<ProjectTrust>
     /** pi's `defaultProvider` + `defaultModel`, as its TUI's "set as default" writes them. */
     setDefaultModel: (cwd: string, provider: string, model: string) => Promise<PiDefaults>
     /** pi's `defaultThinkingLevel`. */
@@ -688,6 +705,8 @@ export const IPC = {
     piDefaults: 'pi:defaults',
     piTrust: 'pi:trust',
     answerPiTrust: 'pi:answer-trust',
+    projectTrust: 'pi:project-trust',
+    setProjectTrust: 'pi:set-project-trust',
     setDefaultModel: 'pi:set-default-model',
     setDefaultThinkingLevel: 'pi:set-default-thinking-level',
     gitStatus: 'git:status',

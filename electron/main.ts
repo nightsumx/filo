@@ -537,6 +537,16 @@ function registerIpc() {
             throw new Error('expected a project folder')
         return providers.service.helper.answerTrust(cwd, typeof label === 'string' ? label : undefined)
     })
+    ipcMain.handle(IPC.projectTrust, (_e, cwds: unknown) => {
+        if (!Array.isArray(cwds) || !cwds.every(cwd => typeof cwd === 'string' && path.isAbsolute(cwd)))
+            throw new Error('expected project folders')
+        return providers.service.helper.trustState(cwds)
+    })
+    ipcMain.handle(IPC.setProjectTrust, async (_e, cwd: unknown, decision: unknown) => {
+        if (typeof cwd !== 'string' || !path.isAbsolute(cwd) || (decision !== null && typeof decision !== 'boolean'))
+            throw new Error('expected a project folder and true, false or null')
+        return (await providers.service.helper.setTrust(cwd, decision))[0]
+    })
     ipcMain.handle(IPC.setDefaultModel, async (_e, cwd: unknown, provider: unknown, model: unknown) => {
         await setDefaultModel(cwd, provider, model)
         return piDefaults(cwd)

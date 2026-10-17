@@ -8,9 +8,11 @@
 //   in   { id, op: 'probeModels' | 'probe', ... }   channel test: a provider's models, one request
 //   in   { id, op: 'prices' }   every model's price and cache lifetime (pi-capabilities/lib/prices PriceList)
 //   in   { id, op: 'trust' | 'answerTrust', cwd, label? }   pi's project trust question, and the choice made (→ { trusted, saved })
+//   in   { id, op: 'trustState', cwds } / { id, op: 'setTrust', cwd, decision }   what trust.json says of projects, and a change to it (→ ProjectTrust[])
 //   in   { op: 'answer', login, promptId, value } | { op: 'cancel', login } | { op: 'probeCancel', probe }
 //   out  { update: LoginUpdate }   while a login runs (prompts and notices)
 import type * as Pi from '@earendil-works/pi-coding-agent'
+import type { ProjectTrust } from '../shared/ipc.ts'
 import type { AuthMethod, LoginNotice, LoginPrompt, LoginUpdate, ProviderInfo, ProviderList } from '../shared/providers.ts'
 import { realpathSync } from 'node:fs'
 import os from 'node:os'
@@ -353,6 +355,32 @@ function answerTrust(cwd: string, label: string | undefined): { trusted: boolean
     return { trusted: option?.trusted ?? false, saved: !!option?.updates.length }
 }
 
+/** What pi's trust.json and defaultProjectTrust say of each project (Settings → Project trust). */
+function trustState(cwds: string[]): ProjectTrust[] {
+    const store = new pi.ProjectTrustStore(pi.getAgentDir())
+    const fallback = pi.SettingsManager.create(os.homedir(), pi.getAgentDir()).getDefaultProjectTrust()
+    return cwds.map((cwd) => {
+        let real = path.resolve(cwd)
+        try {
+            real = realpathSync(real)
+        }
+        catch {}
+        const entry = store.getEntry(cwd)
+        return {
+            cwd,
+            decision: entry?.decision ?? null,
+            inheritedFrom: entry && entry.path !== real ? entry.path : undefined,
+            fallback,
+            gated: pi.hasTrustRequiringProjectResources(cwd),
+        }
+    })
+}
+
+/** null forgets the project's own decision; a decision on a parent folder still applies. */
+function setTrust(cwd: string, decision: boolean | null) {
+    new pi.ProjectTrustStore(pi.getAgentDir()).set(cwd, decision)
+}
+
 // ---------------------------------------------------------------- loop
 
 async function handle(message: Record<string, any>) {
@@ -396,6 +424,12 @@ async function handle(message: Record<string, any>) {
             result = trustQuestion(String(message.cwd))
         else if (op === 'answerTrust')
             result = answerTrust(String(message.cwd), typeof message.label === 'string' ? message.label : undefined)
+        else if (op === 'trustState')
+            result = trustState(Array.isArray(message.cwds) ? message.cwds.map(String) : [])
+        else if (op === 'setTrust') {
+            setTrust(String(message.cwd), typeof message.decision === 'boolean' ? message.decision : null)
+            result = trustState([String(message.cwd)])
+        }
         else if (op === 'apiKey')
             result = (await (await pi.ModelRuntime.create()).getAuth(String(message.provider)).catch(() => undefined))?.auth.apiKey ?? null
         else

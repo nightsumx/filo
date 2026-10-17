@@ -49,7 +49,7 @@ const IDLE_SWEEP_MS = 60_000
 export const MIN_PANE_WIDTH = 520
 export const MAX_PANES = 3
 
-export type SettingsPageId = 'appearance' | 'providers' | 'routes' | 'agents' | 'capabilities' | 'skills' | 'compaction' | 'shortcuts'
+export type SettingsPageId = 'appearance' | 'providers' | 'routes' | 'agents' | 'capabilities' | 'skills' | 'compaction' | 'trust' | 'shortcuts'
 
 export interface Project {
     cwd: string

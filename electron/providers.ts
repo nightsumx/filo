@@ -1,7 +1,7 @@
 // Settings → 供应商, main side. Sign-in and the provider list go through providerHelper.mts, a
 // child process running the user's own pi (so they match the threads exactly); endpoints are edited
 // in pi's models.json here, then checked by loading them in that pi.
-import type { PiEnv } from '@shared/ipc'
+import type { PiEnv, ProjectTrust } from '@shared/ipc'
 import type { AuthMethod, ChannelModel, ChannelSave, Endpoint, EndpointModel, EndpointSave, LoginUpdate, ProviderList, ProvidersState } from '@shared/providers'
 import type { RouteCatalog } from '@shared/routes'
 import type { ProbeReply, ProbeRequest } from 'pi-capabilities/lib/channelTest.ts'
@@ -185,6 +185,16 @@ export class ProviderHelper {
     /** Saves a trust choice as pi's TUI does: whether pi trusts the project this time, and whether trust.json has it now. */
     answerTrust(cwd: string, label: string | undefined): Promise<{ trusted: boolean, saved: boolean }> {
         return this.call({ op: 'answerTrust', cwd, label })
+    }
+
+    /** What pi's trust.json and defaultProjectTrust say of each project. */
+    trustState(cwds: string[]): Promise<ProjectTrust[]> {
+        return this.call({ op: 'trustState', cwds })
+    }
+
+    /** Writes one project's decision through pi's ProjectTrustStore; null forgets it. Resolves to its new state. */
+    setTrust(cwd: string, decision: boolean | null): Promise<ProjectTrust[]> {
+        return this.call({ op: 'setTrust', cwd, decision })
     }
 
     /** The API of each model id pi knows from its maker. */
