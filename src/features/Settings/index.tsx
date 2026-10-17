@@ -9,13 +9,14 @@ import { systemLang, tr } from '@/lib/i18n'
 import { TRANSCRIPT_TEXT } from '@/lib/transcriptText'
 import { cn } from '@/lib/utils'
 import { appStore } from '@/store/app'
-import { Archive, Bot, KeyRound, Palette, Puzzle, Route, Sparkles } from 'lucide-react'
+import { Archive, Bot, Keyboard, KeyRound, Palette, Puzzle, Route, Sparkles } from 'lucide-react'
 import { observer } from 'mobx-react-lite'
 import { AgentsPage } from './Agents'
 import { CapabilitiesPage } from './Capabilities'
 import { CompactionPage } from './Compaction'
 import { ProvidersPage } from './Providers'
 import { RoutesPage } from './Routes'
+import { ShortcutsPage } from './Shortcuts'
 import { SkillsPage } from './Skills'
 
 /** A few transcript lines in the chosen wording, so the effect is visible before closing. */
@@ -121,6 +122,7 @@ const PAGES: { id: SettingsPageId, label: Localized, icon: LucideIcon, page: Rea
     { id: 'capabilities', label: { zh: '能力', en: 'Capabilities' }, icon: Puzzle, page: CapabilitiesPage },
     { id: 'skills', label: { zh: '技能', en: 'Skills' }, icon: Sparkles, page: SkillsPage },
     { id: 'compaction', label: { zh: '上下文压缩', en: 'Compaction' }, icon: Archive, page: CompactionPage },
+    { id: 'shortcuts', label: { zh: '快捷键', en: 'Shortcuts' }, icon: Keyboard, page: ShortcutsPage },
 ]
 
 /** Page list on the left, like the tree in JetBrains Settings; Up/Down move between pages. */

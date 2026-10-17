@@ -11,7 +11,8 @@ import { reaction } from 'mobx'
 import { observer } from 'mobx-react-lite'
 import { useEffect, useRef } from 'react'
 import { existingView, pruneViews, viewOf } from './views'
-import { keys, terminalCommand, terminalKeys } from '@/platform'
+import { shortcutOf } from '@/lib/shortcuts'
+import { keys, terminalKeys } from '@/platform'
 
 const headerBtn = 'flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-gray-500 outline-none hover:bg-black/[0.06] hover:text-gray-800'
 
@@ -160,24 +161,24 @@ export const TerminalPanel = observer(() => {
     const project = terminalStore.project
 
     const onKeyDown = (e: React.KeyboardEvent) => {
-        if (!terminalCommand(e) || !active)
+        const shortcut = shortcutOf('terminal', e)
+        if (!shortcut || !active)
             return
-        const key = e.key.toLowerCase()
         // Inside the terminal these act on terminals, not on threads.
-        if (key === 'w') {
+        if (shortcut === 'terminal-close') {
             void terminalStore.close(active.id)
         }
-        else if (key === 't' && project) {
+        else if (shortcut === 'terminal-new' && project) {
             void terminalStore.create(project)
         }
-        else if (key === 'k') {
+        else if (shortcut === 'terminal-clear') {
             existingView(active.id)?.term.clear()
         }
         // Copy and paste: the Edit menu has them on macOS (so these never fire there), Ctrl+Shift+C/V elsewhere.
-        else if (key === 'c') {
+        else if (shortcut === 'terminal-copy') {
             document.execCommand('copy')
         }
-        else if (key === 'v') {
+        else if (shortcut === 'terminal-paste') {
             const view = existingView(active.id)
             void navigator.clipboard.readText().then(text => text && view?.term.paste(text))
         }

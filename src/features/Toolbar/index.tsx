@@ -12,7 +12,8 @@ import { useEffect, useRef, useState } from 'react'
 import { useGitStatus } from '../Review/useGitStatus'
 import { ProjectBadge } from './ProjectBadge'
 import { newThreadLabel, tr } from '@/lib/i18n'
-import { commandKey, keys, projectKeys, titleBarInset } from '@/platform'
+import { isShortcut } from '@/lib/shortcuts'
+import { keys, projectKeys, titleBarInset } from '@/platform'
 
 export const toolbarBtn = 'flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-[13px] text-gray-800 outline-none transition-colors hover:bg-black/[0.06] data-[state=open]:bg-black/[0.08] focus-visible:ring-2 focus-visible:ring-ide-accent/50 disabled:opacity-40 disabled:hover:bg-transparent'
 const iconBtn = cn(toolbarBtn, 'w-7 justify-center px-0 text-gray-600')
@@ -130,7 +131,7 @@ const ProjectSwitcher = observer(() => {
 
     useEffect(() => {
         const onKey = (e: KeyboardEvent) => {
-            if (commandKey(e) && !e.shiftKey && e.key.toLowerCase() === 'p') {
+            if (isShortcut('switch-project', e)) {
                 e.preventDefault()
                 setOpen(v => !v)
             }

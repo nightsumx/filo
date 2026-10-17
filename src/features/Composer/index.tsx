@@ -16,7 +16,7 @@ import { CacheNotice } from './CacheNotice'
 import { AgentPicker, AutopilotToggle, CompactButton, ConfigPickers, installingAgentLabel, ModelPicker, ModePicker, NoModelNotice, ThinkingPicker } from './Pickers'
 import { TodoBar } from './TodoBar'
 import { tr } from '@/lib/i18n'
-import { keys, os } from '@/platform'
+import { isShortcut, shortcutKeys } from '@/lib/shortcuts'
 import type { Localized } from '@shared/i18n'
 
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024
@@ -55,8 +55,8 @@ async function addImages(thread: Thread, files: File[]) {
 const queuesInput = (thread: Thread) => thread.agent !== 'pi' && !thread.state?.agentCaps?.steering
 
 /** pi's key for taking the queue back into the editor (app.message.dequeue). */
-const dequeueKeys = os === 'windows' ? 'Alt+Q' : keys('⌥↑')
-const followUpKeys = keys('⌥↩')
+const dequeueKeys = shortcutKeys('dequeue')[0]
+const followUpKeys = shortcutKeys('follow-up')[0]
 
 /** pi's editor commands (core/slash-commands.ts in pi 1.0.4). RPC neither lists nor runs them; extensions/builtins.ts serves the session ones as extension commands. */
 const PI_BUILTINS = ['settings', 'model', 'tree', 'thinking', 'scoped-models', 'export', 'import', 'share', 'bug', 'copy', 'name', 'session', 'changelog', 'hotkeys', 'fork', 'clone', 'trust', 'login', 'logout', 'new', 'compact', 'resume', 'reload', 'quit']
@@ -282,7 +282,7 @@ const ComposerEditor = observer(({ thread }: { thread: Thread }) => {
             setSlashDismissed(false)
             // pi's app.message.followUp: Alt+Enter.
             if (canSend)
-                submit(e.altKey ? 'followUp' : 'steer')
+                submit(isShortcut('follow-up', e) ? 'followUp' : 'steer')
             return
         }
         if (e.key === 'Escape' && (thread.running || thread.bash)) {
@@ -291,7 +291,7 @@ const ComposerEditor = observer(({ thread }: { thread: Thread }) => {
             return
         }
         // pi's app.message.dequeue: Alt+Up, Alt+Q on Windows.
-        if (e.altKey && (os === 'windows' ? e.code === 'KeyQ' : e.key === 'ArrowUp') && queued.some(q => q.back)) {
+        if (isShortcut('dequeue', e) && queued.some(q => q.back)) {
             e.preventDefault()
             void thread.dequeueAll()
         }

@@ -20,7 +20,8 @@ import { MainToolbar } from './features/Toolbar'
 import { Setup } from './features/Setup'
 import { Welcome } from './features/Welcome'
 import { newThreadLabel, tr } from '@/lib/i18n'
-import { commandKey, projectDigit } from '@/platform'
+import { shortcutOf } from '@/lib/shortcuts'
+import { projectDigit } from '@/platform'
 
 const EnvError = observer(({ error }: { error: string }) => (
     <div className="app-drag flex h-full w-full flex-col items-center justify-center gap-4 px-8 text-center">
@@ -127,60 +128,61 @@ const Workspace = observer(() => {
 function useShortcuts() {
     useEffect(() => {
         const onKey = (e: KeyboardEvent) => {
-            const key = e.key.toLowerCase()
-            if (e.ctrlKey && !e.metaKey && e.key === 'Tab') {
-                e.preventDefault()
-                appStore.cycleTab(e.shiftKey ? -1 : 1)
-                return
-            }
-            // ⌃` as in VS Code and JetBrains: open and focus the terminal, or hide it from inside.
-            if (e.ctrlKey && !e.metaKey && !e.altKey && e.code === 'Backquote') {
-                e.preventDefault()
-                terminalStore.toggle(e.target instanceof Element && !!e.target.closest('.xterm'))
-                return
-            }
-            const digit = projectDigit(e)
-            if (digit) {
-                const project = appStore.projects[digit - 1]
-                if (project) {
+            // Which key does what is src/lib/shortcuts.ts; this is what each one does.
+            switch (shortcutOf('app', e)) {
+                case 'next-tab':
                     e.preventDefault()
-                    appStore.selectProject(project.cwd)
+                    appStore.cycleTab(1)
+                    break
+                case 'previous-tab':
+                    e.preventDefault()
+                    appStore.cycleTab(-1)
+                    break
+                // ⌃` as in VS Code and JetBrains: open and focus the terminal, or hide it from inside.
+                case 'terminal':
+                    e.preventDefault()
+                    terminalStore.toggle(e.target instanceof Element && !!e.target.closest('.xterm'))
+                    break
+                case 'project': {
+                    const project = appStore.projects[projectDigit(e) - 1]
+                    if (project) {
+                        e.preventDefault()
+                        appStore.selectProject(project.cwd)
+                    }
+                    break
                 }
-                return
-            }
-            if (!commandKey(e))
-                return
-            if (key === 't' && !e.shiftKey && appStore.activeProject) {
-                e.preventDefault()
-                appStore.newThread(appStore.activeProject)
-            }
-            else if (key === 'w' && !e.shiftKey && appStore.activeTab) {
-                e.preventDefault()
-                void closeTabWithConfirm(appStore.activeTab)
-            }
-            else if (/^[1-9]$/.test(e.key)) {
-                e.preventDefault()
-                appStore.focusTabAt(e.key === '9' ? -1 : Number(e.key) - 1)
-            }
-            else if (e.shiftKey && (e.key === '[' || e.key === '{' || e.key === ']' || e.key === '}')) {
-                e.preventDefault()
-                appStore.cycleTab(e.key === '[' || e.key === '{' ? -1 : 1)
-            }
-            else if (e.key === '\\') {
-                e.preventDefault()
-                appStore.toggleLayout()
-            }
-            else if (key === 'b' && !e.shiftKey) {
-                e.preventDefault()
-                appStore.toggleSidebar()
-            }
-            else if (key === 'e' && e.shiftKey) {
-                e.preventDefault()
-                appStore.showSidebarView('files')
-            }
-            else if (key === 'f' && e.shiftKey) {
-                e.preventDefault()
-                appStore.setSearchOpen(!appStore.searchOpen)
+                case 'new-thread':
+                    if (appStore.activeProject) {
+                        e.preventDefault()
+                        appStore.newThread(appStore.activeProject)
+                    }
+                    break
+                case 'close-tab':
+                    if (appStore.activeTab) {
+                        e.preventDefault()
+                        void closeTabWithConfirm(appStore.activeTab)
+                    }
+                    break
+                case 'focus-tab':
+                    e.preventDefault()
+                    appStore.focusTabAt(e.key === '9' ? -1 : Number(e.key) - 1)
+                    break
+                case 'layout':
+                    e.preventDefault()
+                    appStore.toggleLayout()
+                    break
+                case 'sidebar':
+                    e.preventDefault()
+                    appStore.toggleSidebar()
+                    break
+                case 'files':
+                    e.preventDefault()
+                    appStore.showSidebarView('files')
+                    break
+                case 'search':
+                    e.preventDefault()
+                    appStore.setSearchOpen(!appStore.searchOpen)
+                    break
             }
         }
         // Editor tabs save on their own shortly after typing stops; leaving the window saves now.
