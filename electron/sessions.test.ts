@@ -1,5 +1,9 @@
-import { describe, expect, it } from 'vitest'
-import { parseSession, summarizeSession } from './sessions'
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import os from 'node:os'
+import path from 'node:path'
+import process from 'node:process'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { importSession, parseSession, sessionDirFor, summarizeSession } from './sessions'
 
 const lines = (...records: object[]) => records.map(r => JSON.stringify(r)).join('\n')
 
@@ -109,5 +113,79 @@ describe('parseSession', () => {
     it('stops on a parent cycle instead of looping', () => {
         const text = lines(header, { ...user('a', 'b', 'x') }, { ...user('b', 'a', 'y') })
         expect(parseSession(text, '/s/a.jsonl').items.length).toBe(2)
+    })
+})
+
+describe('importSession (pi\'s /import)', () => {
+    let dir: string
+    let previous: string | undefined
+    beforeEach(async () => {
+        dir = await mkdtemp(path.join(os.tmpdir(), 'import-session-'))
+        previous = process.env.PI_CODING_AGENT_SESSION_DIR
+        process.env.PI_CODING_AGENT_SESSION_DIR = path.join(dir, 'sessions')
+    })
+    afterEach(async () => {
+        if (previous === undefined)
+            delete process.env.PI_CODING_AGENT_SESSION_DIR
+        else
+            process.env.PI_CODING_AGENT_SESSION_DIR = previous
+        await rm(dir, { recursive: true, force: true })
+    })
+    const write = async (name: string, ...records: object[]) => {
+        const file = path.join(dir, name)
+        await writeFile(file, `${lines(...records)}\n`)
+        return file
+    }
+
+    it('names the folder as pi does: the cwd without its leading slash, separators as dashes', async () => {
+        expect(await sessionDirFor('/Users/me/proj')).toBe(path.join(dir, 'sessions', '--Users-me-proj--'))
+    })
+
+    it('copies the file into its own project\'s folder and keeps the original', async () => {
+        const file = await write('a.jsonl', header, user('u1', null, 'hello'))
+        const { summary, movedTo } = await importSession(file, '/other', ['/repo', '/other'])
+        expect(movedTo).toBeUndefined()
+        expect(summary.cwd).toBe('/repo')
+        expect(summary.path).toBe(path.join(dir, 'sessions', '--repo--', 'a.jsonl'))
+        expect(summary.firstPrompt).toBe('hello')
+        expect(await readFile(summary.path, 'utf8')).toBe(await readFile(file, 'utf8'))
+    })
+
+    it('adds -1, -2 when the name is taken, like pi', async () => {
+        const file = await write('a.jsonl', header, user('u1', null, 'hello'))
+        const first = await importSession(file, '/repo', ['/repo'])
+        const second = await importSession(file, '/repo', ['/repo'])
+        expect(path.basename(first.summary.path)).toBe('a.jsonl')
+        expect(path.basename(second.summary.path)).toBe('a-1.jsonl')
+    })
+
+    it('files a session of an unknown directory under the project it was imported into, changing only the header\'s cwd', async () => {
+        const file = await write('b.jsonl', { ...header, cwd: '/gone' }, user('u1', null, 'hi'))
+        const { summary, movedTo } = await importSession(file, '/repo', ['/repo'])
+        expect(movedTo).toBe('/repo')
+        expect(summary.cwd).toBe('/repo')
+        const copy = (await readFile(summary.path, 'utf8')).split('\n')
+        expect(JSON.parse(copy[0])).toEqual({ ...header, cwd: '/repo' })
+        expect(copy[1]).toBe(JSON.stringify(user('u1', null, 'hi')))
+        expect(JSON.parse((await readFile(file, 'utf8')).split('\n')[0]).cwd).toBe('/gone')
+    })
+
+    it('leaves a file that is already in the sessions folder where it is', async () => {
+        const inside = path.join(dir, 'sessions', '--repo--')
+        await mkdir(inside, { recursive: true })
+        const file = path.join(inside, 'c.jsonl')
+        await writeFile(file, `${lines(header, user('u1', null, 'x'))}\n`)
+        const { summary } = await importSession(file, '/repo', ['/repo'])
+        expect(summary.path).toBe(file)
+    })
+
+    it('refuses what is not a pi session', async () => {
+        const text = path.join(dir, 'x.jsonl')
+        await writeFile(text, 'not json\n')
+        await expect(importSession(text, '/repo', ['/repo'])).rejects.toThrow()
+        const otherType = await write('y.jsonl', { type: 'message', id: 'a' })
+        await expect(importSession(otherType, '/repo', ['/repo'])).rejects.toThrow()
+        await expect(importSession(path.join(dir, 'missing.jsonl'), '/repo', ['/repo'])).rejects.toThrow()
+        await expect(importSession('relative.jsonl', '/repo', [])).rejects.toThrow()
     })
 })

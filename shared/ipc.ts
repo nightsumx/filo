@@ -456,6 +456,8 @@ export interface PiBridge {
     /** Runs a tool's official installer in a terminal of its own (`by: 'setup'`, in the home folder). */
     setupInstall: (id: string, size?: { cols: number, rows: number }) => Promise<TerminalInfo>
     listSessions: () => Promise<SessionSummary[]>
+    /** pi's /import: a session JSONL (asked for with a file dialog when `file` is left out) copied into the sessions folder; null when the dialog is cancelled. */
+    importSession: (into: string, projects: string[], file?: string) => Promise<{ summary: SessionSummary, movedTo?: string } | null>
     readSession: (path: string) => Promise<SessionSnapshot>
     /** What pi sessions cost over the last `days` days (pi-capabilities/lib/ledger.ts). */
     spendLedger: (days: number) => Promise<Ledger>
@@ -772,6 +774,7 @@ export const IPC = {
     mergeAllWindows: 'window:merge-all',
     focusWindow: 'window:focus',
     revealSession: 'window:reveal-session',
+    importSession: 'session:import',
     exportProjects: 'window:export-projects',
     moveTab: 'window:move-tab',
     exportThreads: 'window:export-threads',

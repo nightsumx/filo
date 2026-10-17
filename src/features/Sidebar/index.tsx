@@ -15,7 +15,7 @@ import { childToolCount, subagentActivity, subagentLive } from '@/lib/subagents'
 import { formatElapsed } from '@/lib/threadActivity'
 import { basename, cn, relativeTime, shortPath } from '@/lib/utils'
 import { appStore } from '@/store/app'
-import { AppWindow, ChevronRight, ChevronsDownUp, ChevronsUpDown, EyeOff, FolderOpen, FolderPlus, GitBranch, GitMerge, LocateFixed, Minus, MoreHorizontal, Plus, Trash2, X } from 'lucide-react'
+import { AppWindow, ChevronRight, ChevronsDownUp, ChevronsUpDown, EyeOff, FolderOpen, FolderPlus, GitBranch, GitMerge, LocateFixed, Minus, MoreHorizontal, Plus, Trash2, Upload, X } from 'lucide-react'
 import { confirm } from '@/lib/confirm'
 import { observer } from 'mobx-react-lite'
 import { useEffect, useState } from 'react'
@@ -321,6 +321,10 @@ const ProjectNode = observer(({ project, index, expanded, onToggle }: { project:
                                     {tr('在副本中新建线程', 'New thread in a worktree')}
                                 </DropdownMenuItem>
                             )}
+                            <DropdownMenuItem onSelect={() => void appStore.importSession(project.cwd)}>
+                                <Upload size={14} />
+                                {tr('导入会话…', 'Import session…')}
+                            </DropdownMenuItem>
                             <DropdownMenuItem onSelect={() => void window.pi.openFolder(project.cwd)}>
                                 <FolderOpen size={14} />
                                 {showInFolderLabel()}

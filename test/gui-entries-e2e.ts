@@ -332,6 +332,32 @@ async function main() {
 
         }
 
+        // ---------------------------------------------------------------- Import session
+        {
+            const source = path.join(WORK, 'import-me.jsonl')
+            const stamp = '2026-01-01T00:00:00.000Z'
+            const record = (o: object) => JSON.stringify(o)
+            await writeFile(source, `${[
+                record({ type: 'session', version: 3, id: 'imported-1', timestamp: stamp, cwd: repo }),
+                record({ type: 'message', id: 'i1', parentId: null, timestamp: stamp, message: { role: 'user', content: [{ type: 'text', text: 'a question from another machine' }], timestamp: 1 } }),
+                record({ type: 'message', id: 'i2', parentId: 'i1', timestamp: stamp, message: { role: 'assistant', content: [{ type: 'text', text: 'an answer from another machine' }], stopReason: 'stop', timestamp: 2 } }),
+            ].join('\n')}\n`)
+            await js(`(() => { window.__app.setSettingsOpen(false); return true })()`)
+            // The project's menu has the entry.
+            await js(`(() => { const b = document.querySelector('button[aria-label="Project actions"]'); b.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, pointerType: 'mouse' })); return true })()`)
+            await until('the project menu', () => js<boolean>(`[...document.querySelectorAll('[role="menuitem"]')].some(e => e.textContent.trim() === 'Import session…')`))
+            check(true, 'the project menu has Import session…')
+            await shot('import-menu')
+            await js(`(() => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); return true })()`)
+            await js(`(() => { void window.__app.importSession(${JSON.stringify(repo)}, ${JSON.stringify(source)}); return true })()`)
+            const copy = path.join(agentDir, 'sessions', `--${repo.replace(/^\//, '').replace(/[/\\:]/g, '-')}--`, 'import-me.jsonl')
+            await until('the copy in pi\'s sessions folder', () => Promise.resolve(existsSync(copy)))
+            await until('the imported session open', () => js<boolean>(`document.body.innerText.includes('an answer from another machine')`), 15_000)
+            check(true, 'importing a session JSONL copies it where pi keeps sessions and opens it with its conversation')
+            check(existsSync(source), 'and leaves the original file')
+            await shot('import-opened')
+        }
+
         // ---------------------------------------------------------------- Clone thread, Rewind to here
         const shot31 = async (name: string) => {
             await sleep(500)

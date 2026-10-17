@@ -31,7 +31,7 @@ import { priceList, readPricesFrom, refreshPrices } from './prices'
 import { endpointSaveOf, helperLaunch, ProviderHelper, ProviderService } from './providers'
 import { resolvePiEnv } from './pi-env'
 import { installCommand, liveSetupDeps, probeSetup, SETUP_LABELS } from './setup'
-import { assertInSessionsDir, listSessions, readSession, sessionsDir } from './sessions'
+import { assertInSessionsDir, importSession, listSessions, readSession, sessionsDir } from './sessions'
 import { readLedger } from 'pi-capabilities/lib/ledger.ts'
 import { platform } from './platform'
 import { RoutesService } from './routes'
@@ -406,6 +406,18 @@ function registerIpc() {
         if (Object.keys(changed).length)
             windows.broadcast(e.sender, IPC.prefsChanged, changed)
         return written
+    })
+    ipcMain.handle(IPC.importSession, async (e, into: unknown, projects: unknown, file: unknown) => {
+        let chosen = file
+        if (chosen === undefined) {
+            const parent = BrowserWindow.fromWebContents(e.sender)
+            const options = { properties: ['openFile'] as 'openFile'[], filters: [{ name: 'pi session', extensions: ['jsonl'] }] }
+            const result = parent ? await dialog.showOpenDialog(parent, options) : await dialog.showOpenDialog(options)
+            if (result.canceled || !result.filePaths[0])
+                return null
+            chosen = result.filePaths[0]
+        }
+        return importSession(chosen, into, projects)
     })
     ipcMain.handle(IPC.pickFolder, async (e) => {
         const parent = BrowserWindow.fromWebContents(e.sender)

@@ -1647,6 +1647,24 @@ class AppStore implements ThreadHost {
         void api().revealSession(result.cwd, result.session, entryId).catch(error => toast.error(error.message))
     }
 
+    /** pi's /import: a session JSONL (a file dialog when `file` is left out) copied into pi's sessions folder and opened. */
+    async importSession(cwd: string, file?: string) {
+        try {
+            const imported = await api().importSession(cwd, this.projects.map(p => p.cwd), file)
+            if (!imported)
+                return
+            await this.refreshSessions()
+            const summary = this.sessions.find(s => s.path === imported.summary.path) ?? imported.summary
+            if (imported.movedTo)
+                toast.info(tr('会话原来的目录不在项目里，已放到这个项目下', 'The session\'s own folder is not one of your projects, so it was filed under this one'))
+            if (this.windowProjects.includes(summary.cwd))
+                this.openSession(summary)
+        }
+        catch (error: any) {
+            toast.error(tr('导入失败', 'Import failed'), { description: error.message })
+        }
+    }
+
     /** Opens a session of this window's projects as a tab, scrolled to `entryId` if given. */
     async revealHere(session: string, entryId?: string) {
         let summary = this.sessions.find(s => s.path === session)

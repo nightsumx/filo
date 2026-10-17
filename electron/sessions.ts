@@ -2,7 +2,8 @@ import type { SessionItem, SessionSnapshot, SessionSummary } from '@shared/ipc'
 import type { AgentMessage } from '@shared/pi'
 import { isShownEntry } from '@shared/entries'
 import { CACHE_WARM } from 'pi-capabilities/lib/promptCache.ts'
-import { open, readdir, readFile, stat } from 'node:fs/promises'
+import { copyFile, mkdir, open, readdir, readFile, stat, writeFile } from 'node:fs/promises'
+import { constants, existsSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import process from 'node:process'
@@ -223,4 +224,62 @@ export async function assertInSessionsDir(filePath: string) {
     const resolved = path.resolve(filePath)
     if (!resolved.startsWith(root + path.sep) || !resolved.endsWith('.jsonl'))
         throw new Error(tr('拒绝访问会话目录之外的文件', 'Refusing to read files outside the sessions folder'))
+}
+
+/** The folder pi keeps a working directory's sessions in (session-manager.js getDefaultSessionDirPath). */
+export async function sessionDirFor(cwd: string): Promise<string> {
+    return path.join(await sessionsDir(), `--${path.resolve(cwd).replace(/^[/\\]/, '').replace(/[/\\:]/g, '-')}--`)
+}
+
+export interface ImportedSession {
+    summary: SessionSummary
+    /** The session's own working directory is not one of the projects, so the copy was moved to the project it was imported into. */
+    movedTo?: string
+}
+
+/**
+ * pi's /import (agent-session-runtime.js importFromJsonl) for a session JSONL: the file is copied into the
+ * sessions folder of the session's own working directory, under its name or with -1, -2… when taken. A file
+ * already in the sessions folder stays where it is. When that directory is not one of `projects`, the
+ * copy is filed under `into` instead, with only its header's cwd changed (pi asks for a directory then too);
+ * the original file is never touched.
+ */
+export async function importSession(file: unknown, into: unknown, projects: unknown): Promise<ImportedSession> {
+    if (typeof file !== 'string' || !path.isAbsolute(file) || typeof into !== 'string' || !path.isAbsolute(into))
+        throw new Error(tr('需要会话文件和项目的绝对路径', 'Expected a session file and a project folder, as absolute paths'))
+    const known = Array.isArray(projects) ? projects.filter((p): p is string => typeof p === 'string') : []
+    const text = await readFile(file, 'utf8').catch((error: any) => {
+        throw new Error(error?.code === 'ENOENT' ? tr(`找不到文件：${file}`, `File not found: ${file}`) : error.message)
+    })
+    const newline = text.indexOf('\n')
+    let header: any
+    try {
+        header = JSON.parse(newline < 0 ? text : text.slice(0, newline))
+    }
+    catch {}
+    if (header?.type !== 'session' || typeof header.id !== 'string' || typeof header.cwd !== 'string')
+        throw new Error(tr('不是 pi 的会话文件（第一行应是会话头）', 'Not a pi session file (the first line should be the session header)'))
+
+    const root = path.resolve(await sessionsDir())
+    const inside = path.resolve(file).startsWith(root + path.sep)
+    const own = known.includes(header.cwd)
+    const cwd = own ? header.cwd : into
+    let target = path.resolve(file)
+    if (!inside) {
+        const dir = await sessionDirFor(cwd)
+        await mkdir(dir, { recursive: true })
+        const { name, ext } = path.parse(path.basename(file))
+        target = path.join(dir, `${name}${ext}`)
+        for (let n = 1; existsSync(target); n++)
+            target = path.join(dir, `${name}-${n}${ext}`)
+        if (own)
+            await copyFile(file, target, constants.COPYFILE_EXCL)
+        else
+            await writeFile(target, newline < 0 ? JSON.stringify({ ...header, cwd }) : `${JSON.stringify({ ...header, cwd })}${text.slice(newline)}`, { flag: 'wx' })
+    }
+    const info = await stat(target)
+    const summary = summarizeSession(await readExcerpt(target, info.size), target, info.mtimeMs)
+    if (!summary)
+        throw new Error(tr('导入后读不出会话', 'The imported session could not be read'))
+    return { summary, movedTo: own || inside ? undefined : cwd }
 }

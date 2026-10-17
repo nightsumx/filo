@@ -56,6 +56,7 @@ const bridge: PiBridge = {
     closeProject: cwd => ipcRenderer.invoke(IPC.closeProject, cwd),
     mergeAllWindows: () => ipcRenderer.invoke(IPC.mergeAllWindows),
     focusWindow: () => ipcRenderer.invoke(IPC.focusWindow),
+    importSession: (into, projects, file) => ipcRenderer.invoke(IPC.importSession, into, projects, file),
     revealSession: (cwd, session, entryId) => ipcRenderer.invoke(IPC.revealSession, cwd, session, entryId),
     onRevealSession: listener => listen(IPC.revealSession, listener),
     onExportProjects: handler => answer(IPC.exportProjects, handler),
