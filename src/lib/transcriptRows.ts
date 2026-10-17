@@ -15,10 +15,22 @@ export type TranscriptRow =
     /** Streaming steps + the "✶ Churning…" line under the last running turn. */
     | { kind: 'live', key: string, turn: Turn, first: boolean }
     /** "✻ Worked for 3m 12s · done 4:12 PM" closing a finished turn. */
-    | { kind: 'footer', key: string, turn: Turn, first: boolean, finalText: string }
+    | { kind: 'footer', key: string, turn: Turn, first: boolean, finalText: string, finalEntryId?: string }
 
 function isPinned(step: Step): boolean {
     return step.kind === 'tool' && step.call.name === 'propose_plan' && step.result?.details?.status === 'approved'
+}
+
+/**
+ * The session entry of the turn's closing answer, to go back to: the last text, when no tool call follows
+ * it (a turn that ends on a tool call has no answer to stand on). A text step's key is `<entryId>:<block>`.
+ */
+function finalAnswerEntry(steps: Step[]): string | undefined {
+    const at = steps.findLastIndex(s => s.kind === 'text')
+    if (at === -1 || steps.slice(at).some(s => s.kind === 'tool'))
+        return undefined
+    const key = steps[at].key
+    return key.slice(0, key.lastIndexOf(':'))
 }
 
 /** `open` holds the keys of finished turns the user unfolded. */
@@ -59,7 +71,7 @@ export function transcriptRows(turns: Turn[], open: ReadonlySet<string> = new Se
         if (!turn.running && hasWork) {
             const texts = turn.steps.filter(s => s.kind === 'text')
             const finalText = texts.length ? (texts[texts.length - 1] as { text: string }).text : ''
-            rows.push({ kind: 'footer', key: `${turn.key}:footer`, turn, first: first(), finalText })
+            rows.push({ kind: 'footer', key: `${turn.key}:footer`, turn, first: first(), finalText, finalEntryId: finalAnswerEntry(turn.steps) })
         }
         // Compacting outside a turn (Grok's, from /compact or the context figure): the working line still shows.
         if (isLast && compacting && !turn.running)

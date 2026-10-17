@@ -1028,6 +1028,27 @@ class AppStore implements ThreadHost {
         }
     }
 
+    /** pi's /clone: a new tab with a copy of the thread's current branch, in a session file of its own. */
+    async cloneThread(thread: Thread) {
+        if (!thread.sessionPath)
+            return
+        const copy = new Thread(this, { key: `new:${uid()}`, cwd: thread.cwd, sessionPath: thread.sessionPath, name: thread.name, firstPrompt: thread.firstPrompt })
+        // Shows the transcript it copies until pi has made the clone.
+        copy.items = thread.items.slice()
+        copy.loaded = true
+        this.threads.set(copy.key, copy)
+        this.insertTab(copy)
+        this.focus(copy.key)
+        if (await copy.clone()) {
+            this.focus(copy.key, true)
+            this.persist()
+            void this.refreshSessions()
+        }
+        else {
+            await this.closeTab(copy.key)
+        }
+    }
+
     async closeTab(key: string) {
         const tab = this.tabByKey(key)
         if (!tab)

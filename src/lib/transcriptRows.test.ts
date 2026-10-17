@@ -24,6 +24,12 @@ describe('transcriptRows', () => {
         expect(rows.at(-1)).toMatchObject({ kind: 'footer', finalText: 'done' })
     })
 
+    it('names the session entry of the closing answer, unless the turn ends on a tool call', () => {
+        const footer = (steps: Step[]) => transcriptRows([turn('u1', steps)]).find(r => r.kind === 'footer')
+        expect(footer([tool('e1:0', 'read'), text('e2:0', 'done')])).toMatchObject({ finalEntryId: 'e2' })
+        expect(footer([text('e1:0', 'let me look'), tool('e1:1', 'read')])).toMatchObject({ finalEntryId: undefined })
+    })
+
     it('gives every step its own row once a turn is unfolded', () => {
         const rows = transcriptRows([turn('a', [tool('a:0', 'read'), tool('a:1', 'bash'), tool('a:2', 'edit'), text('a:3', 'done')])], new Set(['a']))
         expect(rows.map(r => r.kind)).toEqual(['user', 'fold', 'item', 'item', 'item', 'footer'])

@@ -5,7 +5,7 @@ import type { Thread } from '@/store/thread'
 import type { SessionSummary } from '@shared/ipc'
 import { confirm } from '@/lib/confirm'
 import { appStore, isFileTab } from '@/store/app'
-import { AppWindow, Archive, ArrowRightToLine, EyeOff, FileDown, FolderOpen, GitFork, Info, Pencil, RefreshCw, Trash2, X, XCircle } from 'lucide-react'
+import { AppWindow, Archive, ArrowRightToLine, Copy, EyeOff, FileDown, FolderOpen, GitFork, Info, Pencil, RefreshCw, Trash2, X, XCircle } from 'lucide-react'
 import { AgentIcon } from '@/components/AgentIcon'
 import { agentsStore } from '@/store/agents'
 import { useEffect } from 'react'
@@ -121,6 +121,12 @@ export const ThreadActions = observer(({ thread, parts: { Item, Separator } }: {
                         <Item disabled={thread.running} onSelect={() => void forkSession(thread)}>
                             <GitFork size={14} />
                             {tr('分叉线程', 'Fork thread')}
+                        </Item>
+                    )}
+                    {thread.agent === 'pi' && thread.sessionPath && (
+                        <Item disabled={thread.running} onSelect={() => void appStore.cloneThread(thread)}>
+                            <Copy size={14} />
+                            {tr('克隆线程', 'Clone thread')}
                         </Item>
                     )}
                     {heirs.map(agent => (

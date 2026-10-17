@@ -4,8 +4,10 @@
 // through ctx.ui, which the app shows in the thread. Commands that are the app's own (/new opens a
 // tab, /settings, /copy) stay in the app.
 //
-// Also the app's "ask again from here" (/gui-rewind): /tree to before a prompt, without asking; and its
-// "reload extensions and skills" (/gui-reload), which only an extension command's ctx can do.
+// Also the app's "ask again from here" (/gui-rewind): /tree to before a prompt, without asking; "back to
+// this answer" (/gui-rewind-to): /tree to an assistant answer, optionally summarising the branch left;
+// "clone thread" (/gui-clone): /clone; and its "reload extensions and skills" (/gui-reload). Those need
+// an extension command's ctx.
 //
 // Not a capability: the app loads it whatever capabilities are on; pi-cc-tui does not load it.
 import type { ExtensionAPI, ExtensionCommandContext } from '@earendil-works/pi-coding-agent'
@@ -50,6 +52,15 @@ export default function builtins(pi: ExtensionAPI) {
         return !cancelled
     }
 
+    const cloneHere = async (ctx: ExtensionCommandContext) => {
+        if (busy(ctx))
+            return
+        const leaf = ctx.sessionManager.getLeafId()
+        if (!leaf)
+            return ctx.ui.notify('还没有可以复制的内容', 'info')
+        await ctx.fork(leaf, { position: 'at' })
+    }
+
     pi.registerCommand('gui-rewind', {
         description: 'Internal: go back to before a prompt',
         handler: async (args, ctx) => {
@@ -58,6 +69,30 @@ export default function builtins(pi: ExtensionAPI) {
                 return ctx.ui.notify('找不到这条提问', 'error')
             await navigate(ctx, entry.id, { summarize: false })
         },
+    })
+
+    // /tree onto an assistant answer: the leaf becomes it, so the answers after it are another branch (still in the file).
+    pi.registerCommand('gui-rewind-to', {
+        description: 'Internal: go back to just after an answer, optionally summarising the branch left',
+        handler: async (args, ctx) => {
+            if (busy(ctx))
+                return
+            const [id, flag] = args.trim().split(/\s+/)
+            const entry = ctx.sessionManager.getEntry(id ?? '')
+            if (entry?.type !== 'message' || entry.message.role !== 'assistant')
+                return ctx.ui.notify('找不到这条回答', 'error')
+            try {
+                await navigate(ctx, entry.id, { summarize: flag === 'summarize' })
+            }
+            catch (error) {
+                ctx.ui.notify(`回到这条回答失败：${error instanceof Error ? error.message : String(error)}`, 'error')
+            }
+        },
+    })
+
+    pi.registerCommand('gui-clone', {
+        description: 'Internal: copy the current branch into a new session',
+        handler: async (_args, ctx) => cloneHere(ctx),
     })
 
     pi.registerCommand('compact', {
@@ -151,14 +186,7 @@ export default function builtins(pi: ExtensionAPI) {
 
     pi.registerCommand('clone', {
         description: '在当前位置复制出一个新会话',
-        handler: async (_args, ctx) => {
-            if (busy(ctx))
-                return
-            const leaf = ctx.sessionManager.getLeafId()
-            if (!leaf)
-                return ctx.ui.notify('还没有可以复制的内容', 'info')
-            await ctx.fork(leaf, { position: 'at' })
-        },
+        handler: async (_args, ctx) => cloneHere(ctx),
     })
 
     pi.registerCommand('reload', {

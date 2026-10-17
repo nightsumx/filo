@@ -1306,6 +1306,80 @@ export class Thread {
     }
 
     /**
+     * Back to this answer (pi's /tree onto an assistant entry): what followed it stays in the file as
+     * another branch, and `summarize` has pi write a summary of that branch where it was left. The tab,
+     * its key and its session do not change.
+     */
+    async rewindTo(entryId: string, summarize: boolean): Promise<boolean> {
+        if (this.running) {
+            toast.error(tr('运行中不能回到之前的回答，先停止或等它结束', 'Cannot go back to an earlier answer while running; stop it or wait for it to finish'))
+            return false
+        }
+        const at = this.items.findIndex(i => i.key === entryId)
+        if (at === -1 || this.items[at].message.role !== 'assistant')
+            return false
+        const before = this.items
+        // Without a summary the result is known: show it right away. A summary takes a model call, and the branch stays until it is written.
+        if (!summarize) {
+            runInAction(() => {
+                this.items = before.slice(0, at + 1)
+                this.live = []
+            })
+        }
+        const working = summarize ? toast.loading(tr('正在总结离开的这一支…', 'Summarising the branch being left…')) : undefined
+        try {
+            await this.guiCommand('gui-rewind-to', summarize ? `${entryId} summarize` : entryId)
+            await this.load()
+            // The answer is where the branch now ends, or the summary pi wrote right after it.
+            const now = this.items.findIndex(i => i.key === entryId)
+            const rest = now === -1 ? [] : this.items.slice(now + 1)
+            if (now === -1 || rest.some(i => i.message.role !== 'branchSummary'))
+                throw new Error(tr('pi 没有回到这条回答', 'pi did not go back to this answer'))
+            await this.refreshStats()
+            return true
+        }
+        catch (error: any) {
+            toast.error(`${tr('回到这条回答失败：', 'Going back to this answer failed: ')}${error.message}`)
+            await this.load().catch(() => runInAction(() => (this.items = before)))
+            return false
+        }
+        finally {
+            if (working !== undefined)
+                toast.dismiss(working)
+        }
+    }
+
+    /**
+     * pi's /clone: this process moves to a new session file holding the current branch (the key and
+     * session path follow in syncState). The old session stays as it was.
+     */
+    async clone(): Promise<boolean> {
+        if (this.running) {
+            toast.error(tr('运行中不能克隆，先停止或等它结束', 'Cannot clone while running; stop it or wait for it to finish'))
+            return false
+        }
+        const from = this.sessionPath
+        try {
+            await this.guiCommand('gui-clone', '')
+            // The copy already holds the whole branch: keep showing it while the process reports its new file.
+            await this.syncState({ keepItems: true })
+            if (!this.sessionPath || this.sessionPath === from)
+                throw new Error(tr('pi 没有切到新的会话', 'pi did not move to a new session'))
+            await this.load()
+            runInAction(() => {
+                if (this.items.length)
+                    this.persisted = true
+            })
+            await this.refreshStats()
+            return true
+        }
+        catch (error: any) {
+            toast.error(`${tr('克隆失败：', 'Clone failed: ')}${error.message}`)
+            return false
+        }
+    }
+
+    /**
      * pi's fork: this process moves to a new session holding the branch before `entryId` (a user
      * prompt), and the prompt comes back into the composer to edit. The old session stays as it was.
      */

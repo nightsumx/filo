@@ -3,7 +3,9 @@
 //     skills (/reload; disabled while the thread runs, and a prompt template added meanwhile shows up)
 //   - Settings → Shortcuts (/hotkeys): the list, and the keys it lists work
 //   - Settings → Project trust (/trust): toggling writes pi's trust.json, and a parent folder's decision shows
-// Screenshots go to SHOTS (default ~/Documents/filo-command-shots) as 30-gui-<entry>.png.
+//   - the tab menu's Clone thread (/clone), and Rewind to here on an answer (/tree onto an assistant entry,
+//     with the summary of the branch left as an option)
+// Screenshots go to SHOTS (default ~/Documents/filo-command-shots) as 30-gui-<entry>.png (31-gui-… for the last two).
 //
 //   bun run build && bun run e2e:gui-entries
 import { existsSync } from 'node:fs'
@@ -231,6 +233,134 @@ async function main() {
         await until('the project\'s own decision', async () => (await trustOf())[repo] === false)
         check((await trustOf())[WORK] === true, 'its own decision is written next to the parent\'s, which stays')
         await js(`(() => { window.__app.setSettingsOpen(false); return true })()`)
+
+        // ---------------------------------------------------------------- Clone thread, Rewind to here
+        const shot31 = async (name: string) => {
+            await sleep(500)
+            await page.screenshot(path.join(SHOTS, `31-gui-${name}.png`))
+            console.log(`   shot 31-gui-${name}.png`)
+        }
+        const thread = (k: string) => `window.__app.threads.get(${JSON.stringify(k)})`
+        // role:text of every message on the branch the thread shows.
+        const transcript = (k: string) => js<string[]>(`${thread(k)}.items.map(i => i.message.role + ':' + (typeof i.message.content === 'string' ? i.message.content : Array.isArray(i.message.content) ? i.message.content.filter(p => p.type === 'text').map(p => p.text).join('') : (i.message.summary ?? '')))`)
+        const idle = (k: string) => until('the thread to be idle', () => js<boolean>(`(() => { const t = ${thread(k)}; return !!t && !t.running && t.persisted && t.key === t.sessionPath })()`), 30_000)
+        const tabCount = () => js<number>(`window.__app.tabItemsOf(${JSON.stringify(repo)}).length`)
+        const sessionEntries = async (file: string) => (await readFile(file, 'utf8')).split('\n').filter(Boolean).map(line => JSON.parse(line) as any)
+        const entryText = (e: any) => e.type === 'message' ? (typeof e.message.content === 'string' ? e.message.content : e.message.content.filter((p: any) => p.type === 'text').map((p: any) => p.text).join('')) : ''
+
+        await js(`(() => { window.__app.newThread(${JSON.stringify(repo)}); return true })()`)
+        for (const word of ['alpha', 'beta', 'gamma']) {
+            await send(word)
+            await until(`the answer to ${word}`, () => js<boolean>(`(() => { const t = ${T}; return !t.running && JSON.stringify(t.items).includes('echo: ${word}') })()`), 30_000)
+        }
+        const orig = await js<string>(`${T}.key`)
+        await idle(orig)
+        const origFile = await js<string>(`${T}.sessionPath`)
+        check(origFile.endsWith('.jsonl') && (await transcript(orig)).length === 6, 'a thread with three turns to work on')
+
+        // ---- Clone thread
+        await send('slow')
+        await until('the thread to run', () => js<boolean>(`${T}.running`))
+        await openMenu()
+        check(await itemDisabled('Clone thread'), 'Clone thread is disabled while the thread runs')
+        await closeMenu()
+        await js(`${T}.abort()`)
+        await until('the run to stop', () => js<boolean>(`!${T}.running`), 30_000)
+        await idle(orig)
+        const origBefore = await transcript(orig)
+        const origEntries = (await sessionEntries(origFile)).length
+        const tabs = await tabCount()
+        await openMenu()
+        check(!(await itemDisabled('Clone thread')), 'and enabled once it stops')
+        await choose('Clone thread')
+        const clone = await until('the clone to open in a new tab', () => js<string | null>(`(() => { const t = ${T}; return t.key !== ${JSON.stringify(orig)} && t.key.endsWith('.jsonl') && t.persisted && !t.running ? t.key : null })()`))
+        check(await tabCount() === tabs + 1, 'cloning opens a new tab')
+        const cloneBefore = await transcript(clone)
+        check(clone !== orig && JSON.stringify(cloneBefore) === JSON.stringify(origBefore) && cloneBefore.length > 6, `the clone holds the same messages as the thread's branch (${cloneBefore.length} of them, same text)`)
+        check(await js<string>(`${thread(clone)}.sessionPath`) === clone && existsSync(clone), 'in a session file of its own')
+        check(JSON.stringify(await transcript(orig)) === JSON.stringify(origBefore) && (await sessionEntries(origFile)).length === origEntries, 'the original thread and its file are untouched')
+        await shot31('clone')
+        // Each carries on by itself.
+        await send('only in the clone')
+        await until('the clone to answer', () => js<boolean>(`JSON.stringify(${thread(clone)}.items).includes('echo: only in the clone')`), 30_000)
+        await idle(clone)
+        check(JSON.stringify(await transcript(orig)) === JSON.stringify(origBefore), 'what the clone says does not reach the original')
+
+        // ---- Rewind to here
+        await js(`(() => { window.__app.focus(${JSON.stringify(orig)}, true); return true })()`)
+        await until('the original thread in view', () => js<boolean>(`document.body.innerText.includes('echo: gamma')`))
+        const rewindButtons = () => js<number>(`document.querySelectorAll('[role="button"][aria-label="Rewind to here"]').length`)
+        const turnsShown = await js<number>(`${thread(orig)}.turns.filter(t => t.user).length`)
+        check(await rewindButtons() === turnsShown - 1, `every answer but the last has Rewind to here (${turnsShown - 1} of ${turnsShown})`)
+        const clickRewind = (n: number) => js<boolean>(`(() => { const b = document.querySelectorAll('[role="button"][aria-label="Rewind to here"]')[${n}]; b?.click(); return !!b })()`)
+        const dialogText = () => js<string>(`document.querySelector('[role="dialog"]')?.textContent ?? ''`)
+        const toggleBox = (set?: boolean) => js<boolean>(`(() => { const box = document.querySelector('[role="dialog"] input[type="checkbox"]'); if (${set === undefined ? 'false' : 'true'} && box.checked !== ${!!set}) box.click(); return box.checked })()`)
+        const confirmRewind = () => js<boolean>(`(() => { const b = [...document.querySelectorAll('[role="dialog"] button')].find(e => e.textContent === 'Rewind'); b?.click(); return !!b })()`)
+
+        // Cancelling changes nothing.
+        check(await clickRewind(0), 'the first answer has the button')
+        await until('the confirm dialog', async () => (await dialogText()).includes('Rewind to this answer'))
+        check(await toggleBox() === false, 'the summary switch is off by default')
+        await shot31('rewind-confirm')
+        await press('Escape', 'Escape', 0, 27)
+        await until('the dialog to close', () => js<boolean>(`!document.querySelector('[role="dialog"]')`))
+        check(JSON.stringify(await transcript(orig)) === JSON.stringify(origBefore), 'cancelling leaves the thread as it was')
+
+        // Without a summary.
+        await clickRewind(0)
+        await until('the confirm dialog', async () => (await dialogText()).includes('Rewind to this answer'))
+        await confirmRewind()
+        await until('the thread to go back', async () => (await transcript(orig)).length === 2)
+        const back = await transcript(orig)
+        check(back[0] === 'user:alpha' && back[1] === 'assistant:echo: alpha', 'rewinding to the first answer keeps the prompt and that answer')
+        await until('the view to drop the rest', () => js<boolean>(`document.body.innerText.includes('echo: alpha') && !document.body.innerText.includes('echo: beta') && !document.body.innerText.includes('echo: gamma')`))
+        check(true, 'and the view no longer shows what came after')
+        check(await js<boolean>(`!${thread(orig)}.running`), 'nothing runs: it only moved the position')
+        await shot31('rewind')
+        await send('epsilon')
+        await until('the answer after rewinding', () => js<boolean>(`(() => { const t = ${thread(orig)}; return !t.running && JSON.stringify(t.items).includes('echo: epsilon') })()`), 30_000)
+        await idle(orig)
+        check(JSON.stringify(await transcript(orig)) === JSON.stringify(['user:alpha', 'assistant:echo: alpha', 'user:epsilon', 'assistant:echo: epsilon']), 'a new question is answered and continues from that answer')
+        const entries = await sessionEntries(origFile)
+        const texts = entries.map(entryText)
+        check(['beta', 'echo: beta', 'gamma', 'echo: gamma'].every(t => texts.includes(t)), 'the old branch is still in the session file')
+        const byId = new Map(entries.filter(e => e.id).map(e => [e.id, e]))
+        const epsilon = entries.find(e => entryText(e) === 'epsilon')
+        const ancestors: string[] = []
+        for (let e = epsilon; e; e = byId.get(e.parentId))
+            ancestors.push(entryText(e))
+        check(ancestors.includes('echo: alpha') && !ancestors.includes('beta') && !ancestors.includes('echo: gamma'), 'the new prompt hangs off the first answer, so the old turns are another branch (what /tree shows)')
+        check(!entries.some(e => e.type === 'branch_summary'), 'no summary was written')
+        const ondisk = await js<string[]>(`window.pi.readSession(${JSON.stringify(origFile)}).then(s => s.items.filter(i => i.message.role === 'user').map(i => i.message.content[0]?.text ?? i.message.content))`)
+        check(JSON.stringify(ondisk) === JSON.stringify(['alpha', 'epsilon']), 'a restarted pi would resume on the new branch')
+
+        // With a summary of the branch left.
+        const answers = await js<number>(`${thread(orig)}.items.filter(i => i.message.role === 'assistant').length`)
+        check(await rewindButtons() === 1 && answers === 2, 'the first answer still has the button')
+        await clickRewind(0)
+        await until('the confirm dialog', async () => (await dialogText()).includes('Rewind to this answer'))
+        check(await toggleBox(true) === true, 'the summary switch can be turned on')
+        await shot31('rewind-summary-confirm')
+        await confirmRewind()
+        await until('the summary to be written', async () => (await sessionEntries(origFile)).some(e => e.type === 'branch_summary'), 60_000)
+        await until('the thread to show the summary', () => js<boolean>(`${thread(orig)}.items.at(-1)?.message.role === 'branchSummary'`))
+        const afterSummary = await transcript(orig)
+        check(afterSummary[0] === 'user:alpha' && afterSummary[1] === 'assistant:echo: alpha' && afterSummary.length === 3, 'the thread is back at the first answer, then the summary')
+        const summaries = (await sessionEntries(origFile)).filter(e => e.type === 'branch_summary')
+        const firstAnswer = entries.find(e => entryText(e) === 'echo: alpha')
+        check(summaries.length === 1 && summaries[0].parentId === firstAnswer.id && summaries[0].summary.includes('epsilon'), 'the file has one branch_summary under that answer, about the branch left (the epsilon turn)')
+        await shot31('rewind-summary')
+        await send('zeta')
+        await until('the answer after the summary', () => js<boolean>(`(() => { const t = ${thread(orig)}; return !t.running && JSON.stringify(t.items).includes('echo: zeta') })()`), 30_000)
+        check(true, 'and the thread carries on from there')
+        await idle(orig)
+
+        // No button while it runs.
+        await send('slow')
+        await until('the thread to run', () => js<boolean>(`${thread(orig)}.running`))
+        check(await rewindButtons() === 0, 'Rewind to here is not offered while the thread runs')
+        await js(`${thread(orig)}.abort()`)
+        await until('the run to stop', () => js<boolean>(`!${thread(orig)}.running`), 30_000)
 
         console.log(`all GUI entry checks passed; screenshots in ${SHOTS}`)
     }

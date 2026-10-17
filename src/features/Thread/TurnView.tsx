@@ -12,7 +12,8 @@ import { cn, formatCost, formatCount } from '@/lib/utils'
 import { tr } from '@/lib/i18n'
 import copyText from 'copy-to-clipboard'
 import { appStore } from '@/store/app'
-import { Check, ChevronRight, Copy, GitFork, PencilLine, Plane } from 'lucide-react'
+import { confirmWithToggle } from '@/lib/confirm'
+import { Check, ChevronRight, Copy, GitFork, PencilLine, Plane, Undo2 } from 'lucide-react'
 import { observer } from 'mobx-react-lite'
 import { turnStats } from '@/lib/turnSummary'
 import { createContext, Fragment, memo, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
@@ -42,6 +43,24 @@ function CopyAction({ text }: { text: string }) {
 
 /** Saved prompts (keyed by their session entry id) can be forked; live and pending ones not yet. */
 const forkable = (entryId: string | undefined) => !!entryId && !entryId.startsWith('live-') && entryId !== 'pending'
+
+/** pi's /tree onto this answer: what follows leaves the thread (it stays in the session file as another branch), optionally summarised. */
+const RewindAction = observer(({ thread, entryId }: { thread: Thread, entryId: string }) => {
+    // The last answer is where the thread already ends.
+    if (thread.agent !== 'pi' || thread.running || !thread.sessionPath || !forkable(entryId) || thread.items.at(-1)?.key === entryId)
+        return null
+    const rewind = async () => {
+        const { confirmed, checked } = await confirmWithToggle({
+            title: tr('回到这条回答', 'Rewind to this answer'),
+            description: tr('这条回答之后的内容会从线程里移走，仍保留在会话文件里（终端里用 /tree 能看到），可以从这里继续提问。', 'What comes after this answer leaves the thread. It stays in the session file (pi\'s /tree in a terminal shows it), and you can carry on from here.'),
+            confirmText: tr('回到这里', 'Rewind'),
+            toggle: { label: tr('总结离开的这一支', 'Summarise the branch being left'), checked: false },
+        })
+        if (confirmed)
+            void thread.rewindTo(entryId, checked)
+    }
+    return <ActionBtn icon={Undo2} size="small" title={tr('回到这里', 'Rewind to here')} onClick={() => void rewind()} />
+})
 
 /** Review feedback the user sent back: the picked items and the note, no fork or edit. */
 const ReviewFeedbackBubble = observer(function ReviewFeedbackBubble({ user, review }: { user: UserPrompt, review: NonNullable<UserPrompt['review']> }) {
@@ -473,9 +492,10 @@ export const TranscriptRowView = memo(({ row, thread, subagent, top }: { row: Tr
                                 </Tooltip>
                             </TooltipProvider>
                             <ReviewControl thread={thread} turnKey={turn.key} finalText={row.finalText} />
-                            {row.finalText && (
-                                <span className="flex h-6 items-center opacity-0 transition-opacity group-hover/turn:opacity-100">
-                                    <CopyAction text={row.finalText} />
+                            {(row.finalText || row.finalEntryId) && (
+                                <span className="flex h-6 items-center gap-0.5 opacity-0 transition-opacity group-hover/turn:opacity-100 focus-within:opacity-100">
+                                    {!subagent && row.finalEntryId && <RewindAction thread={thread} entryId={row.finalEntryId} />}
+                                    {row.finalText && <CopyAction text={row.finalText} />}
                                 </span>
                             )}
                         </div>

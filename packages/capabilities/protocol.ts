@@ -31,6 +31,10 @@ export interface GuiCommands {
     reviewCancel: 'gui-review-cancel'
     /** `/gui-rewind <entryId>`: back to before that user prompt, in the same session (extensions/builtins.ts, always loaded). */
     rewind: 'gui-rewind'
+    /** `/gui-rewind-to <entryId> [summarize]`: back to just after that assistant answer (the leaf becomes it); what followed stays in the file as another branch. `summarize` has pi write a branch_summary of the abandoned one. */
+    rewindTo: 'gui-rewind-to'
+    /** `/gui-clone`: this process moves to a new session file holding the current branch (like `/clone`; extensions/builtins.ts). */
+    clone: 'gui-clone'
     /** `/gui-reload`: reloads extensions, skills, prompt templates and context files (extensions/builtins.ts); refused while a run is going. */
     reload: 'gui-reload'
     /** `/gui-autopilot on|off`: the supervisor answers for the user in this thread. */
