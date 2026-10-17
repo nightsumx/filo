@@ -71,6 +71,12 @@ async function main() {
         check(after.distance > 40 && m.running, `small wheel ticks up let go of the bottom (${Math.round(after.distance)}px up)`)
         check(Math.abs(m.top - after.top) < 2 && m.height > after.height, `new output doesn't pull the view back down (top ${Math.round(after.top)} → ${Math.round(m.top)})`)
 
+        // Scrolling back down to just short of the bottom does not snap to it.
+        await page.evaluate(`(() => { const s = ${S}; s.scrollTop = s.scrollHeight - s.clientHeight - 40; return true })()`)
+        await sleep(STREAM_MS * 15)
+        const near = await metrics()
+        check(near.distance > 30, `scrolling down to near the bottom doesn't force it (${Math.round(near.distance)}px off)`)
+
         // Back down to the bottom: following resumes.
         await page.evaluate(`(() => { const s = ${S}; s.scrollTop = s.scrollHeight; return true })()`)
         await sleep(STREAM_MS * 15)

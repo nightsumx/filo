@@ -19,6 +19,8 @@ import { UnpinContext, ViewStateContext } from './viewState'
 import { tr } from '@/lib/i18n'
 
 const STICK_THRESHOLD = 80
+/** How close to the very bottom counts as "at the bottom" for re-pinning: scrolling down must actually arrive, not just come near. */
+const PIN_DISTANCE = 4
 const PAD_TOP = 4
 const PAD_BOTTOM = 24
 const NO_TURNS: ReadonlySet<string> = new Set()
@@ -161,7 +163,7 @@ export const MessageList = observer(({ thread, subagent }: { thread: Thread, sub
             return
         // Letting go is decided by the user's input, not by how far from the bottom the view is:
         // a wheel tick moves a few dozen px, still "near the bottom", and the next streamed token
-        // would pull it straight back. Only coming back near the bottom pins again.
+        // would pull it straight back. Only scrolling down to the very bottom pins again.
         let lastTop = el.scrollTop
         let dragging = false
         const onScroll = () => {
@@ -171,7 +173,7 @@ export const MessageList = observer(({ thread, subagent }: { thread: Thread, sub
             if (top < lastTop - 1 && distance > 1)
                 follow(false)
             else if (!dragging)
-                follow(distance < STICK_THRESHOLD)
+                follow(distance < PIN_DISTANCE)
             lastTop = top
             setShowJump(distance >= STICK_THRESHOLD * 2)
         }
@@ -200,7 +202,7 @@ export const MessageList = observer(({ thread, subagent }: { thread: Thread, sub
             follow(false)
             window.addEventListener('pointerup', () => {
                 dragging = false
-                follow(el.scrollHeight - el.scrollTop - el.clientHeight < STICK_THRESHOLD)
+                follow(el.scrollHeight - el.scrollTop - el.clientHeight < PIN_DISTANCE)
             }, { once: true })
         }
         // The list's height is the virtualizer's total size: it grows as rows are measured or output
