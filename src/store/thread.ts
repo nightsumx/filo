@@ -1632,6 +1632,9 @@ export class Thread {
                 break
             case 'compaction_start':
                 this.compacting = true
+                // Outside a turn nothing else started the clock the working line reads.
+                if (!this.running)
+                    this.runStartedAt = Date.now()
                 break
             case 'compaction_end':
                 this.compacting = false

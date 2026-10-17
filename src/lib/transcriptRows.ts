@@ -22,7 +22,7 @@ function isPinned(step: Step): boolean {
 }
 
 /** `open` holds the keys of finished turns the user unfolded. */
-export function transcriptRows(turns: Turn[], open: ReadonlySet<string> = new Set()): TranscriptRow[] {
+export function transcriptRows(turns: Turn[], open: ReadonlySet<string> = new Set(), compacting = false): TranscriptRow[] {
     const rows: TranscriptRow[] = []
     turns.forEach((turn, i) => {
         const start = rows.length
@@ -61,6 +61,9 @@ export function transcriptRows(turns: Turn[], open: ReadonlySet<string> = new Se
             const finalText = texts.length ? (texts[texts.length - 1] as { text: string }).text : ''
             rows.push({ kind: 'footer', key: `${turn.key}:footer`, turn, first: first(), finalText })
         }
+        // Compacting outside a turn (Grok's, from /compact or the context figure): the working line still shows.
+        if (isLast && compacting && !turn.running)
+            rows.push({ kind: 'live', key: `${turn.key}:live`, turn, first: first() })
     })
     return rows
 }

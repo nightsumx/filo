@@ -312,7 +312,9 @@ const handlers = {
         write({ jsonrpc: '2.0', method: '_x.ai/session/interjection', params: { sessionId: session.id, text: params.text, interjectionId: params.interjectionId } })
         return { result: { status: 'queued' } }
     },
-    '_x.ai/compact_conversation': (params) => {
+    '_x.ai/compact_conversation': async (params) => {
+        // Real Grok takes seconds to summarise.
+        await sleep(Number(process.env.FAKE_GROK_COMPACT_MS ?? 0))
         const session = sessions.get(params.sessionId)
         const before = session.tokens
         session.tokens = 2000

@@ -82,7 +82,8 @@ export const MessageList = observer(({ thread, subagent }: { thread: Thread, sub
     // Finished turns the user unfolded, per view.
     const [unfolded, setUnfolded] = useState(() => ({ view: viewKey, keys: new Set<string>() as ReadonlySet<string> }))
     const openTurns = unfolded.view === viewKey ? unfolded.keys : NO_TURNS
-    const rows = useMemo(() => transcriptRows(turns, openTurns), [turns, openTurns])
+    const compacting = !subagent && thread.compacting
+    const rows = useMemo(() => transcriptRows(turns, openTurns, compacting), [turns, openTurns, compacting])
     // Expanding grows the list; don't let bottom-pinning scroll the clicked row away. Scrolling back
     // to the bottom pins again (onScroll).
     const unpin = useCallback(() => follow(false), [follow])

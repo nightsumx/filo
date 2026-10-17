@@ -128,6 +128,7 @@ async function main() {
         FAKE_ACP_DIR: fakeDir,
         FAKE_GROK_DIR: fakeDir,
         FAKE_GROK_BASH_MS: '1500',
+        FAKE_GROK_COMPACT_MS: '2500',
     })
     try {
         const [{ page }] = await windows(1)
@@ -193,7 +194,13 @@ async function main() {
         await shot('03-grok-silent-command')
 
         await typeLine('/compact')
+        // It takes a while: the thread says so (a working line), not nothing.
+        const workingLine = () => js<boolean>(`[...document.querySelectorAll('span')].some(e => e.children.length === 0 && e.textContent === 'Compacting context…')`)
+        await until('the compacting line', workingLine, 5000)
+        check(true, 'while Grok compacts the thread shows a "Compacting context…" working line')
+        await shot('04a-grok-compacting')
         await until('compacted', async () => (await notes('Context compacted')) === 1, 15_000)
+        check(!(await workingLine()), 'and the line is gone once it is done')
         check(await js<number>(`${T}.stats.contextUsage.tokens`) < before + 100, 'typed /compact compacts, and the context figure shrinks without reopening the thread')
         check(!(await js<boolean>(`${T}.compacting`)) && (await js<string>(`${T}.draft`)) === '', 'the compacting state ends and the draft is cleared')
         await shot('04-grok-compact-typed')

@@ -70,4 +70,12 @@ describe('transcriptRows', () => {
         const keys = rows.map(r => r.kind === 'item' && r.item.kind === 'step' ? r.item.step.key : r.kind)
         expect(keys).toEqual(['user', 'a:0', 'fold', 'a:2', 'footer', 'user', 'b:0', 'b:1', 'footer', 'user', 'fold', 'c:1', 'footer'])
     })
+
+    it('shows the working line while the agent compacts outside a turn, after the finished turn\'s footer', () => {
+        const turns = [turn('a', [text('a:0', 'done')])]
+        expect(transcriptRows(turns).map(r => r.kind)).toEqual(['user', 'item', 'footer'])
+        expect(transcriptRows(turns, new Set(), true).map(r => r.kind)).toEqual(['user', 'item', 'footer', 'live'])
+        // A running turn has its line already: not two.
+        expect(transcriptRows([turn('a', [text('a:0', 'x')], { running: true })], new Set(), true).filter(r => r.kind === 'live')).toHaveLength(1)
+    })
 })
