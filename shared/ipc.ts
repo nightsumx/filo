@@ -396,6 +396,34 @@ export interface ClaudeMcpServer {
     target: string
 }
 
+/** An MCP server in Codex's config (Settings → Codex). */
+export interface CodexMcpServer {
+    name: string
+    transport: 'stdio' | 'http'
+    target: string
+    enabled: boolean
+    error?: string
+    tools: number
+}
+
+export interface CodexMcpAdd {
+    cwd: string
+    name: string
+    transport: 'stdio' | 'http'
+    /** The command line (stdio) or the URL. */
+    target: string
+    /** NAME=value, for stdio servers. */
+    env?: string[]
+}
+
+/** A beta feature Codex lists in its /experimental. */
+export interface CodexFeature {
+    name: string
+    title: string
+    description: string
+    enabled: boolean
+}
+
 /** Claude Code's memory (its /memory): the switch for auto memory, and the files it reads and writes. */
 export interface ClaudeMemory {
     enabled: boolean
@@ -587,6 +615,11 @@ export interface PiBridge {
     setProjectTrust: (cwd: string, decision: boolean | null) => Promise<ProjectTrust>
     /** The MCP servers Claude Code has for a project (its .claude.json and the project's .mcp.json). */
     claudeMcp: (cwd: string) => Promise<ClaudeMcpServer[]>
+    codexMcp: (cwd: string) => Promise<CodexMcpServer[]>
+    addCodexMcp: (input: CodexMcpAdd) => Promise<CodexMcpServer[]>
+    removeCodexMcp: (cwd: string, name: string) => Promise<CodexMcpServer[]>
+    codexFeatures: () => Promise<CodexFeature[]>
+    setCodexFeature: (name: string, enabled: boolean) => Promise<CodexFeature[]>
     claudeMemory: (cwd: string) => Promise<ClaudeMemory>
     /** autoMemoryEnabled in Claude Code's settings.json. */
     setClaudeAutoMemory: (enabled: boolean) => Promise<void>
@@ -775,6 +808,11 @@ export const IPC = {
     setProjectTrust: 'pi:set-project-trust',
     claudeMcp: 'claude:mcp',
     claudeMemory: 'claude:memory',
+    codexMcp: 'codex:mcp',
+    addCodexMcp: 'codex:mcp-add',
+    removeCodexMcp: 'codex:mcp-remove',
+    codexFeatures: 'codex:features',
+    setCodexFeature: 'codex:set-feature',
     setClaudeAutoMemory: 'claude:set-auto-memory',
     addClaudeMcp: 'claude:mcp-add',
     removeClaudeMcp: 'claude:mcp-remove',

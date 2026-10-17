@@ -1948,3 +1948,92 @@ export function deleteCodexThread(launch: CodexLaunch, threadId: string): Promis
         await rpc('thread/delete', { threadId })
     })
 }
+
+// ---------------------------------------------------------------- settings (/mcp, /experimental)
+
+export interface CodexMcpServer {
+    name: string
+    transport: 'stdio' | 'http'
+    /** The URL, or the command with its arguments. */
+    target: string
+    enabled: boolean
+    /** Why it did not start, once Codex has tried. */
+    error?: string
+    tools: number
+}
+
+export interface CodexFeature {
+    name: string
+    title: string
+    description: string
+    enabled: boolean
+}
+
+const isObject = (v: unknown): v is Record<string, any> => !!v && typeof v === 'object' && !Array.isArray(v)
+
+/** The MCP servers in Codex's config (user and project layers), and how each one started. */
+export function codexMcpServers(launch: CodexLaunch, cwd: string): Promise<CodexMcpServer[]> {
+    return withAppServer(launch, async (rpc) => {
+        const config = (await rpc('config/read', { includeLayers: false, cwd }))?.config
+        const table = isObject(config?.mcp_servers) ? config.mcp_servers : {}
+        const status = new Map<string, any>()
+        for (const item of (await rpc('mcpServerStatus/list', {}))?.data ?? []) {
+            if (typeof item?.name === 'string')
+                status.set(item.name, item)
+        }
+        return Object.entries(table as Record<string, any>).filter(([, spec]) => isObject(spec)).map(([name, spec]): CodexMcpServer => {
+            const url = typeof spec.url === 'string' ? spec.url : undefined
+            const args = Array.isArray(spec.args) ? spec.args.filter((a: unknown) => typeof a === 'string') : []
+            const seen = status.get(name)
+            const tools = isObject(seen?.tools) ? Object.keys(seen.tools).length : 0
+            return {
+                name,
+                transport: url ? 'http' : 'stdio',
+                target: url ?? [spec.command, ...args].filter(a => typeof a === 'string' && a).join(' '),
+                enabled: spec.enabled !== false,
+                error: typeof seen?.toolsError === 'string' && seen.toolsError ? seen.toolsError : undefined,
+                tools,
+            }
+        })
+    })
+}
+
+/** Writes (or, with null, removes) one `[mcp_servers.<name>]` table in the user's config.toml, then has Codex reload. */
+export function writeCodexMcp(launch: CodexLaunch, name: string, value: Record<string, unknown> | null): Promise<void> {
+    return withAppServer(launch, async (rpc) => {
+        await rpc('config/batchWrite', { edits: [{ keyPath: `mcp_servers.${name}`, value, mergeStrategy: 'replace' }] })
+        await rpc('config/mcpServer/reload', {})
+    })
+}
+
+/** The features Codex calls beta (what its /experimental lists), with their state. */
+export function codexFeatures(launch: CodexLaunch): Promise<CodexFeature[]> {
+    return withAppServer(launch, async (rpc) => {
+        const features: CodexFeature[] = []
+        let cursor: string | undefined
+        for (let page = 0; page < 10; page++) {
+            const result = await rpc('experimentalFeature/list', cursor ? { cursor } : {})
+            for (const f of result?.data ?? []) {
+                if (f?.stage !== 'beta' || typeof f.name !== 'string')
+                    continue
+                features.push({
+                    name: f.name,
+                    title: (typeof f.displayName === 'string' && f.displayName) || f.name,
+                    description: typeof f.description === 'string' ? f.description : '',
+                    enabled: f.enabled === true,
+                })
+            }
+            cursor = typeof result?.nextCursor === 'string' && result.nextCursor ? result.nextCursor : undefined
+            if (!cursor)
+                break
+        }
+        return features
+    })
+}
+
+/** `features.<name>` in the user's config.toml, as /experimental writes it. */
+export function setCodexFeature(launch: CodexLaunch, name: string, enabled: boolean): Promise<void> {
+    return withAppServer(launch, async (rpc) => {
+        await rpc('config/batchWrite', { edits: [{ keyPath: `features.${name}`, value: enabled, mergeStrategy: 'replace' }] })
+    })
+}

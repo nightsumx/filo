@@ -13,7 +13,7 @@
 import type { AddressInfo } from 'node:net'
 import { execFileSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
-import { mkdir, rm, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import http from 'node:http'
 import path from 'node:path'
 import process from 'node:process'
@@ -313,6 +313,44 @@ async function main() {
         await click('Allow')
         await until('the permission run ends', () => js<boolean>(`(() => { const t = ${T}; return !t.running && JSON.stringify(t.turns.at(-1).steps).includes('Palette fetched.') })()`), 20_000)
         check(JSON.stringify(requests.at(-1).input).includes('\\"enabled\\":true'), 'Allow granted it')
+
+        // Settings → Codex (/mcp, /experimental): the tables of its config.toml, written through its app-server.
+        {
+            const toml = () => readFile(path.join(home, 'config.toml'), 'utf8')
+            await js(`(() => { window.__app.openSettings('codex'); return true })()`)
+            await until('the Codex page', () => js<boolean>(`!!document.querySelector('[data-mcp="demo"]')`))
+            check(true, 'the page lists the MCP server of config.toml')
+            const type = async (label: string, text: string) => {
+                await js(`(() => { document.querySelector('[aria-label=${JSON.stringify(label)}]').focus(); return true })()`)
+                await page.call('Input.insertText', { text })
+            }
+            await type('Name', 'files')
+            await type('Command', 'node -e "1" "a b"')
+            await type('Environment variables', 'TOKEN=abc')
+            await click('Add')
+            await until('the server in config.toml', async () => (await toml()).includes('[mcp_servers.files]'))
+            const written = await toml()
+            check(written.includes('command = "node"') && written.includes('TOKEN = "abc"') && written.includes('[mcp_servers.demo]'), 'Add writes the table and keeps the rest of config.toml')
+            await until('the server listed', () => js<boolean>(`!!document.querySelector('[data-mcp="files"]')`))
+            check(true, 'and the page lists it')
+            const feature = await js<string>(`document.querySelector('[data-feature] [role="switch"]')?.closest('[data-feature]').dataset.feature`)
+            check(!!feature, `a beta feature is offered (${feature})`)
+            const featureOn = () => js<boolean>(`document.querySelector('[data-feature="${feature}"] [role="switch"]').getAttribute('aria-checked') === 'true'`)
+            const before = await featureOn()
+            await js(`(() => { document.querySelector('[data-feature="${feature}"] [role="switch"]').click(); return true })()`)
+            await until('the feature written', async () => new RegExp(`${feature} = ${before ? 'false' : 'true'}`).test(await toml()))
+            await until('the switch follows', async () => (await featureOn()) === !before)
+            check(true, 'its switch writes features.<name> in config.toml')
+            if (SHOTS)
+                await page.screenshot(path.join(SHOTS, 'codex-settings.png'))
+            await js(`(() => { document.querySelector('[data-mcp="files"] button').click(); return true })()`)
+            await until('the confirmation', () => js<boolean>(`[...document.querySelectorAll('[role="alertdialog"] button, [role="dialog"] button')].some(b => b.textContent.trim() === 'Remove' && !b.closest('[data-mcp]'))`))
+            await js(`(() => { [...document.querySelectorAll('[role="alertdialog"] button, [role="dialog"] button')].find(b => b.textContent.trim() === 'Remove' && !b.closest('[data-mcp]')).click(); return true })()`)
+            await until('the server gone', async () => !(await toml()).includes('[mcp_servers.files]'))
+            await until('the list follows', () => js<boolean>(`!document.querySelector('[data-mcp="files"]') && !!document.querySelector('[data-mcp="demo"]')`))
+            check((await toml()).includes('[mcp_servers.demo]'), 'Remove takes only that table out of config.toml')
+            await js(`(() => { window.__app.setSettingsOpen(false); return true })()`)
+        }
 
         // Fork the whole thread (tab menu).
         const copy = await js<string>(`${T}.forkSession()`)

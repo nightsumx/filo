@@ -9,11 +9,12 @@ import { systemLang, tr } from '@/lib/i18n'
 import { TRANSCRIPT_TEXT } from '@/lib/transcriptText'
 import { cn } from '@/lib/utils'
 import { appStore } from '@/store/app'
-import { Archive, Bot, Cpu, Keyboard, KeyRound, Palette, Puzzle, Route, ShieldCheck, Sparkles, Terminal } from 'lucide-react'
+import { Archive, Bot, Cpu, Keyboard, KeyRound, Palette, Puzzle, Route, ShieldCheck, Sparkles, SquareTerminal, Terminal } from 'lucide-react'
 import { observer } from 'mobx-react-lite'
 import { AgentsPage } from './Agents'
 import { CapabilitiesPage } from './Capabilities'
 import { ClaudeCodePage } from './ClaudeCode'
+import { CodexPage } from './Codex'
 import { CompactionPage } from './Compaction'
 import { PiPage } from './Pi'
 import { ProvidersPage } from './Providers'
@@ -122,6 +123,7 @@ const PAGES: { id: SettingsPageId, label: Localized, icon: LucideIcon, page: Rea
     { id: 'providers', label: { zh: '供应商', en: 'Providers' }, icon: KeyRound, page: ProvidersPage },
     { id: 'pi', label: { zh: 'Pi', en: 'Pi' }, icon: Cpu, page: PiPage },
     { id: 'claude', label: { zh: 'Claude Code', en: 'Claude Code' }, icon: Terminal, page: ClaudeCodePage },
+    { id: 'codex', label: { zh: 'Codex', en: 'Codex' }, icon: SquareTerminal, page: CodexPage },
     { id: 'routes', label: { zh: '路由', en: 'Routing' }, icon: Route, page: RoutesPage },
     { id: 'agents', label: { zh: 'Agent', en: 'Agents' }, icon: Bot, page: AgentsPage },
     { id: 'capabilities', label: { zh: '能力', en: 'Capabilities' }, icon: Puzzle, page: CapabilitiesPage },

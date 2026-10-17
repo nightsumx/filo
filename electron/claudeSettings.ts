@@ -161,3 +161,35 @@ export async function setClaudeAutoMemory(enabled: unknown, env: Env = process.e
     await writeFile(tmp, `${JSON.stringify({ ...settings, autoMemoryEnabled: enabled }, null, 2)}\n`)
     await rename(tmp, file)
 }
+
+// ---------------------------------------------------------------- Codex
+
+/** The `[mcp_servers.<name>]` table for a server added in Settings → Codex (checked first: it goes into config.toml). */
+export function codexMcpTable(input: { name: string, transport: string, target: string, env?: string[] }): Record<string, unknown> {
+    codexServerName(input.name)
+    if (input.transport === 'http') {
+        if (!/^https?:\/\//.test(input.target))
+            throw new Error(tr('地址要以 http:// 或 https:// 开头', 'The URL must start with http:// or https://'))
+        return { url: input.target }
+    }
+    if (input.transport !== 'stdio')
+        throw new Error('unknown transport')
+    const [command, ...args] = commandWords(input.target)
+    if (!command)
+        throw new Error(tr('命令不能为空', 'The command is empty'))
+    const env: Record<string, string> = {}
+    for (const line of input.env ?? []) {
+        const at = line.indexOf('=')
+        if (at < 1)
+            throw new Error(tr(`环境变量要写成 名字=值：${line}`, `An environment variable is NAME=value: ${line}`))
+        env[line.slice(0, at)] = line.slice(at + 1)
+    }
+    return { command, args, ...(Object.keys(env).length ? { env } : {}) }
+}
+
+/** A server (or feature) name goes into a config.toml key path, so a dot would reach into another table: letters, digits, underscores and dashes only, as Codex itself takes. */
+export function codexServerName(name: unknown): string {
+    if (typeof name !== 'string' || !/^[\w-]+$/.test(name))
+        throw new Error(tr('名字只能用字母、数字、下划线和连字符', 'The name may only have letters, digits, underscores and dashes'))
+    return name
+}

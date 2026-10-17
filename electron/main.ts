@@ -1,4 +1,4 @@
-import type { AgentStartOptions, CacheWarming, ClaudeMcpAdd, ClaudeMcpRemove, SearchResult, StateSave, TabMove, ThemePref, WindowBounds, WindowReport } from '@shared/ipc'
+import type { AgentStartOptions, CacheWarming, ClaudeMcpAdd, ClaudeMcpRemove, CodexMcpAdd, SearchResult, StateSave, TabMove, ThemePref, WindowBounds, WindowReport } from '@shared/ipc'
 import type { LoginUpdate } from '@shared/providers'
 import { acpAgent, agentOfKey, parseAcpSessionKey } from '@shared/agents'
 import { SETUP_TOOL_IDS, SETUP_VERSION } from '@shared/setup'
@@ -17,8 +17,9 @@ import { DEFAULT_THEME, IPC, THEME_PREFS } from '@shared/ipc'
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, net, Notification, shell } from 'electron'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
+import { codexFeatures, codexMcpServers, setCodexFeature, writeCodexMcp } from './native/codex'
 import { AcpService } from './acp/service'
-import { claudeMcpServers, claudeMemory, setClaudeAutoMemory, mcpAddArgs, mcpRemoveArgs } from './claudeSettings'
+import { claudeMcpServers, codexMcpTable, codexServerName, claudeMemory, setClaudeAutoMemory, mcpAddArgs, mcpRemoveArgs } from './claudeSettings'
 import { AgentManager } from './agents'
 import { BACKGROUND, reveal } from './background'
 import { applySave, savedWindows, StateFile } from './appState'
@@ -579,6 +580,26 @@ function registerIpc() {
             throw new Error(String(error?.stderr || error?.stdout || error?.message || error).trim())
         }
     }
+    const codexLaunch = () => acp.launch('codex')
+    const codexMcp = async (cwd: string) => codexMcpServers(await codexLaunch(), cwd)
+    ipcMain.handle(IPC.codexMcp, (_e, cwd: unknown) => codexMcp(absolutePath(cwd)))
+    ipcMain.handle(IPC.addCodexMcp, async (_e, input: CodexMcpAdd) => {
+        const cwd = absolutePath(input?.cwd)
+        await writeCodexMcp(await codexLaunch(), codexServerName(input.name), codexMcpTable(input))
+        return codexMcp(cwd)
+    })
+    ipcMain.handle(IPC.removeCodexMcp, async (_e, cwd: unknown, name: unknown) => {
+        await writeCodexMcp(await codexLaunch(), codexServerName(name), null)
+        return codexMcp(absolutePath(cwd))
+    })
+    ipcMain.handle(IPC.codexFeatures, async () => codexFeatures(await codexLaunch()))
+    ipcMain.handle(IPC.setCodexFeature, async (_e, name: unknown, enabled: unknown) => {
+        if (typeof enabled !== 'boolean')
+            throw new Error('expected true or false')
+        const launch = await codexLaunch()
+        await setCodexFeature(launch, codexServerName(name), enabled)
+        return codexFeatures(launch)
+    })
     ipcMain.handle(IPC.claudeMemory, (_e, cwd: unknown) => claudeMemory(absolutePath(cwd)))
     ipcMain.handle(IPC.setClaudeAutoMemory, (_e, enabled: unknown) => setClaudeAutoMemory(enabled))
     ipcMain.handle(IPC.claudeMcp, (_e, cwd: unknown) => claudeMcp(cwd))

@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { claudeJsonPath, claudeMcpServers, claudeMemory, commandWords, mcpAddArgs, mcpRemoveArgs, setClaudeAutoMemory } from './claudeSettings'
+import { claudeJsonPath, claudeMcpServers, claudeMemory, codexMcpTable, codexServerName, commandWords, mcpAddArgs, mcpRemoveArgs, setClaudeAutoMemory } from './claudeSettings'
 import { projectSlug } from './native/claudeTui'
 
 describe('commandWords', () => {
@@ -105,5 +105,26 @@ describe('claude memory', () => {
         await setClaudeAutoMemory(true, env)
         expect((await claudeMemory(dir, env)).enabled).toBe(true)
         await expect(setClaudeAutoMemory('no', env)).rejects.toThrow()
+    })
+})
+
+describe('codexMcpTable', () => {
+    it('makes the config.toml table of a command server, with its environment', () => {
+        expect(codexMcpTable({ name: 'files', transport: 'stdio', target: 'npx -y srv "a b"', env: ['K=v=1'] }))
+            .toEqual({ command: 'npx', args: ['-y', 'srv', 'a b'], env: { K: 'v=1' } })
+        expect(codexMcpTable({ name: 'files', transport: 'stdio', target: 'node' })).toEqual({ command: 'node', args: [] })
+    })
+    it('makes the table of a URL server', () => {
+        expect(codexMcpTable({ name: 'web', transport: 'http', target: 'https://example.com/mcp' })).toEqual({ url: 'https://example.com/mcp' })
+    })
+    it('refuses a name that would reach into other keys, and what is no command or URL', () => {
+        for (const name of ['a.b', 'a b', '', 'x]\n[y'])
+            expect(() => codexMcpTable({ name, transport: 'stdio', target: 'x' }), name).toThrow()
+        expect(() => codexMcpTable({ name: 'ok', transport: 'http', target: 'ftp://x' })).toThrow()
+        expect(() => codexMcpTable({ name: 'ok', transport: 'stdio', target: ' ' })).toThrow()
+        expect(() => codexMcpTable({ name: 'ok', transport: 'stdio', target: 'x', env: ['NOEQUALS'] })).toThrow()
+        expect(() => codexMcpTable({ name: 'ok', transport: 'sse', target: 'x' })).toThrow()
+        expect(() => codexServerName('a.b')).toThrow()
+        expect(codexServerName('a-b_12')).toBe('a-b_12')
     })
 })
