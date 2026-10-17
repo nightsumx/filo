@@ -192,6 +192,14 @@ export class AcpService {
         return this.launchOf(spec)
     }
 
+    /** The agent's own command without the arguments that start it as a server, for subcommands such as `grok mcp list`. */
+    cli(id: string): Promise<AcpLaunch> {
+        const spec = ACP_AGENTS.find(a => a.id === id)
+        if (!spec)
+            throw new Error(`unknown agent ${id}`)
+        return resolveLaunch(installSpec({ ...spec, args: [] }), this.agentsDir?.())
+    }
+
     async availability(): Promise<AgentAvailability[]> {
         return Promise.all(ACP_AGENTS.map(async (spec): Promise<AgentAvailability> => {
             const base = { id: spec.id, label: spec.label, installing: this.installs.has(spec.id) }

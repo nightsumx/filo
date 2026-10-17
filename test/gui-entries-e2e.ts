@@ -59,7 +59,13 @@ async function main() {
         windows: [{ projects: [repo] }],
     }))
 
-    const stop = await launch({ PI_GUI_USER_DATA: userData, PI_CODING_AGENT_DIR: agentDir, PI_GUI_TEST: '1' })
+    // The user's own grok, run with a home of its own so `grok mcp` writes a config that is not theirs.
+    const grokBin = path.join(os.homedir(), '.grok', 'bin', 'grok')
+    const grokHome = path.join(WORK, 'grok-home')
+    const grokWrapper = path.join(WORK, 'grok-wrapper.sh')
+    await mkdir(grokHome, { recursive: true })
+    await writeFile(grokWrapper, `#!/bin/sh\nHOME=${JSON.stringify(grokHome)} exec ${JSON.stringify(grokBin)} "$@"\n`, { mode: 0o755 })
+    const stop = await launch({ PI_GUI_USER_DATA: userData, PI_CODING_AGENT_DIR: agentDir, PI_GUI_TEST: '1', PI_GUI_ACP_GROK: JSON.stringify([grokWrapper]) })
     try {
         const [{ page }] = await windows(1)
         const js = <T = any>(expression: string) => page.evaluate<T>(expression)
@@ -373,6 +379,48 @@ async function main() {
             await until('the project entry gone', async () => !(await mcpIn(projectFile).catch(() => ({ teamtool: 1 } as Record<string, any>))).teamtool)
             await until('the list follows', () => js<boolean>(`!${row('teamtool')} && !!${row('files')}`))
             check(!!(await mcpIn(userFile)).files, 'Remove runs pi mcp remove for that scope only')
+            await js(`(() => { window.__app.setSettingsOpen(false); return true })()`)
+        }
+
+        // ---------------------------------------------------------------- Grok's MCP servers (/mcps, grok mcp)
+        if (!existsSync(grokBin)) {
+            console.log('skipped: grok is not installed, so Settings > Grok Build is not tried')
+        }
+        else {
+            const userConfig = path.join(grokHome, '.grok', 'config.toml')
+            const projectConfig = path.join(repo, '.grok', 'config.toml')
+            const text = (file: string) => readFile(file, 'utf8').catch(() => '')
+            await js(`(() => { window.__app.openSettings('grok'); return true })()`)
+            await until('the Grok page', () => js<boolean>(`!!document.querySelector('[data-mcp-form]')`))
+            const type = async (label: string, text: string) => {
+                await js(`(() => { document.querySelector('[data-mcp-form] [aria-label=${JSON.stringify(label)}]').focus(); return true })()`)
+                await page.call('Input.insertText', { text })
+            }
+            const add = async (name: string, command: string, scopeLabel: string) => {
+                await type('Name', name)
+                await type('Command', command)
+                await js(`(() => { [...document.querySelectorAll('[data-mcp-form] button')].find(b => b.textContent.trim() === ${JSON.stringify(scopeLabel)}).click(); return true })()`)
+                await js(`(() => { [...document.querySelectorAll('[data-mcp-form] button')].find(b => b.textContent.trim() === 'Add').click(); return true })()`)
+                await until(`${name} listed`, () => js<boolean>(`!!document.querySelector('[data-mcp="${name}"]')`))
+            }
+            await add('files', 'node -e "1" "a b"', 'All projects')
+            await add('teamtool', 'node team.js', 'This project')
+            const user = await text(userConfig)
+            check(user.includes('[mcp_servers.files]') && user.includes('command = "node"') && user.includes('"a b"'), 'Add runs grok mcp add: the user-level server is in ~/.grok/config.toml')
+            check((await text(projectConfig)).includes('[mcp_servers.teamtool]'), 'and a project one in the project\'s .grok/config.toml')
+            check(await js<boolean>(`document.querySelector('[data-mcp="teamtool"]').dataset.scope === 'project' && document.querySelector('[data-mcp="files"]').dataset.scope === 'user'`), 'the page lists both with their scope')
+            await shot('grok-mcp-list')
+            await js(`(() => { document.querySelector('[data-mcp="files"] [role="switch"]').click(); return true })()`)
+            await until('disabled in config.toml', async () => (await text(userConfig)).includes('enabled = false'))
+            await until('the switch off', () => js<boolean>(`document.querySelector('[data-mcp="files"] [role="switch"]').getAttribute('aria-checked') === 'false'`))
+            check(true, 'the switch runs grok mcp disable')
+            await js(`(() => { document.querySelector('[data-mcp="teamtool"] button:last-of-type').click(); return true })()`)
+            const confirmRemove = `[...document.querySelectorAll('[role="alertdialog"] button, [role="dialog"] button')].find(b => b.textContent.trim() === 'Remove' && !b.closest('[data-mcp]'))`
+            await until('the confirmation', () => js<boolean>(`!!(${confirmRemove})`))
+            await js(`(() => { (${confirmRemove}).click(); return true })()`)
+            await until('the project server gone', async () => !(await text(projectConfig)).includes('teamtool'))
+            await until('the list follows', () => js<boolean>(`!document.querySelector('[data-mcp="teamtool"]') && !!document.querySelector('[data-mcp="files"]')`))
+            check((await text(userConfig)).includes('[mcp_servers.files]'), 'Remove takes out the project\'s server only')
             await js(`(() => { window.__app.setSettingsOpen(false); return true })()`)
         }
 

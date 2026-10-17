@@ -1,4 +1,4 @@
-import type { AgentStartOptions, CacheWarming, ClaudeMcpAdd, ClaudeMcpRemove, CodexMcpAdd, PiMcpAdd, SearchResult, StateSave, TabMove, ThemePref, WindowBounds, WindowReport } from '@shared/ipc'
+import type { AgentStartOptions, CacheWarming, ClaudeMcpAdd, ClaudeMcpRemove, CodexMcpAdd, GrokMcpAdd, PiMcpAdd, SearchResult, StateSave, TabMove, ThemePref, WindowBounds, WindowReport } from '@shared/ipc'
 import type { LoginUpdate } from '@shared/providers'
 import { acpAgent, agentOfKey, parseAcpSessionKey } from '@shared/agents'
 import { SETUP_TOOL_IDS, SETUP_VERSION } from '@shared/setup'
@@ -27,6 +27,7 @@ import { repoEdits } from './edits'
 import { FolderWatch, listDir, readText, writeText } from './files'
 import { applyWorktree, createWorktree, gitBranch, gitCommit, gitDiscard, gitFileBytes, gitFileDiff, gitFileEntries, gitFileThumbs, gitStatus, removeWorktree, threadTask, worktreeParent } from './git'
 import { mainLang, setMainLang, tr } from './i18n'
+import { GROK_MCP_LIST, grokMcpAddArgs, grokMcpEnableArgs, grokMcpRemoveArgs, parseGrokMcp } from './grokSettings'
 import { piMcpAddArgs, piMcpRemoveArgs, piMcpServers, setPiMcp } from './piMcp'
 import { installPackage, runPi, WEB_ACCESS } from './piPackages'
 import { listSkills, shareSkills } from './skills'
@@ -572,15 +573,32 @@ function registerIpc() {
         return { patterns, ...found, scoped: patterns ? found.scoped : found.models.map(m => `${m.provider}/${m.id}`) }
     }
     const claudeMcp = async (cwd: unknown) => claudeMcpServers(absolutePath(cwd))
-    const runClaude = async (args: string[], cwd: string) => {
-        const launch = await acp.launch('claude')
+    // An agent's own command (`claude mcp add`, `grok mcp list`); rejects with what it printed when it fails.
+    const runCli = async (id: string, args: string[], cwd: string): Promise<string> => {
+        const launch = await acp.cli(id)
         try {
-            await execFileAsync(launch.file, [...launch.args, ...args], { cwd, env: launch.env, timeout: 60_000, windowsVerbatimArguments: launch.windowsVerbatimArguments })
+            return (await execFileAsync(launch.file, [...launch.args, ...args], { cwd, env: launch.env, timeout: 60_000, windowsVerbatimArguments: launch.windowsVerbatimArguments })).stdout
         }
         catch (error: any) {
             throw new Error(String(error?.stderr || error?.stdout || error?.message || error).trim())
         }
     }
+    const runClaude = (args: string[], cwd: string) => runCli('claude', args, cwd)
+    const grokMcp = async (cwd: string) => parseGrokMcp(await runCli('grok', GROK_MCP_LIST, cwd))
+    ipcMain.handle(IPC.grokMcp, (_e, cwd: unknown) => grokMcp(absolutePath(cwd)))
+    ipcMain.handle(IPC.addGrokMcp, async (_e, input: GrokMcpAdd) => {
+        const cwd = absolutePath(input?.cwd)
+        await runCli('grok', grokMcpAddArgs(input), cwd)
+        return grokMcp(cwd)
+    })
+    ipcMain.handle(IPC.removeGrokMcp, async (_e, cwd: unknown, scope: string, name: string) => {
+        await runCli('grok', grokMcpRemoveArgs(scope, name), absolutePath(cwd))
+        return grokMcp(absolutePath(cwd))
+    })
+    ipcMain.handle(IPC.setGrokMcp, async (_e, cwd: unknown, name: string, enabled: unknown) => {
+        await runCli('grok', grokMcpEnableArgs(name, enabled), absolutePath(cwd))
+        return grokMcp(absolutePath(cwd))
+    })
     ipcMain.handle(IPC.piMcp, (_e, cwd: unknown) => piMcpServers(absolutePath(cwd)))
     ipcMain.handle(IPC.addPiMcp, async (_e, input: PiMcpAdd) => {
         const cwd = absolutePath(input?.cwd)

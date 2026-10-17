@@ -396,6 +396,25 @@ export interface ClaudeMcpServer {
     target: string
 }
 
+/** An MCP server of Grok Build (its /mcps): `user` is in ~/.grok/config.toml, `project` in ./.grok/config.toml. */
+export interface GrokMcpServer {
+    name: string
+    scope: 'user' | 'project'
+    transport: 'stdio' | 'http' | 'sse'
+    target: string
+    enabled: boolean
+}
+
+export interface GrokMcpAdd {
+    cwd: string
+    name: string
+    scope: GrokMcpServer['scope']
+    transport: GrokMcpServer['transport']
+    /** The command line (stdio) or the URL. */
+    target: string
+    env?: string[]
+}
+
 /** An MCP server of pi (its /mcp): `user` is in the agent folder's mcp.json, `project` in the project's .pi/mcp.json. */
 export interface PiMcpServer {
     name: string
@@ -636,6 +655,10 @@ export interface PiBridge {
     setProjectTrust: (cwd: string, decision: boolean | null) => Promise<ProjectTrust>
     /** The MCP servers Claude Code has for a project (its .claude.json and the project's .mcp.json). */
     claudeMcp: (cwd: string) => Promise<ClaudeMcpServer[]>
+    grokMcp: (cwd: string) => Promise<GrokMcpServer[]>
+    addGrokMcp: (input: GrokMcpAdd) => Promise<GrokMcpServer[]>
+    removeGrokMcp: (cwd: string, scope: GrokMcpServer['scope'], name: string) => Promise<GrokMcpServer[]>
+    setGrokMcp: (cwd: string, name: string, enabled: boolean) => Promise<GrokMcpServer[]>
     piMcp: (cwd: string) => Promise<PiMcpServer[]>
     addPiMcp: (input: PiMcpAdd) => Promise<PiMcpServer[]>
     removePiMcp: (cwd: string, scope: PiMcpServer['scope'], name: string) => Promise<PiMcpServer[]>
@@ -833,6 +856,10 @@ export const IPC = {
     setProjectTrust: 'pi:set-project-trust',
     claudeMcp: 'claude:mcp',
     claudeMemory: 'claude:memory',
+    grokMcp: 'grok:mcp',
+    addGrokMcp: 'grok:mcp-add',
+    removeGrokMcp: 'grok:mcp-remove',
+    setGrokMcp: 'grok:mcp-set',
     piMcp: 'pi:mcp',
     addPiMcp: 'pi:mcp-add',
     removePiMcp: 'pi:mcp-remove',
