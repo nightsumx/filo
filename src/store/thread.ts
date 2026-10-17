@@ -354,6 +354,17 @@ export class Thread {
         return this.agentStatus === 'ready' ? this.state?.terminalPid : undefined
     }
 
+    /** Claude Code's /goal condition while it is set and not met. */
+    get goal(): string | undefined {
+        return this.agent === 'claude' ? this.state?.goal : undefined
+    }
+
+    /** /goal: with a condition Claude Code keeps working until it holds; null clears it. Sent as the text it takes, as in the terminal. */
+    async setGoal(condition: string | null) {
+        const text = condition === null ? '/goal clear' : `/goal ${condition.trim()}`
+        await this.submit(text, [], 'steer')
+    }
+
     /** The terminal the agent's TUI runs in, while the process lives. */
     get tuiTerminal(): string | undefined {
         return this.agentId ? this.state?.tuiTerminal : undefined

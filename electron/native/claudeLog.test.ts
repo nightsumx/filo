@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync, appendFileSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { activePath, ClaudeLog, readRecords } from './claudeLog'
+import { activePath, ClaudeLog, parseLines, readRecords } from './claudeLog'
 
 // Record shapes as claude 2.1.285 writes them (checked against a session driven through its TUI).
 let n = 0
@@ -21,6 +21,23 @@ const done = (parent: string) => rec('system', parent, { subtype: 'turn_duration
 const roles = (log: ClaudeLog) => log.transcript.messages.map(m => m.message.role)
 
 describe('claude session file', () => {
+    it('follows the /goal condition from its goal_status records until it is met or cleared', () => {
+        const status = (parent: string | null, met: boolean, condition: string) => rec('attachment', parent, { attachment: { type: 'goal_status', met, sentinel: true, condition } })
+        const a = status(null, false, 'the file marker.txt exists')
+        const b = status(a.uuid!, false, 'tests pass')
+        const c = status(b.uuid!, true, 'tests pass')
+        // As read from the file: records are slimmed to what the fold needs.
+        const read = (...records: ClaudeRecord[]) => parseLines(`${records.map(r => JSON.stringify(r)).join('\n')}\n`).records
+        const log = new ClaudeLog('k:')
+        expect(log.meta.goal).toBeUndefined()
+        log.add(read(a))
+        expect(log.meta.goal).toBe('the file marker.txt exists')
+        log.add(read(b))
+        expect(log.meta.goal).toBe('tests pass')
+        log.add(read(c))
+        expect(log.meta.goal).toBeUndefined()
+    })
+
     it('shows a command Claude Code does not know, with its answer', () => {
         const a = rec('system', null, { subtype: 'informational', content: 'Unknown command: /zzz', level: 'warning' })
         const b = rec('system', a.uuid!, { subtype: 'informational', content: 'Auto mode lets Claude handle permission prompts', level: 'info' })

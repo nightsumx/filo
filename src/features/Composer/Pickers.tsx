@@ -8,7 +8,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { cn, formatTokens, ipcMessage } from '@/lib/utils'
 import { AgentIcon } from '@/components/AgentIcon'
-import { Brain, Check, ChevronDown, ClipboardList, Cpu, Shrink, Download, FilePen, KeyRound, Loader2, Plane, Plus, Route, Settings2, ShieldCheck, SlidersHorizontal, Undo2, Zap } from 'lucide-react'
+import { Brain, Check, ChevronDown, ClipboardList, Cpu, Shrink, Download, FilePen, Flag, KeyRound, Loader2, Plane, Plus, Route, Settings2, ShieldCheck, SlidersHorizontal, Undo2, Zap } from 'lucide-react'
 import { observable, runInAction } from 'mobx'
 import { observer } from 'mobx-react-lite'
 import { useEffect, useRef, useState } from 'react'
@@ -464,6 +464,69 @@ function AutoCompactField({ thread, close }: { thread: Thread, close: () => void
         </div>
     )
 }
+
+/** Claude Code's /goal: a condition it keeps working toward until a check says it holds. */
+export const GoalButton = observer(({ thread }: { thread: Thread }) => {
+    const [open, setOpen] = useState(false)
+    const [text, setText] = useState('')
+    if (thread.agent !== 'claude')
+        return null
+    const goal = thread.goal
+    const busy = thread.running
+    const set = () => {
+        const condition = text.trim()
+        if (!condition)
+            return
+        setOpen(false)
+        setText('')
+        void thread.setGoal(condition)
+    }
+    return (
+        <Popover open={open && !busy} onOpenChange={setOpen}>
+            <PopoverTrigger
+                className={cn(pill, goal && 'text-ide-accent hover:text-ide-accent')}
+                disabled={busy}
+                aria-label={tr('目标', 'Goal')}
+                title={goal ? tr(`目标：${goal}`, `Goal: ${goal}`) : busy ? tr('等这一轮结束再设目标', 'Wait for the turn to end to set a goal') : tr('设一个完成条件，Claude Code 做到为止', 'Set a condition; Claude Code keeps working until it holds')}
+            >
+                <Flag size={13} />
+                <span className="max-w-[160px] truncate">{goal ?? tr('目标', 'Goal')}</span>
+            </PopoverTrigger>
+            <PopoverContent align="start" sideOffset={6} className="w-[340px] p-3" data-goal-popover>
+                <div className="text-[12px] font-medium text-gray-800">{tr('目标（/goal）', 'Goal (/goal)')}</div>
+                <p className="mt-1 text-[12px] text-gray-500">{tr('写一个可以检查的完成条件。Claude Code 会接着做，每轮结束时检查，没达成就继续。', 'Write a condition that can be checked. Claude Code keeps working, and checks at the end of each turn until it holds.')}</p>
+                {goal && <p className="mt-2 break-words text-[12px] text-gray-800" data-goal-current>{tr(`当前：${goal}`, `Current: ${goal}`)}</p>}
+                <input
+                    autoFocus
+                    value={text}
+                    onChange={e => setText(e.target.value)}
+                    onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !e.nativeEvent.isComposing)
+                            set()
+                    }}
+                    aria-label={tr('完成条件', 'Condition')}
+                    placeholder={tr('例如：npm test 全部通过', 'e.g. npm test passes')}
+                    className={cn(flatFieldClass, 'mt-2 h-8 w-full px-2 text-[12px]')}
+                />
+                <div className="mt-2.5 flex justify-end gap-2">
+                    {goal && (
+                        <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => {
+                                setOpen(false)
+                                void thread.setGoal(null)
+                            }}
+                        >
+                            {tr('清除目标', 'Clear goal')}
+                        </Button>
+                    )}
+                    <Button size="sm" disabled={!text.trim()} onClick={set}>{goal ? tr('换成这个', 'Replace') : tr('设置', 'Set')}</Button>
+                </div>
+            </PopoverContent>
+        </Popover>
+    )
+})
 
 export const CompactButton = observer(({ thread }: { thread: Thread }) => {
     const [open, setOpen] = useState(false)

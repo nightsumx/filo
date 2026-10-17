@@ -438,6 +438,9 @@ export class ClaudeTuiAgent implements AgentAdapter {
         await this.launchTui()
     }
 
+    /** The /goal condition the thread last heard of. */
+    private goalSent: string | undefined
+
     private title(): string | undefined {
         return this.log.meta.customTitle ?? this.log.meta.aiTitle
     }
@@ -450,6 +453,10 @@ export class ClaudeTuiAgent implements AgentAdapter {
             this.wrote = true
         if (records.length && this.log.add(records))
             this.emit({ type: 'agent_settled' })
+        if (this.log.meta.goal !== this.goalSent) {
+            this.goalSent = this.log.meta.goal
+            this.emit({ type: 'state_changed' })
+        }
         const title = this.title()
         if (title && title !== this.titleSent) {
             this.titleSent = title
@@ -942,6 +949,7 @@ export class ClaudeTuiAgent implements AgentAdapter {
                         tuiTerminal: this.terminal || undefined,
                         tuiHooks: this.hooksIssue,
                         permissionMode: this.permissionMode || this.log.meta.permissionMode,
+                        goal: this.log.meta.goal,
                     })
                 case 'get_available_models':
                     return ok({ models: MODEL_ALIASES.map(m => ({ ...m, provider: this.spec.label })) })

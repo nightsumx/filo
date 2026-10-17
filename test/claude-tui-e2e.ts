@@ -276,6 +276,30 @@ async function main() {
             check(true, 'Auto puts it back to auto')
         }
 
+        // The goal button (/goal): set a condition, see it on the button, clear it.
+        {
+            const openGoal = async () => {
+                await js(`(() => { const b = document.querySelector('button[aria-label="Goal"]'); b.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, pointerType: 'mouse' })); b.click(); return true })()`)
+                await until('the goal popover', () => js<boolean>(`!!document.querySelector('[data-goal-popover] input')`))
+            }
+            await openGoal()
+            await js(`(() => { document.querySelector('[data-goal-popover] input').focus(); return true })()`)
+            await page.call('Input.insertText', { text: 'the file marker.txt exists' })
+            if (SHOTS)
+                await page.screenshot(path.join(SHOTS, 'claude-goal.png'))
+            await js(`(() => { [...document.querySelectorAll('[data-goal-popover] button')].find(b => b.textContent.trim() === 'Set').click(); return true })()`)
+            await until('the goal on the thread', () => js<boolean>(`${T}.goal === 'the file marker.txt exists'`), 30_000)
+            await until('the goal turn to end', () => js<boolean>(`!${T}.running`), 30_000)
+            check(await js<boolean>(`document.querySelector('button[aria-label="Goal"]').textContent.trim() === 'the file marker.txt exists'`), 'Set sends /goal: Claude Code records the condition and the button shows it')
+            check(await js<boolean>(`JSON.stringify(${T}.turns.at(-1).steps).includes('Goal set: the file marker.txt exists')`), 'and says so in the thread')
+            await openGoal()
+            check(await js<boolean>(`document.querySelector('[data-goal-current]').textContent.includes('the file marker.txt exists')`), 'the popover shows the current goal')
+            await js(`(() => { [...document.querySelectorAll('[data-goal-popover] button')].find(b => b.textContent.trim() === 'Clear goal').click(); return true })()`)
+            await until('the goal cleared', () => js<boolean>(`${T}.goal === undefined`), 30_000)
+            await until('the button back to Goal', () => js<boolean>(`document.querySelector('button[aria-label="Goal"]').textContent.trim() === 'Goal'`))
+            check(true, 'Clear goal sends /goal clear: the condition is gone')
+        }
+
         // Settings → Claude Code (/mcp): the servers it has, added and removed with the user's claude.
         {
             const claudeJson = path.join(config, '.claude.json')

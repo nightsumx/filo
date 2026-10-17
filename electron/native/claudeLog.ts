@@ -47,6 +47,8 @@ export interface ClaudeMeta {
     firstPrompt?: string
     /** Seconds its prompt cache lives: an hour once it wrote one-hour entries (a subscription does), else the model's. */
     cacheTtl?: number
+    /** The /goal condition while it is set and not met. */
+    goal?: string
 }
 
 const INTERRUPTED = '[Request interrupted by user'
@@ -118,8 +120,10 @@ function slim(r: ClaudeRecord): ClaudeRecord {
     if (r.type === 'attachment' || r.type === 'file-history-snapshot' || r.type === 'file-history-delta') {
         const a = r.attachment as any
         // A prompt typed while a turn ran, handed to the model between its steps.
+        // /goal: the condition while it is not met.
+        const goal = a?.type === 'goal_status' && typeof a.condition === 'string' ? { attachment: { type: a.type, met: a.met === true, condition: a.condition } } : {}
         const queued = a?.type === 'queued_command' && a.origin?.kind === 'human' && typeof a.prompt === 'string' ? { attachment: { type: a.type, prompt: a.prompt } } : {}
-        return { type: r.type, uuid: r.uuid, parentUuid: r.parentUuid, isSidechain: r.isSidechain, ...queued }
+        return { type: r.type, uuid: r.uuid, parentUuid: r.parentUuid, isSidechain: r.isSidechain, ...queued, ...goal }
     }
     const tur = r.toolUseResult
     if (tur && typeof tur === 'object') {
@@ -392,6 +396,11 @@ export class ClaudeFold {
             this.user(r)
         else if (r.type === 'system')
             this.system(r)
+        else if (r.type === 'attachment' && (r.attachment as any)?.type === 'goal_status') {
+            const a = r.attachment as { met?: boolean, condition?: string }
+            // Met, or cleared: both come as met.
+            this.meta.goal = a.met ? undefined : a.condition
+        }
         else if (r.type === 'attachment' && typeof (r.attachment as any)?.prompt === 'string') {
             this.endStream()
             const prompt: string = (r.attachment as any).prompt

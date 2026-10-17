@@ -15,7 +15,7 @@ import { toast } from 'sonner'
 import { StatusLine } from '../Thread/StatusLine'
 import { CacheNotice } from './CacheNotice'
 import { CommandChip, CommandPicker } from './CommandPicker'
-import { AgentPicker, AutopilotToggle, CompactButton, ConfigPickers, installingAgentLabel, ModelPicker, ModePicker, NoModelNotice, ThinkingPicker } from './Pickers'
+import { AgentPicker, AutopilotToggle, CompactButton, ConfigPickers, GoalButton, installingAgentLabel, ModelPicker, ModePicker, NoModelNotice, ThinkingPicker } from './Pickers'
 import { TodoBar } from './TodoBar'
 import { tr } from '@/lib/i18n'
 import { isShortcut, shortcutKeys } from '@/lib/shortcuts'
@@ -285,6 +285,7 @@ const ComposerEditor = observer(({ thread }: { thread: Thread }) => {
                         <AutopilotToggle thread={thread} />
                         <ConfigPickers thread={thread} />
                         <CompactButton thread={thread} />
+                        <GoalButton thread={thread} />
                         <CommandPicker thread={thread} />
                         <span className="flex-1" />
                         {thread.running && !hasInput

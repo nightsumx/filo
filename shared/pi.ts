@@ -105,6 +105,8 @@ export interface RpcSessionState {
     /** Not pi's: the terminal a TUI-driven agent (Claude Code) runs in; the thread can show it. */
     tuiTerminal?: string
     /** Not pi's: why that agent's hooks will not come (electron/native/claudeTui.ts HooksIssue). */
+    /** Not pi's: Claude Code's /goal condition while it is set and not met. */
+    goal?: string
     tuiHooks?: { cause: 'disabled' | 'policy' | 'silent', files: string[], tried?: boolean }
 }
 
