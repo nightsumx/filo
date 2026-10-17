@@ -118,7 +118,7 @@ describe('codexMcpTable', () => {
         expect(codexMcpTable({ name: 'web', transport: 'http', target: 'https://example.com/mcp' })).toEqual({ url: 'https://example.com/mcp' })
     })
     it('refuses a name that would reach into other keys, and what is no command or URL', () => {
-        for (const name of ['a.b', 'a b', '', 'x]\n[y'])
+        for (const name of ['a.b', 'a b', '', '-x', 'x]\n[y'])
             expect(() => codexMcpTable({ name, transport: 'stdio', target: 'x' }), name).toThrow()
         expect(() => codexMcpTable({ name: 'ok', transport: 'http', target: 'ftp://x' })).toThrow()
         expect(() => codexMcpTable({ name: 'ok', transport: 'stdio', target: ' ' })).toThrow()

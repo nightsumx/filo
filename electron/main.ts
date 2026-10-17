@@ -1,4 +1,4 @@
-import type { AgentStartOptions, CacheWarming, ClaudeMcpAdd, ClaudeMcpRemove, CodexMcpAdd, SearchResult, StateSave, TabMove, ThemePref, WindowBounds, WindowReport } from '@shared/ipc'
+import type { AgentStartOptions, CacheWarming, ClaudeMcpAdd, ClaudeMcpRemove, CodexMcpAdd, PiMcpAdd, SearchResult, StateSave, TabMove, ThemePref, WindowBounds, WindowReport } from '@shared/ipc'
 import type { LoginUpdate } from '@shared/providers'
 import { acpAgent, agentOfKey, parseAcpSessionKey } from '@shared/agents'
 import { SETUP_TOOL_IDS, SETUP_VERSION } from '@shared/setup'
@@ -27,7 +27,8 @@ import { repoEdits } from './edits'
 import { FolderWatch, listDir, readText, writeText } from './files'
 import { applyWorktree, createWorktree, gitBranch, gitCommit, gitDiscard, gitFileBytes, gitFileDiff, gitFileEntries, gitFileThumbs, gitStatus, removeWorktree, threadTask, worktreeParent } from './git'
 import { mainLang, setMainLang, tr } from './i18n'
-import { installPackage, WEB_ACCESS } from './piPackages'
+import { piMcpAddArgs, piMcpRemoveArgs, piMcpServers, setPiMcp } from './piMcp'
+import { installPackage, runPi, WEB_ACCESS } from './piPackages'
 import { listSkills, shareSkills } from './skills'
 import { agentDir, compactionInfo, enabledModels, globalCompaction, piDefaults, piSettingsState, setCacheWarming, setCapabilities, setDefaultModel, setDefaultThinkingLevel, setEnabledModels, setGlobalCompaction, setWebAccess, watchSettings } from './piSettings'
 import { ChannelTests } from './channelTests'
@@ -580,6 +581,20 @@ function registerIpc() {
             throw new Error(String(error?.stderr || error?.stdout || error?.message || error).trim())
         }
     }
+    ipcMain.handle(IPC.piMcp, (_e, cwd: unknown) => piMcpServers(absolutePath(cwd)))
+    ipcMain.handle(IPC.addPiMcp, async (_e, input: PiMcpAdd) => {
+        const cwd = absolutePath(input?.cwd)
+        await runPi(piMcpAddArgs(input), { cwd, timeoutMs: 60_000 })
+        return piMcpServers(cwd)
+    })
+    ipcMain.handle(IPC.removePiMcp, async (_e, cwd: unknown, scope: string, name: string) => {
+        await runPi(piMcpRemoveArgs(scope, name), { cwd: absolutePath(cwd), timeoutMs: 60_000 })
+        return piMcpServers(absolutePath(cwd))
+    })
+    ipcMain.handle(IPC.setPiMcp, async (_e, cwd: unknown, scope: string, name: string, patch: { enabled?: unknown, exposure?: unknown }) => {
+        await setPiMcp(absolutePath(cwd), scope, name, patch ?? {})
+        return piMcpServers(absolutePath(cwd))
+    })
     const codexLaunch = () => acp.launch('codex')
     const codexMcp = async (cwd: string) => codexMcpServers(await codexLaunch(), cwd)
     ipcMain.handle(IPC.codexMcp, (_e, cwd: unknown) => codexMcp(absolutePath(cwd)))

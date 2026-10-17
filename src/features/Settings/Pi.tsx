@@ -6,6 +6,7 @@ import { Markdown } from '@/components/Markdown'
 import { Button } from '@/components/ui/button'
 import { Choice, Comment, SettingRow, SettingsPage } from '@/components/ui/form'
 import { tr } from '@/lib/i18n'
+import { PiMcpSection } from './PiMcp'
 import { appStore } from '@/store/app'
 import { observer } from 'mobx-react-lite'
 import { useEffect, useState } from 'react'
@@ -117,6 +118,7 @@ const ChangelogRow = observer(() => {
 export const PiPage = observer(() => (
     <SettingsPage title="Pi">
         <ModelsRow />
+        <PiMcpSection />
         <ChangelogRow />
     </SettingsPage>
 ))

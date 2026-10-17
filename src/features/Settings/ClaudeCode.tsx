@@ -118,11 +118,14 @@ const McpSection = observer(() => {
             {servers?.length === 0 && <Comment className="mt-2">{tr('还没有 MCP 服务器。', 'No MCP servers yet.')}</Comment>}
             <ul className="mt-2 flex flex-col gap-1" data-mcp-list>
                 {servers?.map(server => (
-                    <li key={`${server.scope}:${server.name}`} className="flex items-center gap-2 rounded-[6px] bg-[var(--jb-fill)] px-3 py-1.5 text-[13px]" data-mcp={server.name}>
-                        <span className="font-medium text-gray-900">{server.name}</span>
-                        <span className="shrink-0 text-[11px] text-[var(--jb-comment)]">{`${tr(SCOPE_LABEL[server.scope])} · ${server.transport}`}</span>
-                        <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-gray-600" title={server.target}>{server.target}</span>
-                        <Button variant="outline" size="sm" onClick={() => void remove(server)}>{tr('移除', 'Remove')}</Button>
+                    <li key={`${server.scope}:${server.name}`} className="flex flex-col gap-1 rounded-[6px] bg-[var(--jb-fill)] px-3 py-2 text-[13px]" data-mcp={server.name}>
+                        <div className="flex items-center gap-2">
+                            <span className="font-medium text-gray-900">{server.name}</span>
+                            <span className="shrink-0 text-[11px] text-[var(--jb-comment)]">{`${tr(SCOPE_LABEL[server.scope])} · ${server.transport}`}</span>
+                            <span className="flex-1" />
+                            <Button variant="outline" size="sm" onClick={() => void remove(server)}>{tr('移除', 'Remove')}</Button>
+                        </div>
+                        <span className="truncate font-mono text-[12px] text-gray-600" title={server.target}>{server.target}</span>
                     </li>
                 ))}
             </ul>

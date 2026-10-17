@@ -55,22 +55,22 @@ export function withPackageEnabled(settings: Record<string, any>, enabled: boole
     return { ...settings, packages }
 }
 
-/** `pi install <source>` with the pi the app runs; rejects with the end of its output. */
-export async function installPackage(source = WEB_ACCESS.source): Promise<void> {
+/** Runs the pi the app runs with these arguments; rejects with the end of its output when it fails. */
+export async function runPi(args: string[], { cwd, timeoutMs = INSTALL_TIMEOUT_MS }: { cwd?: string, timeoutMs?: number } = {}): Promise<string> {
     const resolved = await resolvePiEnv()
     if (!resolved.ok)
         throw new Error(resolved.error)
     const env = piSpawnEnv(resolved.env)
-    const command = piCommand(resolved.env, ['install', source])
-    await new Promise<void>((resolve, reject) => {
-        const child = spawn(command.file, command.args, { env, stdio: ['ignore', 'pipe', 'pipe'], windowsVerbatimArguments: command.windowsVerbatimArguments })
+    const command = piCommand(resolved.env, args)
+    return new Promise<string>((resolve, reject) => {
+        const child = spawn(command.file, command.args, { cwd, env, stdio: ['ignore', 'pipe', 'pipe'], windowsVerbatimArguments: command.windowsVerbatimArguments })
         let output = ''
         const keep = (chunk: Buffer) => {
             output = (output + chunk.toString()).slice(-4000)
         }
         child.stdout.on('data', keep)
         child.stderr.on('data', keep)
-        const timer = setTimeout(() => child.kill('SIGTERM'), INSTALL_TIMEOUT_MS)
+        const timer = setTimeout(() => child.kill('SIGTERM'), timeoutMs)
         child.on('error', (error) => {
             clearTimeout(timer)
             reject(error)
@@ -78,9 +78,14 @@ export async function installPackage(source = WEB_ACCESS.source): Promise<void> 
         child.on('exit', (code, signal) => {
             clearTimeout(timer)
             if (code === 0)
-                return resolve()
+                return resolve(output)
             const tail = output.trim().split('\n').filter(l => l.trim() && !/^npm (notice|warn)/i.test(l)).slice(-4).join('\n')
-            reject(new Error(tail || tr(`pi install 退出（${code ?? signal}）`, `pi install exited (${code ?? signal})`)))
+            reject(new Error(tail || tr(`pi ${args[0]} 退出（${code ?? signal}）`, `pi ${args[0]} exited (${code ?? signal})`)))
         })
     })
+}
+
+/** `pi install <source>` with the pi the app runs; rejects with the end of its output. */
+export async function installPackage(source = WEB_ACCESS.source): Promise<void> {
+    await runPi(['install', source])
 }

@@ -332,6 +332,50 @@ async function main() {
 
         }
 
+        // ---------------------------------------------------------------- pi's MCP servers (/mcp, pi mcp)
+        {
+            const userFile = path.join(agentDir, 'mcp.json')
+            const projectFile = path.join(repo, '.pi', 'mcp.json')
+            const mcpIn = async (file: string) => JSON.parse(await readFile(file, 'utf8')).mcpServers as Record<string, any>
+            await writeFile(projectFile, JSON.stringify({ mcpServers: { teamtool: { command: 'node', args: ['team.js'] } } }))
+            await js(`(() => { window.__app.openSettings('pi'); return true })()`)
+            const row = (name: string) => `document.querySelector('[data-mcp="${name}"]')`
+            await until('the project server listed', () => js<boolean>(`!!${row('teamtool')}`))
+            check(await js<boolean>(`!!document.querySelector('#pi-mcp-untrusted')`), 'a project that is not trusted says its .pi/mcp.json is not loaded')
+            const type = async (label: string, text: string) => {
+                await js(`(() => { document.querySelector('[data-mcp-form] [aria-label=${JSON.stringify(label)}]').focus(); return true })()`)
+                await page.call('Input.insertText', { text })
+            }
+            await type('Name', 'files')
+            await type('Command', 'node -e "1" "a b"')
+            await type('Environment variables', 'TOKEN=abc')
+            await shot('pi-mcp-form')
+            await js(`(() => { [...document.querySelectorAll('[data-mcp-form] button')].find(b => b.textContent.trim() === 'Add').click(); return true })()`)
+            await until('pi mcp add to write mcp.json', async () => !!(await mcpIn(userFile).catch(() => ({} as Record<string, any>))).files)
+            const added = (await mcpIn(userFile)).files
+            check(added.command === 'node' && JSON.stringify(added.args) === JSON.stringify(['-e', '1', 'a b']) && added.env?.TOKEN === 'abc', `Add runs the user's pi mcp add (${JSON.stringify(added)})`)
+            await until('the server listed', () => js<boolean>(`!!${row('files')}`))
+            check(true, 'and the page lists it next to the project\'s')
+            // The switch and the exposure edit the file that defines the server.
+            await js(`(() => { ${row('files')}.querySelector('[role="switch"]').click(); return true })()`)
+            await until('enabled false', async () => (await mcpIn(userFile)).files.enabled === false)
+            await until('the switch off', () => js<boolean>(`${row('files')}.querySelector('[role="switch"]').getAttribute('aria-checked') === 'false'`))
+            check(JSON.stringify((await mcpIn(userFile)).files.args) === JSON.stringify(['-e', '1', 'a b']), 'the switch writes enabled: false and keeps the rest of the entry')
+            await js(`(() => { const s = ${row('files')}.querySelector('select'); s.value = 'direct'; s.dispatchEvent(new Event('change', { bubbles: true })); return true })()`)
+            await until('exposure direct', async () => (await mcpIn(userFile)).files.exposure === 'direct')
+            check(true, 'the exposure menu writes exposure')
+            await shot('pi-mcp-list')
+            // The project's own entry is removed from .pi/mcp.json, yours stays.
+            await js(`(() => { ${row('teamtool')}.querySelector('button:last-of-type').click(); return true })()`)
+            const confirmRemove = `[...document.querySelectorAll('[role="alertdialog"] button, [role="dialog"] button')].find(b => b.textContent.trim() === 'Remove' && !b.closest('[data-mcp]'))`
+            await until('the confirmation', () => js<boolean>(`!!(${confirmRemove})`))
+            await js(`(() => { (${confirmRemove}).click(); return true })()`)
+            await until('the project entry gone', async () => !(await mcpIn(projectFile).catch(() => ({ teamtool: 1 } as Record<string, any>))).teamtool)
+            await until('the list follows', () => js<boolean>(`!${row('teamtool')} && !!${row('files')}`))
+            check(!!(await mcpIn(userFile)).files, 'Remove runs pi mcp remove for that scope only')
+            await js(`(() => { window.__app.setSettingsOpen(false); return true })()`)
+        }
+
         // ---------------------------------------------------------------- Import session
         {
             const source = path.join(WORK, 'import-me.jsonl')

@@ -187,9 +187,9 @@ export function codexMcpTable(input: { name: string, transport: string, target: 
     return { command, args, ...(Object.keys(env).length ? { env } : {}) }
 }
 
-/** A server (or feature) name goes into a config.toml key path, so a dot would reach into another table: letters, digits, underscores and dashes only, as Codex itself takes. */
+/** A server (or feature) name goes into a config.toml key path, so a dot would reach into another table: letters, digits, underscores and dashes only (not first, where a command would read it as an option). */
 export function codexServerName(name: unknown): string {
-    if (typeof name !== 'string' || !/^[\w-]+$/.test(name))
-        throw new Error(tr('名字只能用字母、数字、下划线和连字符', 'The name may only have letters, digits, underscores and dashes'))
+    if (typeof name !== 'string' || !/^\w[\w-]*$/.test(name))
+        throw new Error(tr('名字以字母、数字或下划线开头，只能用字母、数字、下划线和连字符', 'The name starts with a letter, digit or underscore and has only letters, digits, underscores and dashes'))
     return name
 }

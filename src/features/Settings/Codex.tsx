@@ -111,9 +111,10 @@ const McpSection = observer(() => {
                             <span className="shrink-0 text-[11px] text-[var(--jb-comment)]">
                                 {[server.transport, server.enabled ? '' : tr('已停用', 'disabled'), server.tools ? tr(`${server.tools} 个工具`, `${server.tools} tools`) : ''].filter(Boolean).join(' · ')}
                             </span>
-                            <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-gray-600" title={server.target}>{server.target}</span>
+                            <span className="flex-1" />
                             <Button variant="outline" size="sm" onClick={() => void remove(server)}>{tr('移除', 'Remove')}</Button>
                         </div>
+                        <span className="truncate font-mono text-[12px] text-gray-600" title={server.target}>{server.target}</span>
                         {server.error && <span className="truncate text-[11px] text-red-500" title={server.error} data-mcp-error>{server.error}</span>}
                     </li>
                 ))}

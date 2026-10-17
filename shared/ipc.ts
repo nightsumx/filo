@@ -396,6 +396,27 @@ export interface ClaudeMcpServer {
     target: string
 }
 
+/** An MCP server of pi (its /mcp): `user` is in the agent folder's mcp.json, `project` in the project's .pi/mcp.json. */
+export interface PiMcpServer {
+    name: string
+    scope: 'user' | 'project'
+    /** `override` is a project entry that only switches a user-level server on or off. */
+    transport: 'stdio' | 'http' | 'override'
+    target: string
+    enabled: boolean
+    exposure: string
+}
+
+export interface PiMcpAdd {
+    cwd: string
+    name: string
+    scope: PiMcpServer['scope']
+    transport: 'stdio' | 'http'
+    /** The command line (stdio) or the URL. */
+    target: string
+    env?: string[]
+}
+
 /** An MCP server in Codex's config (Settings → Codex). */
 export interface CodexMcpServer {
     name: string
@@ -615,6 +636,10 @@ export interface PiBridge {
     setProjectTrust: (cwd: string, decision: boolean | null) => Promise<ProjectTrust>
     /** The MCP servers Claude Code has for a project (its .claude.json and the project's .mcp.json). */
     claudeMcp: (cwd: string) => Promise<ClaudeMcpServer[]>
+    piMcp: (cwd: string) => Promise<PiMcpServer[]>
+    addPiMcp: (input: PiMcpAdd) => Promise<PiMcpServer[]>
+    removePiMcp: (cwd: string, scope: PiMcpServer['scope'], name: string) => Promise<PiMcpServer[]>
+    setPiMcp: (cwd: string, scope: PiMcpServer['scope'], name: string, patch: { enabled?: boolean, exposure?: string }) => Promise<PiMcpServer[]>
     codexMcp: (cwd: string) => Promise<CodexMcpServer[]>
     addCodexMcp: (input: CodexMcpAdd) => Promise<CodexMcpServer[]>
     removeCodexMcp: (cwd: string, name: string) => Promise<CodexMcpServer[]>
@@ -808,6 +833,10 @@ export const IPC = {
     setProjectTrust: 'pi:set-project-trust',
     claudeMcp: 'claude:mcp',
     claudeMemory: 'claude:memory',
+    piMcp: 'pi:mcp',
+    addPiMcp: 'pi:mcp-add',
+    removePiMcp: 'pi:mcp-remove',
+    setPiMcp: 'pi:mcp-set',
     codexMcp: 'codex:mcp',
     addCodexMcp: 'codex:mcp-add',
     removeCodexMcp: 'codex:mcp-remove',
