@@ -31,6 +31,7 @@
         "e2e:routes": "bun --tsconfig-override=tsconfig.node.json test/routes-e2e.ts",
         "e2e:cli-sessions": "bun --tsconfig-override=tsconfig.node.json test/cli-sessions-e2e.ts",
         "e2e:acp": "bun --tsconfig-override=tsconfig.node.json test/acp-e2e.ts",
+        "e2e:commands": "bun --tsconfig-override=tsconfig.node.json test/commands-e2e.ts",
         "e2e:terminal": "bun --tsconfig-override=tsconfig.node.json test/terminal-e2e.ts",
         "e2e:cache": "bun --tsconfig-override=tsconfig.node.json test/cache-e2e.ts",
         "e2e:channel": "bun --tsconfig-override=tsconfig.node.json test/channel-e2e.ts",

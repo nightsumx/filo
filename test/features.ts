@@ -22,7 +22,19 @@ import { startMockLlm } from './harness'
 const WORK = workDir('pi-gui-features')
 const SHOTS = process.env.SHOTS ?? ''
 
-const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8' }).trim()
+/** The app refreshes its git status while the test works in the same repo: a command that meets its index.lock goes again. */
+const git = (cwd: string, ...args: string[]): string => {
+    for (let attempt = 0; ; attempt++) {
+        try {
+            return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim()
+        }
+        catch (error: any) {
+            if (attempt >= 20 || !String(error.stderr).includes('index.lock'))
+                throw error
+            Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100)
+        }
+    }
+}
 
 /** A one-page PDF with a line of text and a valid xref table. */
 function tinyPdf(): string {
