@@ -299,6 +299,15 @@ function userText(r: ClaudeRecord): string {
     return t
 }
 
+/** What a local slash command printed (`<local-command-stdout>`), without the colour codes; '' if r is not that. */
+function commandOutput(r: ClaudeRecord): string {
+    const content = r.message?.content ?? r.content
+    const t = typeof content === 'string' ? content : blocksOf(r).filter(b => b?.type === 'text').map(b => str(b.text)).join('\n')
+    const m = /^<local-command-(?:stdout|stderr)>([\s\S]*?)<\/local-command-(?:stdout|stderr)>$/.exec(t.trim())
+    // eslint-disable-next-line no-control-regex
+    return m ? m[1].replace(/\u001B\[[0-9;]*[A-Za-z]/g, '') : ''
+}
+
 function imagesOf(r: ClaudeRecord) {
     return blocksOf(r)
         .filter(b => b?.type === 'image' && typeof b.source?.data === 'string')
@@ -463,6 +472,11 @@ export class ClaudeFold {
         }
         if (r.isMeta || r.origin?.kind === 'task-notification')
             return
+        const output = commandOutput(r)
+        if (output) {
+            this.transcript.commandOutput(output)
+            return
+        }
         const text = userText(r)
         if (text.startsWith(INTERRUPTED)) {
             this.endStream()
@@ -493,10 +507,22 @@ export class ClaudeFold {
             this.compactTokens = r.compactMetadata?.preTokens ?? 0
         }
         else if (r.subtype === 'local_command' && typeof r.content === 'string') {
+            const output = commandOutput(r)
             const text = userText({ type: 'user', message: { content: r.content } })
-            if (text) {
+            if (output) {
+                this.transcript.commandOutput(output)
+            }
+            else if (text) {
                 this.transcript.userPrompt(text)
                 this.meta.firstPrompt ??= text
+            }
+        }
+        else if (r.subtype === 'informational' && typeof r.content === 'string') {
+            // A command Claude Code does not know leaves no prompt record, only this line.
+            const unknown = /^Unknown command: (\/\S+)/.exec(r.content)
+            if (unknown) {
+                this.transcript.userPrompt(unknown[1])
+                this.transcript.commandOutput(r.content)
             }
         }
     }

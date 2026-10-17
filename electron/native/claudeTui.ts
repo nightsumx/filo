@@ -194,6 +194,8 @@ const ENTER = '\r'
 const STARTUP_GRACE_MS = 2500
 /** A submitted prompt's record lands within this; a hook-only turn (none) does not hold the thread. */
 const PROMPT_RECORD_MS = 8000
+/** How long a slash command may leave no trace before it counts as answered on the TUI's screen. */
+const SCREEN_ONLY_MS = 3000
 /** A prompt in the file with no UserPromptSubmit this long after: the hooks do not come. */
 const HOOK_SILENCE_MS = 3000
 const SLEEP = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
@@ -234,11 +236,14 @@ export class ClaudeTuiAgent implements AgentAdapter {
     private slowStart = false
     /** Characters the user typed in the TUI's input since the last submit: a GUI prompt would join their line. */
     private dirty = 0
+    /** A command was answered on the TUI's screen, maybe in a dialog (/cost) that takes the next keys. */
+    private screenDialog = false
     private lastPre: { name: string, input: string, id: string } | null = null
     private waits = new Map<string, Approval>()
     private model = ''
     private permissionMode = ''
     private poll: ReturnType<typeof setInterval> | null = null
+    private idlePoll: ReturnType<typeof setInterval> | null = null
     private stopTimer: ReturnType<typeof setTimeout> | null = null
     private titleSent = ''
     private named = false
@@ -312,6 +317,11 @@ export class ClaudeTuiAgent implements AgentAdapter {
         this.hooksIssue = found.issue?.cause === 'disabled' && override ? undefined : found.issue
         const hooks = await registerHooks(event => this.hook(event), found.urlAllowlist ? 'command' : 'http')
         this.disposeHooks = hooks.dispose
+        // A command typed in the TUI that only prints (/cost, /context) fires no hook; its record is picked up from the file.
+        this.idlePoll ??= setInterval(() => {
+            if (!this.running && !this.exited)
+                this.tail()
+        }, 2000)
         const settings: Record<string, unknown> = { ...hooks.settings }
         if (override)
             settings.disableAllHooks = false
@@ -686,6 +696,8 @@ export class ClaudeTuiAgent implements AgentAdapter {
 
     /** Keys a window typed into the TUI: a line in progress there holds the GUI's prompts back. */
     private typed(data: string) {
+        // The user is at the TUI: whatever it shows is theirs to close.
+        this.screenDialog = false
         // Sign-in and the folder question come before the prompt (no hooks: no telling when).
         if (!this.started && !this.hooksIssue)
             return
@@ -740,6 +752,12 @@ export class ClaudeTuiAgent implements AgentAdapter {
         }
         if (this.waits.size)
             throw new Error(tr('先回答 Claude Code 正在问的问题', 'Answer what Claude Code is asking first'))
+        // The dialog a screen-only command left open would take this prompt's keys: close it, as the user would.
+        if (this.screenDialog) {
+            this.screenDialog = false
+            terminals!.inject(this.terminal, ESC)
+            await SLEEP(300)
+        }
         for (const file of saveImages(images)) {
             terminals!.inject(this.terminal, paste(file))
             await SLEEP(120)
@@ -763,6 +781,17 @@ export class ClaudeTuiAgent implements AgentAdapter {
         // A command that opens a menu (/model, /config, …) is answered in the TUI.
         if (/^\/\S+$/.test(text.trim()) && !/^\/(compact|clear|cost|exit)$/.test(text.trim()))
             this.emit({ type: 'tui_view', show: true, reason: 'command' })
+    }
+
+    /** True when a prompt just sent left no trace (no hook, no record, no turn) for a few seconds. */
+    private async screenOnly(was: { submitted: number, prompts: number }): Promise<boolean> {
+        for (let waited = 0; waited < SCREEN_ONLY_MS; waited += 100) {
+            await SLEEP(100)
+            this.tail()
+            if (this.submitted > was.submitted || this.log.fold.prompts > was.prompts || this.running || this.waits.size || this.exited)
+                return false
+        }
+        return true
     }
 
     private async command(line: string) {
@@ -819,7 +848,15 @@ export class ClaudeTuiAgent implements AgentAdapter {
                     const message = String(command.message ?? '')
                     if (this.guiCommand(message))
                         return ok({ disposition: 'handled' })
+                    const was = { running: this.running, submitted: this.submitted, prompts: this.log.fold.prompts }
                     await this.prompt(message, Array.isArray(command.images) ? command.images as ImageContent[] : [])
+                    // A command Claude Code answers on its screen only (/cost, /context in some versions) writes nothing
+                    // to the session file and fires no hook, so the thread would wait for a turn that never comes.
+                    if (!was.running && /^\/[\w:.-]+/.test(message.trim()) && !/^\/(compact|clear|exit)(\s|$)/.test(message.trim()) && await this.screenOnly(was)) {
+                        this.screenDialog = true
+                        this.emit({ type: 'tui_view', show: true, reason: 'command' })
+                        return ok({ disposition: 'handled' })
+                    }
                     return ok({})
                 }
                 case 'claude_enable_hooks':
@@ -883,6 +920,9 @@ export class ClaudeTuiAgent implements AgentAdapter {
         if (this.poll)
             clearInterval(this.poll)
         this.poll = null
+        if (this.idlePoll)
+            clearInterval(this.idlePoll)
+        this.idlePoll = null
         if (this.stopTimer)
             clearTimeout(this.stopTimer)
         this.stopTimer = null

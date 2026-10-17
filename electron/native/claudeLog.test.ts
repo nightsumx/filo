@@ -21,6 +21,29 @@ const done = (parent: string) => rec('system', parent, { subtype: 'turn_duration
 const roles = (log: ClaudeLog) => log.transcript.messages.map(m => m.message.role)
 
 describe('claude session file', () => {
+    it('shows a command Claude Code does not know, with its answer', () => {
+        const a = rec('system', null, { subtype: 'informational', content: 'Unknown command: /zzz', level: 'warning' })
+        const b = rec('system', a.uuid!, { subtype: 'informational', content: 'Auto mode lets Claude handle permission prompts', level: 'info' })
+        const log = new ClaudeLog('k:')
+        log.add([a, b])
+        expect(log.transcript.messages.map(m => m.message)).toMatchObject([
+            { role: 'user', content: [{ type: 'text', text: '/zzz' }] },
+            { role: 'custom', customType: '/zzz', content: 'Unknown command: /zzz', display: true },
+        ])
+    })
+
+    it('shows what a local slash command printed, under the command', () => {
+        const a = rec('user', null, { message: { role: 'user', content: '<command-name>/cost</command-name>\n<command-message>cost</command-message>\n<command-args></command-args>' } })
+        const b = rec('user', a.uuid!, { message: { role: 'user', content: '<local-command-stdout>Total cost: \u001B[1m$0.42\u001B[0m</local-command-stdout>' } })
+        const c = rec('user', b.uuid!, { message: { role: 'user', content: '<local-command-stdout></local-command-stdout>' } })
+        const log = new ClaudeLog('k:')
+        log.add([a, b, c])
+        expect(log.transcript.messages.map(m => m.message)).toMatchObject([
+            { role: 'user', content: [{ type: 'text', text: '/cost' }] },
+            { role: 'custom', customType: '/cost', content: 'Total cost: $0.42', display: true },
+        ])
+    })
+
     it('folds a turn: prompt, text, a command with its output, the closing text', () => {
         const a = prompt(null, 'BASH1 now')
         const b = reply(a.uuid!, 'msg_1', { type: 'text', text: 'Running command 1.' })
@@ -109,7 +132,8 @@ describe('claude session file', () => {
         const d = rec('user', c.uuid!, { message: { role: 'user', content: '<bash-input>ls</bash-input>' } })
         const log = new ClaudeLog('k:')
         log.add([a, b, c, d])
-        expect(log.transcript.messages.map(m => (m.message as any).content[0].text)).toEqual(['/model opus', '!ls'])
+        // The caveat is meta and dropped; what /model printed is a note under it.
+        expect(log.transcript.messages.map(m => (m.message as any).content[0]?.text ?? (m.message as any).content)).toEqual(['/model opus', 'Set model', '!ls'])
         expect(log.fold.turnOpen).toBe(false)
     })
 

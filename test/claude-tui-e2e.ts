@@ -47,7 +47,10 @@ function reply(body: any): any[] {
         if (m.role !== 'user')
             break
         const result = Array.isArray(m.content) ? m.content.find((b: any) => b.type === 'tool_result') : undefined
-        if (result) {
+        // After a resume Claude Code folds the new prompt into the user turn that holds the last tool result
+        // (the API wants them together); that is a prompt, not a tool turn. Reminders are tags: `<…>`.
+        const prompted = Array.isArray(m.content) && m.content.some((b: any) => b.type === 'text' && b.text.trim() && !b.text.trimStart().startsWith('<'))
+        if (result && !prompted) {
             const out = typeof result.content === 'string' ? result.content : JSON.stringify(result.content)
             return [{ type: 'text', text: `Tool finished: ${out.slice(0, 200)}` }]
         }
