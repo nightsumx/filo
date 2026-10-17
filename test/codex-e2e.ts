@@ -248,9 +248,11 @@ async function main() {
         await until('back on the first tab', () => js<boolean>(`${T}.key === ${JSON.stringify(key)}`))
         check(await js<boolean>(`${T}.features.compaction`), 'Compact is offered (Codex lists /compact)')
         script.push({ text: 'Summary: notes in Markdown.' })
-        await js(`(() => { void ${T}.compact(); return true })()`)
+        await js(`(() => { const b = document.querySelector('button[aria-label="Compact context"]'); b.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, pointerType: 'mouse' })); b.click(); return true })()`)
+        await until('the compact popover', () => js<boolean>(`!!document.querySelector('[data-compact-popover]')`))
+        await js(`(() => { [...document.querySelectorAll('[data-compact-popover] button')].find(b => b.textContent.trim() === 'Compact').click(); return true })()`)
         await until('compacted', () => js<boolean>(`(() => { const t = ${T}; return !t.running && JSON.stringify(t.turns.at(-1).steps).includes('compaction') })()`), 20_000)
-        check(true, 'Compact runs as a turn and leaves a compaction note')
+        check(true, 'the Compact button runs it as a turn and leaves a compaction note')
         if (SHOTS)
             await page.screenshot(path.join(SHOTS, 'codex-compact.png'))
 

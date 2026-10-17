@@ -551,7 +551,7 @@ export const CompactButton = observer(({ thread }: { thread: Thread }) => {
                 {thread.compacting ? <Loader2 size={13} className="animate-spin" /> : <Shrink size={13} />}
                 <span>{thread.compacting ? tr('压缩中', 'Compacting') : tr('压缩', 'Compact')}</span>
             </PopoverTrigger>
-            <PopoverContent align="start" sideOffset={6} className="w-[320px] p-3">
+            <PopoverContent align="start" sideOffset={6} className="w-[320px] p-3" data-compact-popover>
                 <div className="text-[12px] font-medium text-gray-800">{tr('压缩上下文', 'Compact context')}</div>
                 <p className="mt-1 text-[12px] text-gray-500">{tr('把前面的对话总结成一段，腾出上下文空间。', 'Summarizes the conversation so far to free up context.')}</p>
                 {thread.features.compactInstructions && (

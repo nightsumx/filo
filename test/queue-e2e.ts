@@ -111,7 +111,9 @@ async function main() {
 
         // ---------------------------------------------------------------- typed during a compaction
         compactSlowly = true
-        await page.evaluate(`(() => { void ${T}.compact(); return true })()`)
+        await page.evaluate(`(() => { const b = document.querySelector('button[aria-label="Compact context"]'); b.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, pointerType: 'mouse' })); b.click(); return true })()`)
+        await until('the compact popover', () => page.evaluate<boolean>(`!!document.querySelector('[data-compact-popover]')`))
+        await page.evaluate(`(() => { [...document.querySelectorAll('[data-compact-popover] button')].find(b => b.textContent.trim() === 'Compact').click(); return true })()`)
         await until('compacting', () => page.evaluate<boolean>(`${T}.compacting`))
         await send('after compaction', true)
         check(await page.evaluate<string>(`${T}.compactionQueue.map(q => q.text).join('|')`) === 'after compaction', 'a message typed while pi compacts is held, as its TUI holds it')
