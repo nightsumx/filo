@@ -244,16 +244,16 @@ async function main() {
         await settled('a second answer', 'echo: hello again')
         await until('the figure button', () => js<boolean>(`!!document.querySelector('button[title^="Context usage"]')`))
         await shot('05-grok-context-figure')
+        // The figure opens the usage detail (the session info), for every agent.
         await js(`(() => { document.querySelector('button[title^="Context usage"]').click(); return true })()`)
-        const workingLine = () => js<boolean>(`[...document.querySelectorAll('span')].some(e => e.children.length === 0 && e.textContent === 'Compacting context…')`)
-        await until('the compacting line', workingLine, 5000)
-        check(true, 'while Grok compacts the thread shows a "Compacting context…" working line')
-        await shot('04a-grok-compacting')
-        await until('compacted', async () => (await notes('Context compacted')) === 1, 15_000)
-        check(!(await workingLine()), 'and the line is gone once it is done')
-        check(await js<number>(`${T}.stats.contextUsage.tokens`) < before + 100, 'clicking the context figure compacts, and the figure shrinks without reopening the thread')
-        check(!(await js<boolean>(`${T}.compacting`)), 'the compacting state ends')
-        await shot('06-grok-compact-click')
+        const dialogText = () => js<string>(`document.querySelector('[role="dialog"]')?.textContent ?? ''`)
+        await until('the usage detail', async () => (await dialogText()).includes('Context usage'))
+        const detail = await dialogText()
+        check(detail.includes('Context usage') && /\d/.test(detail), 'clicking the context figure opens the session info, with the context row and its numbers')
+        await shot('05a-grok-usage-detail')
+        await page.call('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 })
+        await page.call('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 })
+        await until('the detail closes', async () => !(await dialogText()))
 
         // The compact button beside the pickers: Grok takes no note on what to keep, so the popover has no field for it.
         const pill = `document.querySelector('button[aria-label="Compact context"]')`
@@ -263,8 +263,14 @@ async function main() {
         check(!(await js<boolean>(`!!document.querySelector('[role="dialog"] input')`)), 'Grok: the compact popover has no "what to keep" field, since Grok takes none')
         await shot('06a-grok-compact-button')
         await js(`(() => { [...document.querySelectorAll('[role="dialog"] button')].find(b => b.textContent.trim() === 'Compact').click(); return true })()`)
-        await until('compacted by the button', async () => (await notes('Context compacted')) === 2, 15_000)
-        check(true, 'Grok: the compact button compacts, and the popover closes')
+        const workingLine = () => js<boolean>(`[...document.querySelectorAll('span')].some(e => e.children.length === 0 && e.textContent === 'Compacting context…')`)
+        await until('the compacting line', workingLine, 5000)
+        check(true, 'while Grok compacts the thread shows a "Compacting context…" working line')
+        await shot('04a-grok-compacting')
+        await until('compacted by the button', async () => (await notes('Context compacted')) === 1, 15_000)
+        check(!(await workingLine()), 'and the line is gone once it is done')
+        check(await js<number>(`${T}.stats.contextUsage.tokens`) < before + 100, 'the compact button compacts, and the figure shrinks without reopening the thread')
+        check(!(await js<boolean>(`${T}.compacting`)), 'the compacting state ends')
 
         // Whatever else is typed is the agent's to read: no refusal, no routing.
         const t1 = await turns()

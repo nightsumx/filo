@@ -10,6 +10,7 @@ import { useEffect, useState } from 'react'
 import { CacheFigure } from './CachePanel'
 import { SpendFigure } from './SpendPanel'
 import { tr } from '@/lib/i18n'
+import { showSessionInfo } from '../Tabs/SessionInfo'
 
 // xterm-256 colours cc-statusline uses (108, 110, 141, 244, 179, 174); light theme gets darker twins in index.css.
 const OK = 'text-[var(--sl-ok)]'
@@ -107,21 +108,18 @@ export const StatusLine = observer(({ thread }: { thread: Thread }) => {
                 <span className={MUTED}>{`${k(usage.tokens)}/${k(usage.contextWindow)}`}</span>
             </>
         )
-        // The terminal's /compact, one click away from the figure it shrinks.
-        parts.push(thread.features.compaction
-            ? (
-                    <button
-                        key="ctx"
-                        type="button"
-                        disabled={thread.running || thread.compacting}
-                        title={thread.compacting ? tr('正在压缩上下文', 'Compacting context') : tr('上下文用量，点击压缩', 'Context usage; click to compact')}
-                        onClick={() => void thread.compact()}
-                        className="rounded-sm outline-none hover:underline focus-visible:ring-1 focus-visible:ring-gray-400 disabled:no-underline"
-                    >
-                        {figure}
-                    </button>
-                )
-            : <span key="ctx" title={tr('上下文用量', 'Context usage')}>{figure}</span>)
+        // The usage detail: the session info dialog (tokens, cost, context), for every agent. Compacting is the button beside the pickers.
+        parts.push(
+            <button
+                key="ctx"
+                type="button"
+                title={tr('上下文用量，点击看明细', 'Context usage; click for details')}
+                onClick={() => showSessionInfo(thread)}
+                className="rounded-sm outline-none hover:underline focus-visible:ring-1 focus-visible:ring-gray-400"
+            >
+                {figure}
+            </button>,
+        )
     }
 
     // The conversation's prompt-cache hit rate; a turn's own is in its footer's card. A significant miss on the latest
