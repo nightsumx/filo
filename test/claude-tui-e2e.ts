@@ -282,6 +282,17 @@ async function main() {
             const mcpOf = async () => existsSync(claudeJson) ? (JSON.parse(await readFile(claudeJson, 'utf8')).projects?.[repo]?.mcpServers ?? {}) as Record<string, any> : {}
             await js(`(() => { window.__app.openSettings('claude'); return true })()`)
             await until('the Claude Code page', () => js<boolean>(`!!document.querySelector('[data-mcp-form]')`))
+            // /memory: the auto memory switch is autoMemoryEnabled in Claude Code's settings.json (on until set to false).
+            const memoryOn = async () => JSON.parse(await readFile(path.join(config, 'settings.json'), 'utf8')).autoMemoryEnabled
+            const memorySwitch = `document.querySelector('[role="switch"]')`
+            check(await js<string>(`${memorySwitch}.getAttribute('aria-checked')`) === 'true', 'auto memory shows on by default')
+            await js(`(() => { ${memorySwitch}.click(); return true })()`)
+            await until('autoMemoryEnabled false', async () => (await memoryOn()) === false)
+            await until('the switch off', () => js<boolean>(`${memorySwitch}.getAttribute('aria-checked') === 'false'`))
+            check(JSON.parse(await readFile(path.join(config, 'settings.json'), 'utf8')).modelSettings !== undefined, 'the switch writes autoMemoryEnabled false and keeps the other settings')
+            await js(`(() => { ${memorySwitch}.click(); return true })()`)
+            await until('autoMemoryEnabled true', async () => (await memoryOn()) === true)
+            check(await js<boolean>(`!!document.querySelector('[data-memory-files]')`), 'and the memory files are offered')
             const type = async (label: string, text: string) => {
                 await js(`(() => { document.querySelector('[aria-label=${JSON.stringify(label)}]').focus(); return true })()`)
                 await page.call('Input.insertText', { text })

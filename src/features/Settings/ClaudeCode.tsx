@@ -1,9 +1,9 @@
 // Settings → Claude Code: what its terminal commands /mcp (and more, below) do. Everything is Claude Code's
 // own: the servers are in its .claude.json and the project's .mcp.json, changed with `claude mcp add` and
 // `claude mcp remove` (the user's own claude), so the terminal's `claude` sees the same. Nothing is kept here.
-import type { ClaudeMcpServer } from '@shared/ipc'
+import type { ClaudeMcpServer, ClaudeMemory } from '@shared/ipc'
 import { Button } from '@/components/ui/button'
-import { Comment, flatFieldClass, Segmented, SettingRow, SettingsPage } from '@/components/ui/form'
+import { Comment, flatFieldClass, Segmented, Switch, SettingRow, SettingsPage } from '@/components/ui/form'
 import { confirm } from '@/lib/confirm'
 import { tr } from '@/lib/i18n'
 import { appStore } from '@/store/app'
@@ -131,8 +131,58 @@ const McpSection = observer(() => {
     )
 })
 
+const MemorySection = observer(() => {
+    const cwd = appStore.project?.cwd
+    const [memory, setMemory] = useState<ClaudeMemory>()
+    useEffect(() => {
+        if (cwd)
+            void window.pi.claudeMemory(cwd).then(setMemory, () => setMemory(undefined))
+    }, [cwd])
+    if (!cwd || !memory)
+        return null
+    const toggle = async (enabled: boolean) => {
+        try {
+            await window.pi.setClaudeAutoMemory(enabled)
+            setMemory(await window.pi.claudeMemory(cwd))
+        }
+        catch (error: any) {
+            toast.error(tr('保存失败', 'Could not save'), { description: error.message })
+        }
+    }
+    return (
+        <>
+            <SettingRow
+                title={tr('自动记忆', 'Auto memory')}
+                description={tr(
+                    'Claude Code 把学到的东西记成笔记，下次对话自动带上。存在它自己的 settings.json（autoMemoryEnabled），和终端里的 /memory 同一个开关；新开的线程生效。',
+                    'Claude Code keeps notes of what it learns and brings them to the next conversation. Saved in its own settings.json (autoMemoryEnabled), the same switch as /memory in the terminal; new threads use it.',
+                )}
+                control={({ labelId, descId }) => <Switch checked={memory.enabled} labelledBy={labelId} describedBy={descId} onChange={v => void toggle(v)} />}
+            />
+            <SettingRow
+                title={tr('记忆文件', 'Memory files')}
+                description={tr('Claude Code 每次对话都会读的说明和笔记。', 'The instructions and notes Claude Code reads in every conversation.')}
+                control={() => (
+                    <span className="flex shrink-0 items-center gap-2" data-memory-files>
+                        <Button variant="outline" size="sm" disabled={!memory.projectFile} onClick={() => appStore.openFile(memory.projectFile!, cwd)}>
+                            {tr('项目的 CLAUDE.md', 'Project CLAUDE.md')}
+                        </Button>
+                        <Button variant="outline" size="sm" onClick={() => void (memory.userFile ? window.pi.revealPath(memory.userFile) : window.pi.openFolder(memory.userFolder))}>
+                            {tr('你的 CLAUDE.md', 'Your CLAUDE.md')}
+                        </Button>
+                        <Button variant="outline" size="sm" disabled={!memory.dir} onClick={() => void window.pi.openFolder(memory.dir!)}>
+                            {tr('笔记文件夹', 'Notes folder')}
+                        </Button>
+                    </span>
+                )}
+            />
+        </>
+    )
+})
+
 export const ClaudeCodePage = observer(() => (
     <SettingsPage title="Claude Code">
+        <MemorySection />
         <McpSection />
     </SettingsPage>
 ))

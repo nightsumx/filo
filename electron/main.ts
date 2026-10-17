@@ -18,7 +18,7 @@ import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, net, Notificati
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { AcpService } from './acp/service'
-import { claudeMcpServers, mcpAddArgs, mcpRemoveArgs } from './claudeSettings'
+import { claudeMcpServers, claudeMemory, setClaudeAutoMemory, mcpAddArgs, mcpRemoveArgs } from './claudeSettings'
 import { AgentManager } from './agents'
 import { BACKGROUND, reveal } from './background'
 import { applySave, savedWindows, StateFile } from './appState'
@@ -579,6 +579,8 @@ function registerIpc() {
             throw new Error(String(error?.stderr || error?.stdout || error?.message || error).trim())
         }
     }
+    ipcMain.handle(IPC.claudeMemory, (_e, cwd: unknown) => claudeMemory(absolutePath(cwd)))
+    ipcMain.handle(IPC.setClaudeAutoMemory, (_e, enabled: unknown) => setClaudeAutoMemory(enabled))
     ipcMain.handle(IPC.claudeMcp, (_e, cwd: unknown) => claudeMcp(cwd))
     ipcMain.handle(IPC.addClaudeMcp, async (_e, input: ClaudeMcpAdd) => {
         const cwd = absolutePath(input?.cwd)

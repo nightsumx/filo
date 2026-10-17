@@ -1,8 +1,9 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { claudeJsonPath, claudeMcpServers, commandWords, mcpAddArgs, mcpRemoveArgs } from './claudeSettings'
+import { claudeJsonPath, claudeMcpServers, claudeMemory, commandWords, mcpAddArgs, mcpRemoveArgs, setClaudeAutoMemory } from './claudeSettings'
+import { projectSlug } from './native/claudeTui'
 
 describe('commandWords', () => {
     it('splits on spaces and keeps quoted words whole', () => {
@@ -72,5 +73,37 @@ describe('claudeMcpServers', () => {
 
     it('is empty without any file', async () => {
         expect(await claudeMcpServers(path.join(dir, 'p'), { CLAUDE_CONFIG_DIR: dir }, '/nowhere')).toEqual([])
+    })
+})
+
+describe('claude memory', () => {
+    let dir: string
+    beforeEach(async () => {
+        dir = await mkdtemp(path.join(os.tmpdir(), 'claude-mem-'))
+    })
+    afterEach(() => rm(dir, { recursive: true, force: true }))
+
+    it('is on unless settings.json says false, and finds the files that exist', async () => {
+        const cwd = path.join(dir, 'proj')
+        const env = { CLAUDE_CONFIG_DIR: path.join(dir, 'cfg') }
+        await mkdir(cwd, { recursive: true })
+        expect(await claudeMemory(cwd, env)).toEqual({ enabled: true, userFolder: env.CLAUDE_CONFIG_DIR, userFile: undefined, projectFile: undefined, dir: undefined })
+        const notes = path.join(env.CLAUDE_CONFIG_DIR, 'projects', projectSlug(cwd), 'memory')
+        await mkdir(notes, { recursive: true })
+        await writeFile(path.join(env.CLAUDE_CONFIG_DIR, 'CLAUDE.md'), 'mine')
+        await writeFile(path.join(cwd, 'CLAUDE.md'), 'ours')
+        await writeFile(path.join(env.CLAUDE_CONFIG_DIR, 'settings.json'), JSON.stringify({ autoMemoryEnabled: false }))
+        expect(await claudeMemory(cwd, env)).toMatchObject({ enabled: false, userFile: path.join(env.CLAUDE_CONFIG_DIR, 'CLAUDE.md'), projectFile: path.join(cwd, 'CLAUDE.md'), dir: notes })
+    })
+
+    it('writes the switch and keeps every other key', async () => {
+        const env = { CLAUDE_CONFIG_DIR: path.join(dir, 'cfg') }
+        await mkdir(env.CLAUDE_CONFIG_DIR, { recursive: true })
+        await writeFile(path.join(env.CLAUDE_CONFIG_DIR, 'settings.json'), JSON.stringify({ model: 'opus', hooks: { a: 1 } }))
+        await setClaudeAutoMemory(false, env)
+        expect(JSON.parse(await readFile(path.join(env.CLAUDE_CONFIG_DIR, 'settings.json'), 'utf8'))).toEqual({ model: 'opus', hooks: { a: 1 }, autoMemoryEnabled: false })
+        await setClaudeAutoMemory(true, env)
+        expect((await claudeMemory(dir, env)).enabled).toBe(true)
+        await expect(setClaudeAutoMemory('no', env)).rejects.toThrow()
     })
 })

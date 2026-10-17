@@ -3,12 +3,14 @@
 // `claude` reads the same. The user-level servers live in `.claude.json` (inside CLAUDE_CONFIG_DIR when set,
 // else in the home folder), a project's own in `.claude.json` under `projects.<folder>` (local) and in the
 // project's `.mcp.json` (project, for the team).
-import type { ClaudeMcpAdd, ClaudeMcpRemove, ClaudeMcpServer } from '@shared/ipc'
-import { readFile } from 'node:fs/promises'
+import type { ClaudeMcpAdd, ClaudeMcpRemove, ClaudeMcpServer, ClaudeMemory } from '@shared/ipc'
+import { existsSync } from 'node:fs'
+import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import process from 'node:process'
 import { tr } from './i18n'
+import { claudeDir, projectSlug } from './native/claudeTui'
 
 type Env = Record<string, string | undefined>
 
@@ -122,4 +124,40 @@ export function mcpRemoveArgs(input: ClaudeMcpRemove): string[] {
     if (!SCOPES.includes(input.scope) || !NAME.test(input.name))
         throw new Error('unknown scope or name')
     return ['mcp', 'remove', '-s', input.scope, input.name]
+}
+
+// ---------------------------------------------------------------- memory
+
+const settingsFile = (env: Env) => path.join(claudeDir(env), 'settings.json')
+
+/**
+ * What /memory shows: whether auto memory is on (settings.json's autoMemoryEnabled, on unless set to false),
+ * and where the files are: your CLAUDE.md, the project's, and the folder Claude Code writes its notes in
+ * (autoMemoryDirectory, else projects/<project>/memory inside its folder).
+ */
+export async function claudeMemory(cwd: string, env: Env = process.env): Promise<ClaudeMemory> {
+    const settings = await readJson(settingsFile(env))
+    const custom = typeof settings.autoMemoryDirectory === 'string' && path.isAbsolute(settings.autoMemoryDirectory) ? settings.autoMemoryDirectory : undefined
+    const userFile = path.join(claudeDir(env), 'CLAUDE.md')
+    const projectFile = [path.join(cwd, 'CLAUDE.md'), path.join(cwd, '.claude', 'CLAUDE.md')].find(existsSync)
+    const dir = custom ?? path.join(claudeDir(env), 'projects', projectSlug(cwd), 'memory')
+    return {
+        enabled: settings.autoMemoryEnabled !== false,
+        userFile: existsSync(userFile) ? userFile : undefined,
+        userFolder: claudeDir(env),
+        projectFile,
+        dir: existsSync(dir) ? dir : undefined,
+    }
+}
+
+/** autoMemoryEnabled in Claude Code's settings.json, as /memory writes it; the other keys stay as they are. */
+export async function setClaudeAutoMemory(enabled: unknown, env: Env = process.env): Promise<void> {
+    if (typeof enabled !== 'boolean')
+        throw new Error('expected true or false')
+    const file = settingsFile(env)
+    const settings = await readJson(file)
+    await mkdir(path.dirname(file), { recursive: true })
+    const tmp = `${file}.${process.pid}.tmp`
+    await writeFile(tmp, `${JSON.stringify({ ...settings, autoMemoryEnabled: enabled }, null, 2)}\n`)
+    await rename(tmp, file)
 }

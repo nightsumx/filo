@@ -396,6 +396,19 @@ export interface ClaudeMcpServer {
     target: string
 }
 
+/** Claude Code's memory (its /memory): the switch for auto memory, and the files it reads and writes. */
+export interface ClaudeMemory {
+    enabled: boolean
+    /** Your CLAUDE.md, when there is one. */
+    userFile?: string
+    /** Claude Code's own folder, where your CLAUDE.md goes. */
+    userFolder: string
+    /** The project's CLAUDE.md, when there is one. */
+    projectFile?: string
+    /** The folder of notes Claude Code keeps for the project, once it has written some. */
+    dir?: string
+}
+
 export interface ClaudeMcpAdd {
     cwd: string
     name: string
@@ -574,6 +587,9 @@ export interface PiBridge {
     setProjectTrust: (cwd: string, decision: boolean | null) => Promise<ProjectTrust>
     /** The MCP servers Claude Code has for a project (its .claude.json and the project's .mcp.json). */
     claudeMcp: (cwd: string) => Promise<ClaudeMcpServer[]>
+    claudeMemory: (cwd: string) => Promise<ClaudeMemory>
+    /** autoMemoryEnabled in Claude Code's settings.json. */
+    setClaudeAutoMemory: (enabled: boolean) => Promise<void>
     /** `claude mcp add`, with the user's own claude; resolves to the list afterwards. */
     addClaudeMcp: (input: ClaudeMcpAdd) => Promise<ClaudeMcpServer[]>
     /** `claude mcp remove`. */
@@ -758,6 +774,8 @@ export const IPC = {
     projectTrust: 'pi:project-trust',
     setProjectTrust: 'pi:set-project-trust',
     claudeMcp: 'claude:mcp',
+    claudeMemory: 'claude:memory',
+    setClaudeAutoMemory: 'claude:set-auto-memory',
     addClaudeMcp: 'claude:mcp-add',
     removeClaudeMcp: 'claude:mcp-remove',
     scopedModels: 'pi:scoped-models',
