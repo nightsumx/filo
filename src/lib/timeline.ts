@@ -58,7 +58,7 @@ export type Step =
     | { kind: 'tool', key: string, call: ToolCall, result?: ToolResultView, running: boolean, startedAt?: number, ms?: number, endedAt?: number }
     | { kind: 'bash', key: string, message: BashExecutionMessage }
     /** title is set for custom notes only; compaction / branch titles come from the transcript wording. */
-    | { kind: 'note', key: string, variant: 'compaction' | 'branch' | 'custom', title: string, text: string }
+    | { kind: 'note', key: string, variant: 'compaction' | 'branch' | 'custom' | 'command', title: string, text: string }
     /** text is empty when pi gave no message; the view then says "Aborted" / "Request failed". */
     | { kind: 'error', key: string, text: string, aborted: boolean }
     /** A review report; `applied` lists its item ids already sent back to the agent. */
@@ -398,7 +398,8 @@ export function buildTurns(messages: TimelineMessage[], options: BuildOptions = 
                     }, message.timestamp)
                 }
                 else if (message.display) {
-                    ensure(key, message.timestamp).steps.push({ kind: 'note', key, variant: 'custom', title: message.customType, text: contentText(message.content) })
+                    // What a slash command printed (customType is the command, `/cost`): shown under the command, not folded.
+                    ensure(key, message.timestamp).steps.push({ kind: 'note', key, variant: message.customType.startsWith('/') ? 'command' : 'custom', title: message.customType, text: contentText(message.content) })
                 }
                 break
             }

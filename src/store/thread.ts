@@ -1637,6 +1637,11 @@ export class Thread {
                 this.compacting = false
                 if (event.errorMessage)
                     toast.error(`${tr('压缩失败：', 'Compaction failed: ')}${readableError(event.errorMessage)}`)
+                // Grok compacts by itself or on a click, outside any turn: the note it left in the
+                // timeline and the shrunk context figure show up only by reading them back.
+                // (Mid-run, the turn's settle reloads.) pi's compact() and settle do this for pi.
+                if (this.agent !== 'pi' && !this.running && !this.settling)
+                    void Promise.all([this.load(), this.refreshStats()]).catch(() => {})
                 void this.flushCompactionQueue()
                 break
             case 'auto_retry_start':

@@ -203,3 +203,12 @@ describe('autopilot', () => {
         expect(buildTurns([...messages, m(decision('wait', [], 2400))]).map(t => t.steps.map(s => s.kind))).toEqual([['tool', 'text'], ['autopilot-card', 'autopilot']])
     })
 })
+
+describe('slash command output', () => {
+    it('a custom message named for a command is a note under it, other custom messages stay folded', () => {
+        const printed = (customType: string): AgentMessage => ({ role: 'custom', customType, content: 'Total cost: $0.42', display: true, timestamp: 2000 })
+        const steps = (customType: string) => buildTurns([m(user('/cost')), m(printed(customType))]).flatMap(t => t.steps)
+        expect(steps('/cost')).toMatchObject([{ kind: 'note', variant: 'command', title: '/cost', text: 'Total cost: $0.42' }])
+        expect(steps('some-extension')).toMatchObject([{ kind: 'note', variant: 'custom' }])
+    })
+})

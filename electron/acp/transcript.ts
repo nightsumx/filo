@@ -16,6 +16,7 @@ import type { AgentMessage, AssistantMessage, ImageContent, PiEvent, TextContent
 import type { AskAnswer, AskDetails, AskQuestion, PlanDetails, TodoItem } from '@shared/capabilities'
 import type { Price } from 'pi-capabilities/lib/prices.ts'
 import { costOf } from 'pi-capabilities/lib/prices.ts'
+import { tr } from '../i18n'
 
 /** ACP stop reasons → pi's. */
 const STOP_REASONS: Record<string, AssistantMessage['stopReason']> = {
@@ -373,6 +374,8 @@ export class AcpTranscript {
     private deferred: ToolState | null = null
     /** Assistant messages finished during the current prompt; the last gets the prompt's usage. */
     private promptStart = 0
+    /** The slash command the last prompt was (`/context`), '' for a plain prompt. */
+    private command = ''
     private emit: (event: PiEvent) => void
     private now: () => number
     private modelInfo: TranscriptOptions['model']
@@ -453,7 +456,22 @@ export class AcpTranscript {
         const content: (TextContent | ImageContent)[] = [...(prompt ? [text(prompt)] : []), ...images]
         this.push({ role: 'user', content, timestamp: this.now() })
         this.promptStart = this.messages.length
+        this.command = /^\/[\w:.-]+(\s|$)/.exec(prompt)?.[0].trim() ?? ''
         this.requests.clear()
+    }
+
+    /** What a slash command printed in place of an answer (Claude Code's /cost, /status…): a note under it. */
+    commandOutput(output: string) {
+        if (!output.trim())
+            return
+        this.closeAssistant('stop')
+        this.push({ role: 'custom', customType: this.command || '/', content: output.trim(), display: true, timestamp: this.now() })
+    }
+
+    /** A command that ran without saying anything: the thread would show a bare prompt, as if it were ignored. */
+    private noteSilentCommand() {
+        if (this.command && this.messages.length === this.promptStart)
+            this.commandOutput(tr('已执行，没有输出。', 'Done, with no output.'))
     }
 
     /** One `session/update` payload (`params.update`). */
@@ -507,6 +525,10 @@ export class AcpTranscript {
         if (this.open && errorMessage)
             this.open.errorMessage = errorMessage
         this.closeAssistant(reason)
+        // A command the agent ran without saying anything (Grok's /context): the thread would show a
+        // bare prompt, as if it were ignored.
+        if (reason === 'stop')
+            this.noteSilentCommand()
         if (usage)
             this.applyUsage(usage)
         this.userOpen = false
@@ -535,9 +557,13 @@ export class AcpTranscript {
             return
         }
         this.closeAssistant('stop')
+        // A replayed history has no prompt requests: the next prompt closes the last one's command.
+        this.noteSilentCommand()
         this.push({ role: 'user', content: [...(t ? [text(t)] : []), ...(image ? [image] : [])], timestamp: this.now() })
         this.userOpen = true
         this.promptStart = this.messages.length
+        // Grok marks the turns it ran itself (not the model) with `hostTurn`: /context, /always-approve…
+        this.command = update._meta?.hostTurn ? /^\/[\w:.-]+(\s|$)/.exec(t)?.[0].trim() ?? '' : ''
     }
 
     private chunk(kind: 'text' | 'thinking', content: any) {

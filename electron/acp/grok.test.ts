@@ -286,6 +286,17 @@ describe('Grok Build', () => {
         await expect(gone.agent.ready).rejects.toThrow(/not found/i)
     })
 
+    it('a command that prints nothing leaves a note, not a bare prompt', async () => {
+        const { agent, send, settled } = start()
+        await agent.ready
+        const done = settled()
+        await send({ type: 'prompt', message: '/context' })
+        await done
+        expect(agent.snapshot().map(({ message: m }: any) => m.role === 'custom' ? [m.role, m.customType, m.display] : m.role)).toEqual(['user', ['custom', '/context', true]])
+        // Reopened, the agent's history has the command and no answer: the same note.
+        expect(await reopened(agent.sessionId)).toEqual(shape(agent))
+    })
+
     it('a failed prompt ends the run with its error', async () => {
         const { agent, send, settled } = start()
         await agent.ready

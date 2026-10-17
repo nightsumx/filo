@@ -54,8 +54,8 @@ function xai(session, update, { stored = true } = {}) {
         store(session, { method: '_x.ai/session/update', params })
 }
 /** A user message Grok stores but does not send (an interjection, a fallback turn's prompt). */
-function storeUser(session, text, contentMeta) {
-    store(session, { method: 'session/update', params: { sessionId: session.id, update: { sessionUpdate: 'user_message_chunk', content: { type: 'text', text, ...(contentMeta ? { _meta: contentMeta } : {}) }, _meta: { modelId: session.model } }, _meta: { eventId: `${session.id}-${++session.events}`, agentTimestampMs: Date.now() } } })
+function storeUser(session, text, contentMeta, hostTurn = false) {
+    store(session, { method: 'session/update', params: { sessionId: session.id, update: { sessionUpdate: 'user_message_chunk', content: { type: 'text', text, ...(contentMeta ? { _meta: contentMeta } : {}) }, _meta: hostTurn ? { hostTurn: true } : { modelId: session.model } }, _meta: { eventId: `${session.id}-${++session.events}`, agentTimestampMs: Date.now() } } })
 }
 
 const say = text => ({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text } })
@@ -118,10 +118,14 @@ async function prompt(session, params) {
     session.promptId = params._meta?.promptId ?? randomUUID()
     session.calls = 0
     session.cancelled = false
-    storeUser(session, text)
+    // Grok stamps the turns it ran itself (not the model) with hostTurn.
+    storeUser(session, text, undefined, text === '/context')
     queueChanged(session, { id: session.promptId, text })
     if (text === 'fail')
         throw Object.assign(new Error('Internal error'), { code: -32603 })
+    // A slash command Grok answers itself and says nothing for (/context, /always-approve): no model call, no message.
+    if (text === '/context')
+        return endTurn(session)
     modelCall(session)
     if (text === 'bash') {
         const id = 'call-b5f46c9f-48df-4853-887e-e439e57611c2-0'
@@ -263,7 +267,7 @@ const handlers = {
     'session/new': (params) => {
         const session = newSession(randomUUID(), params.cwd)
         writeFileSync(metaFile(session.id), JSON.stringify({ cwd: params.cwd }))
-        setTimeout(() => update(session, { sessionUpdate: 'available_commands_update', availableCommands: [{ name: 'compact', description: 'Compress conversation history to save context window', input: null }] }, { transient: true }), 5)
+        setTimeout(() => update(session, { sessionUpdate: 'available_commands_update', availableCommands: [{ name: 'compact', description: 'Compress conversation history to save context window', input: null }, { name: 'context', description: 'Show context window usage', input: null }] }, { transient: true }), 5)
         return { sessionId: session.id, models: { currentModelId: session.model, availableModels: models }, configOptions: configOptions(session) }
     },
     'session/load': (params) => {

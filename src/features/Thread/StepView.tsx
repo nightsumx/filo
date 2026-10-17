@@ -49,7 +49,7 @@ function BashExecution({ id, message }: { id: string, message: Extract<Step, { k
     )
 }
 
-function NoteBlock({ id, variant, title: customTitle, text }: { id: string, variant: 'compaction' | 'branch' | 'custom', title: string, text: string }) {
+function NoteBlock({ id, variant, title: customTitle, text }: { id: string, variant: 'compaction' | 'branch' | 'custom' | 'command', title: string, text: string }) {
     const t = useT()
     const title = variant === 'compaction' ? t.compacted : variant === 'branch' ? t.branchSummary : customTitle
     const [open, setOpen] = useViewState(id, false)
@@ -111,6 +111,14 @@ export const StepView = memo(({ step }: { step: Step }) => {
         case 'autopilot-card':
             return <AutopilotCardStep card={step.card} answer={step.answer} />
         case 'note':
+            if (step.variant === 'command') {
+                // A slash command's printout, like Claude Code's ⎿ under the command it answers.
+                return (
+                    <Gutter mark="⎿" markClassName="text-gray-400">
+                        <pre className="min-h-6 overflow-x-auto py-[3px] font-mono text-[12px] leading-[18px] whitespace-pre-wrap break-words text-gray-600 select-text">{step.text}</pre>
+                    </Gutter>
+                )
+            }
             return <NoteBlock id={step.key} variant={step.variant} title={step.title} text={step.text} />
         case 'error':
             return (
