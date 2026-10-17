@@ -76,6 +76,20 @@ describe('routesService', () => {
         await Promise.all([crashed.shutdown(), routes.shutdown()])
     })
 
+    it('takes out the copy of a model Grok saved beside the block before it starts, or it refuses to', async () => {
+        const routes = service()
+        await routes.save(config)
+        // Picking a model made Grok save it as its own table, beside the block's (same key, once unquoted).
+        await writeFile(path.join(home, '.grok', 'config.toml'), `${await grokToml()}\n[model.filo-g1]\nmodel = "g1"\n\n[models]\ndefault = "filo-g1"\n`)
+        await routes.routeAcp({ id: 'grok', label: 'Grok' } as any, { command: 'grok', args: [], env: {} } as any, { group: 'g1' })
+        const healed = await grokToml()
+        // One table for the model (the default Grok saved still names it), not two.
+        expect(healed.match(/^\[model[."]/gm)).toHaveLength(1)
+        expect(healed).toContain('[model."filo-g1"]')
+        expect(healed).toContain('default = "filo-g1"')
+        await routes.shutdown()
+    })
+
     it('lists the groups pi and Grok can pick, and nothing for the agents a thread puts on a group', async () => {
         const routes = service()
         await routes.save({ ...config, groups: [...config.groups, { id: 'e', name: 'Empty', api: 'openai-completions', mode: 'order', members: [] }] })

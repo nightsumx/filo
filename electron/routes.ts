@@ -18,7 +18,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { pricedModel } from 'pi-capabilities/lib/prices.ts'
 import { AGENT_APIS, EMPTY_ROUTES, groupsFor, isRoutedAgent, memberKey, pickableGroups, ROUTED_AGENT_LABELS, routesOf } from '@shared/routes'
-import { grokBlock, grokModelId, withBlock } from './gateway/agentConfig'
+import { grokBlock, grokModelId, withGrokBlock } from './gateway/agentConfig'
 import { claudeChannelEdits, codexChannelLines, codexChannelToml, codexLines, codexProviderId, codexTables, lineValue } from './gateway/channel'
 import { Gateway, UnreachableMember } from './gateway/server'
 import { applyJson, claudeEdits, codexToml, piEdits, restoreJson } from './gateway/terminalSync'
@@ -344,7 +344,7 @@ export class RoutesService {
                     return ''
                 throw error
             })
-            const next = withBlock(text, block)
+            const next = withGrokBlock(text, block)
             if (next !== text) {
                 await mkdir(path.dirname(file), { recursive: true })
                 await writeFile(file, next)
@@ -674,7 +674,7 @@ export class RoutesService {
             const file = this.grokConfig()
             const text = await readFile(file, 'utf8').catch(() => undefined)
             if (text !== undefined) {
-                const next = withBlock(text, undefined)
+                const next = withGrokBlock(text, undefined)
                 if (next !== text)
                     await writeFile(file, next).catch(() => {})
             }

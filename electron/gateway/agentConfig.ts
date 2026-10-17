@@ -24,6 +24,32 @@ export function withBlock(text: string, block: string | undefined): string {
     return `${rest.replace(/\s*$/, '\n')}\n${body}`
 }
 
+/**
+ * `text` without the tables of Filo's own Grok models. Grok saves the model it was given (unquoted
+ * `[model.filo-…]`, outside the block) once one is picked, and a second table of the same name
+ * (the block's is quoted, the same key in TOML) makes it refuse to start.
+ */
+export function withoutGrokModels(text: string): string {
+    const kept: string[] = []
+    let dropping = false
+    for (const line of text.split('\n')) {
+        const trimmed = line.trim()
+        if (trimmed.startsWith('[')) {
+            const name = trimmed.startsWith('[[') ? '' : trimmed.slice(1).split(']')[0].replaceAll('"', '').replaceAll(' ', '')
+            dropping = name.startsWith(`model.${grokModelId('')}`)
+        }
+        if (!dropping)
+            kept.push(line)
+    }
+    let result = kept.join('\n')
+    while (result.includes('\n\n\n'))
+        result = result.replaceAll('\n\n\n', '\n\n')
+    return result
+}
+
+/** `text` with the block in place of the app's old one and of any copy of its models Grok saved. */
+export const withGrokBlock = (text: string, block: string | undefined) => withBlock(withoutGrokModels(withBlock(text, undefined)), block)
+
 /** A TOML basic string. */
 export const tomlString = (value: string) => JSON.stringify(value).replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029')
 
