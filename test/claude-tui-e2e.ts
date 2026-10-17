@@ -255,6 +255,27 @@ async function main() {
         if (SHOTS)
             await page.screenshot(path.join(SHOTS, 'claude-effort-low.png'))
 
+        // The compact popover's auto-compact threshold (/autocompact): Claude Code writes it for the model in use.
+        {
+            const windowOf = async () => Object.values(JSON.parse(await readFile(path.join(config, 'settings.json'), 'utf8')).modelSettings ?? {}).map((m: any) => m.autoCompactWindow).find(w => w !== undefined)
+            await js(`(() => { const b = document.querySelector('button[aria-label="Compact context"]'); b.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, pointerType: 'mouse' })); b.click(); return true })()`)
+            await until('the auto-compact field', () => js<boolean>(`!!document.querySelector('[data-auto-compact] input')`))
+            if (SHOTS)
+                await page.screenshot(path.join(SHOTS, 'claude-auto-compact.png'))
+            await js(`(() => { document.querySelector('[data-auto-compact] input').focus(); return true })()`)
+            await page.call('Input.insertText', { text: '500' })
+            await js(`(() => { [...document.querySelectorAll('[data-auto-compact] button')].find(b => b.textContent.trim() === 'Set').click(); return true })()`)
+            await until('settings.json to hold the window', async () => (await windowOf()) === 500_000)
+            await until('Claude Code\'s answer in the thread', () => js<boolean>(`JSON.stringify(${T}.turns.at(-1)).includes('Auto-compact window')`))
+            check(true, 'Set sends /autocompact: Claude Code writes 500000 under the model in use and says so in the thread')
+            check(await js<boolean>(`!${T}.running && !${T}.tuiShown`), 'and the thread stays idle, in the chat')
+            await js(`(() => { const b = document.querySelector('button[aria-label="Compact context"]'); b.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, pointerType: 'mouse' })); b.click(); return true })()`)
+            await until('the field again', () => js<boolean>(`!!document.querySelector('[data-auto-compact] input')`))
+            await js(`(() => { [...document.querySelectorAll('[data-auto-compact] button')].find(b => b.textContent.trim() === 'Auto').click(); return true })()`)
+            await until('settings.json to hold auto', async () => (await windowOf()) === 'auto')
+            check(true, 'Auto puts it back to auto')
+        }
+
         // Settings → Claude Code (/mcp): the servers it has, added and removed with the user's claude.
         {
             const claudeJson = path.join(config, '.claude.json')

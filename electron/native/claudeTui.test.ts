@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { hookSettings, listClaudeSessions, projectSlug, sessionFile } from './claudeTui'
+import { autoCompactWindow, hookSettings, listClaudeSessions, projectSlug, sessionFile } from './claudeTui'
 
 describe('claude code session files', () => {
     let dir: string
@@ -65,5 +65,19 @@ describe('claude code session files', () => {
         // An administrator's word wins, from the base file or a drop-in.
         await writeFile(path.join(managed, 'managed-settings.d', '10-hooks.json'), JSON.stringify({ allowManagedHooksOnly: true }))
         expect(hookSettings(config, cwd, [managed]).issue).toEqual({ cause: 'policy', files: [path.join(managed, 'managed-settings.d', '10-hooks.json')] })
+    })
+})
+
+describe('autoCompactWindow', () => {
+    it('writes a window as thousands of tokens, which /autocompact reads', () => {
+        expect(autoCompactWindow(500_000)).toBe('500k')
+        expect(autoCompactWindow(100_000)).toBe('100k')
+        expect(autoCompactWindow(1_000_000)).toBe('1000k')
+        expect(autoCompactWindow('auto')).toBe('auto')
+    })
+
+    it('refuses what Claude Code does not take, so nothing odd is typed into its prompt', () => {
+        for (const bad of [99_999, 1_000_001, 1.5, '500k', '500k\n/exit', null, undefined, Number.NaN])
+            expect(() => autoCompactWindow(bad)).toThrow()
     })
 })

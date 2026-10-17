@@ -165,6 +165,15 @@ const STRIP_ENV = ['CLAUDECODE', 'CLAUDE_CODE_ENTRYPOINT', 'CLAUDE_CODE_SSE_PORT
 const MODEL_ALIASES = [{ id: 'opus', name: 'Opus' }, { id: 'sonnet', name: 'Sonnet' }, { id: 'haiku', name: 'Haiku' }]
 const EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh']
 
+/** What /autocompact is given for a window of tokens (100K to 1M, in thousands) or 'auto'. */
+export function autoCompactWindow(value: unknown): string {
+    if (value === 'auto')
+        return 'auto'
+    if (typeof value !== 'number' || !Number.isInteger(value) || value < 100_000 || value > 1_000_000)
+        throw new Error(tr('自动压缩的阈值要在 10 万到 100 万 token 之间', 'The auto-compact window is between 100,000 and 1,000,000 tokens'))
+    return `${Math.round(value / 1000)}k`
+}
+
 /** Claude Code's folder: CLAUDE_CONFIG_DIR, else ~/.claude. */
 export function claudeDir(env: Record<string, string | undefined> = process.env): string {
     return env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude')
@@ -953,6 +962,12 @@ export class ClaudeTuiAgent implements AgentAdapter {
                         throw new Error(tr(`Claude Code 没有「${String(command.level)}」这一档`, `Claude Code has no "${String(command.level)}" effort`))
                     await this.typeAndConfirm(`/effort ${level}`, 'Switch effort?')
                     this.effort = level
+                    return ok()
+                }
+                case 'set_auto_compact': {
+                    // /autocompact takes 100K to 1M tokens ("500k", "1m") or auto, and writes it under the current model in settings.json.
+                    const window = autoCompactWindow(command.window)
+                    await this.command(`/autocompact ${window}`)
                     return ok()
                 }
                 case 'get_commands':

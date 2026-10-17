@@ -1475,6 +1475,16 @@ export class Thread {
     }
 
     /** `instructions`: what to keep, for the agents that take a note (features.compactInstructions). */
+    /** Claude Code's /autocompact: how full the context gets before it compacts itself, in tokens, or 'auto'. */
+    async setAutoCompact(window: number | 'auto') {
+        try {
+            await this.request({ type: 'set_auto_compact', window })
+        }
+        catch (error: any) {
+            toast.error(error.message)
+        }
+    }
+
     async compact(instructions?: string) {
         try {
             const note = this.features.compactInstructions ? instructions?.trim() : ''

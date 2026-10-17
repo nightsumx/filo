@@ -431,6 +431,40 @@ export const ThinkingPicker = observer(({ thread }: { thread: Thread }) => {
  * Compact the context: a button beside the pickers, not a number to find in the status line. Agents that take
  * a note on what to keep (features.compactInstructions) get a field for it; for the others it is one click.
  */
+/** Claude Code's /autocompact for the model in use: the size the context may reach before it compacts itself. */
+function AutoCompactField({ thread, close }: { thread: Thread, close: () => void }) {
+    const [size, setSize] = useState('')
+    const tokens = Number(size) * 1000
+    const valid = Number.isInteger(tokens) && tokens >= 100_000 && tokens <= 1_000_000
+    const apply = (window: number | 'auto') => {
+        close()
+        void thread.setAutoCompact(window)
+    }
+    return (
+        <div className="mt-3 border-t border-[var(--jb-separator)] pt-2.5" data-auto-compact>
+            <div className="text-[12px] font-medium text-gray-800">{tr('自动压缩的阈值', 'Auto-compact at')}</div>
+            <p className="mt-1 text-[12px] text-gray-500">{tr('上下文到多少 token 时自动压缩，对当前模型生效。', 'How many tokens the context may reach before it compacts itself, for the current model.')}</p>
+            <div className="mt-2 flex items-center gap-2">
+                <input
+                    value={size}
+                    inputMode="numeric"
+                    onChange={e => setSize(e.target.value)}
+                    onKeyDown={(e) => {
+                        if (e.key === 'Enter' && valid && !e.nativeEvent.isComposing)
+                            apply(tokens)
+                    }}
+                    aria-label={tr('阈值（千 token，100 到 1000）', 'Window (thousand tokens, 100 to 1000)')}
+                    placeholder="500"
+                    className={cn(flatFieldClass, 'h-8 w-20 px-2 text-[12px]')}
+                />
+                <span className="text-[12px] text-gray-500">k</span>
+                <Button size="sm" variant="outline" disabled={!valid} onClick={() => apply(tokens)}>{tr('设置', 'Set')}</Button>
+                <Button size="sm" variant="outline" className="ml-auto" onClick={() => apply('auto')}>{tr('自动', 'Auto')}</Button>
+            </div>
+        </div>
+    )
+}
+
 export const CompactButton = observer(({ thread }: { thread: Thread }) => {
     const [open, setOpen] = useState(false)
     const [note, setNote] = useState('')
@@ -474,6 +508,7 @@ export const CompactButton = observer(({ thread }: { thread: Thread }) => {
                 <div className="mt-2.5 flex justify-end">
                     <Button size="sm" onClick={run}>{tr('压缩', 'Compact')}</Button>
                 </div>
+                {thread.agent === 'claude' && <AutoCompactField thread={thread} close={() => setOpen(false)} />}
             </PopoverContent>
         </Popover>
     )
