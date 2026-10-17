@@ -184,6 +184,14 @@ export class AcpService {
         return resolveLaunch(installSpec(spec), this.agentsDir?.())
     }
 
+    /** How an agent's own command runs (its CLI for Claude Code), for one-off subcommands such as `claude mcp list`. */
+    launch(id: string): Promise<AcpLaunch> {
+        const spec = ACP_AGENTS.find(a => a.id === id)
+        if (!spec)
+            throw new Error(`unknown agent ${id}`)
+        return this.launchOf(spec)
+    }
+
     async availability(): Promise<AgentAvailability[]> {
         return Promise.all(ACP_AGENTS.map(async (spec): Promise<AgentAvailability> => {
             const base = { id: spec.id, label: spec.label, installing: this.installs.has(spec.id) }

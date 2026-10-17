@@ -16,7 +16,7 @@
 import type { AddressInfo } from 'node:net'
 import { execFileSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
-import { mkdir, rm, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import http from 'node:http'
 import path from 'node:path'
 import process from 'node:process'
@@ -254,6 +254,38 @@ async function main() {
         check((await js<string>(`document.body.innerText`)).includes('Low'), 'and the thinking picker shows Low')
         if (SHOTS)
             await page.screenshot(path.join(SHOTS, 'claude-effort-low.png'))
+
+        // Settings → Claude Code (/mcp): the servers it has, added and removed with the user's claude.
+        {
+            const claudeJson = path.join(config, '.claude.json')
+            const mcpOf = async () => existsSync(claudeJson) ? (JSON.parse(await readFile(claudeJson, 'utf8')).projects?.[repo]?.mcpServers ?? {}) as Record<string, any> : {}
+            await js(`(() => { window.__app.openSettings('claude'); return true })()`)
+            await until('the Claude Code page', () => js<boolean>(`!!document.querySelector('[data-mcp-form]')`))
+            const type = async (label: string, text: string) => {
+                await js(`(() => { document.querySelector('[aria-label=${JSON.stringify(label)}]').focus(); return true })()`)
+                await page.call('Input.insertText', { text })
+            }
+            await type('Name', 'files')
+            await type('Command', 'node -e "setTimeout(()=>{},1)" "a b"')
+            await type('Environment variables', 'TOKEN=abc')
+            if (SHOTS)
+                await page.screenshot(path.join(SHOTS, 'claude-mcp-form.png'))
+            await click('Add')
+            await until('the server in .claude.json', async () => !!(await mcpOf()).files)
+            const added = (await mcpOf()).files
+            check(added.command === 'node' && JSON.stringify(added.args) === JSON.stringify(['-e', 'setTimeout(()=>{},1)', 'a b']) && added.env?.TOKEN === 'abc', `Add runs claude mcp add: the server is in Claude Code's own config (${JSON.stringify(added)})`)
+            await until('the server listed', () => js<boolean>(`!!document.querySelector('[data-mcp="files"]')`))
+            check(true, 'and the page lists it')
+            if (SHOTS)
+                await page.screenshot(path.join(SHOTS, 'claude-mcp-list.png'))
+            await js(`(() => { document.querySelector('[data-mcp="files"] button').click(); return true })()`)
+            await until('the confirmation', () => js<boolean>(`[...document.querySelectorAll('[role="alertdialog"] button, [role="dialog"] button')].some(b => b.textContent.trim() === 'Remove' && !b.closest('[data-mcp]'))`))
+            await js(`(() => { [...document.querySelectorAll('[role="alertdialog"] button, [role="dialog"] button')].find(b => b.textContent.trim() === 'Remove' && !b.closest('[data-mcp]')).click(); return true })()`)
+            await until('the server gone', async () => !(await mcpOf()).files)
+            await until('the list empty', () => js<boolean>(`!document.querySelector('[data-mcp="files"]')`))
+            check(true, 'Remove runs claude mcp remove, and the list follows')
+            await js(`(() => { window.__app.setSettingsOpen(false); return true })()`)
+        }
 
         // A command: Claude Code's permission dialog, answered by the approval card.
         await send('BASH make the marker')

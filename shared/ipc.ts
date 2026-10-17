@@ -387,6 +387,32 @@ export interface ScopedModels {
     warnings: string[]
 }
 
+/** An MCP server Claude Code has (Settings → Claude Code); `scope` is where it is kept, as in `claude mcp add -s`. */
+export interface ClaudeMcpServer {
+    name: string
+    scope: 'local' | 'project' | 'user'
+    transport: string
+    /** The URL, or the command with its arguments. */
+    target: string
+}
+
+export interface ClaudeMcpAdd {
+    cwd: string
+    name: string
+    scope: ClaudeMcpServer['scope']
+    transport: 'stdio' | 'http' | 'sse'
+    /** The command line (stdio) or the URL. */
+    target: string
+    /** NAME=value, for stdio servers. */
+    env?: string[]
+}
+
+export interface ClaudeMcpRemove {
+    cwd: string
+    name: string
+    scope: ClaudeMcpServer['scope']
+}
+
 /** What pi's trust.json and defaultProjectTrust say of a project (Settings → Project trust). */
 export interface ProjectTrust {
     cwd: string
@@ -546,6 +572,12 @@ export interface PiBridge {
     projectTrust: (cwds: string[]) => Promise<ProjectTrust[]>
     /** Writes a project's decision through pi's ProjectTrustStore (null forgets it). Threads already running keep the trust they started with. */
     setProjectTrust: (cwd: string, decision: boolean | null) => Promise<ProjectTrust>
+    /** The MCP servers Claude Code has for a project (its .claude.json and the project's .mcp.json). */
+    claudeMcp: (cwd: string) => Promise<ClaudeMcpServer[]>
+    /** `claude mcp add`, with the user's own claude; resolves to the list afterwards. */
+    addClaudeMcp: (input: ClaudeMcpAdd) => Promise<ClaudeMcpServer[]>
+    /** `claude mcp remove`. */
+    removeClaudeMcp: (input: ClaudeMcpRemove) => Promise<ClaudeMcpServer[]>
     /** The models pi has, and which ones enabledModels (pi's /scoped-models) covers. */
     scopedModels: (cwd: string) => Promise<ScopedModels>
     /** Saves enabledModels as pi's /scoped-models does; null removes it (all models). */
@@ -725,6 +757,9 @@ export const IPC = {
     answerPiTrust: 'pi:answer-trust',
     projectTrust: 'pi:project-trust',
     setProjectTrust: 'pi:set-project-trust',
+    claudeMcp: 'claude:mcp',
+    addClaudeMcp: 'claude:mcp-add',
+    removeClaudeMcp: 'claude:mcp-remove',
     scopedModels: 'pi:scoped-models',
     setScopedModels: 'pi:set-scoped-models',
     piChangelog: 'pi:changelog',

@@ -1,4 +1,4 @@
-import type { AgentStartOptions, CacheWarming, SearchResult, StateSave, TabMove, ThemePref, WindowBounds, WindowReport } from '@shared/ipc'
+import type { AgentStartOptions, CacheWarming, ClaudeMcpAdd, ClaudeMcpRemove, SearchResult, StateSave, TabMove, ThemePref, WindowBounds, WindowReport } from '@shared/ipc'
 import type { LoginUpdate } from '@shared/providers'
 import { acpAgent, agentOfKey, parseAcpSessionKey } from '@shared/agents'
 import { SETUP_TOOL_IDS, SETUP_VERSION } from '@shared/setup'
@@ -15,7 +15,10 @@ import { SessionFollower } from './follow'
 import { PresenceWatcher, presenceDir } from './presence'
 import { DEFAULT_THEME, IPC, THEME_PREFS } from '@shared/ipc'
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, net, Notification, shell } from 'electron'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
 import { AcpService } from './acp/service'
+import { claudeMcpServers, mcpAddArgs, mcpRemoveArgs } from './claudeSettings'
 import { AgentManager } from './agents'
 import { BACKGROUND, reveal } from './background'
 import { applySave, savedWindows, StateFile } from './appState'
@@ -65,6 +68,7 @@ const agents = new AgentManager({
 
 // Sessions of ACP agents (Codex, …) started from the app; the agents keep the conversations.
 const acpMirrorDir = () => path.join(app.getPath('userData'), 'acp-transcripts')
+const execFileAsync = promisify(execFile)
 const acp = new AcpService(
     () => path.join(app.getPath('userData'), 'acp-sessions.json'),
     acpMirrorDir,
@@ -565,6 +569,27 @@ function registerIpc() {
         // No patterns: every model is in.
         return { patterns, ...found, scoped: patterns ? found.scoped : found.models.map(m => `${m.provider}/${m.id}`) }
     }
+    const claudeMcp = async (cwd: unknown) => claudeMcpServers(absolutePath(cwd))
+    const runClaude = async (args: string[], cwd: string) => {
+        const launch = await acp.launch('claude')
+        try {
+            await execFileAsync(launch.file, [...launch.args, ...args], { cwd, env: launch.env, timeout: 60_000, windowsVerbatimArguments: launch.windowsVerbatimArguments })
+        }
+        catch (error: any) {
+            throw new Error(String(error?.stderr || error?.stdout || error?.message || error).trim())
+        }
+    }
+    ipcMain.handle(IPC.claudeMcp, (_e, cwd: unknown) => claudeMcp(cwd))
+    ipcMain.handle(IPC.addClaudeMcp, async (_e, input: ClaudeMcpAdd) => {
+        const cwd = absolutePath(input?.cwd)
+        await runClaude(mcpAddArgs({ ...input, cwd }), cwd)
+        return claudeMcp(cwd)
+    })
+    ipcMain.handle(IPC.removeClaudeMcp, async (_e, input: ClaudeMcpRemove) => {
+        const cwd = absolutePath(input?.cwd)
+        await runClaude(mcpRemoveArgs({ ...input, cwd }), cwd)
+        return claudeMcp(cwd)
+    })
     ipcMain.handle(IPC.scopedModels, (_e, cwd: unknown) => scopedModels(cwd))
     ipcMain.handle(IPC.setScopedModels, async (_e, cwd: unknown, patterns: unknown) => {
         await setEnabledModels(patterns)
