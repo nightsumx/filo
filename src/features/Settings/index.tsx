@@ -9,11 +9,12 @@ import { systemLang, tr } from '@/lib/i18n'
 import { TRANSCRIPT_TEXT } from '@/lib/transcriptText'
 import { cn } from '@/lib/utils'
 import { appStore } from '@/store/app'
-import { Archive, Bot, Keyboard, KeyRound, Palette, Puzzle, Route, ShieldCheck, Sparkles } from 'lucide-react'
+import { Archive, Bot, Cpu, Keyboard, KeyRound, Palette, Puzzle, Route, ShieldCheck, Sparkles } from 'lucide-react'
 import { observer } from 'mobx-react-lite'
 import { AgentsPage } from './Agents'
 import { CapabilitiesPage } from './Capabilities'
 import { CompactionPage } from './Compaction'
+import { PiPage } from './Pi'
 import { ProvidersPage } from './Providers'
 import { RoutesPage } from './Routes'
 import { ShortcutsPage } from './Shortcuts'
@@ -118,6 +119,7 @@ const TranscriptLangRow = observer(() => (
 const PAGES: { id: SettingsPageId, label: Localized, icon: LucideIcon, page: React.FC }[] = [
     { id: 'appearance', label: { zh: '外观', en: 'Appearance' }, icon: Palette, page: AppearancePage },
     { id: 'providers', label: { zh: '供应商', en: 'Providers' }, icon: KeyRound, page: ProvidersPage },
+    { id: 'pi', label: { zh: 'Pi', en: 'Pi' }, icon: Cpu, page: PiPage },
     { id: 'routes', label: { zh: '路由', en: 'Routing' }, icon: Route, page: RoutesPage },
     { id: 'agents', label: { zh: 'Agent', en: 'Agents' }, icon: Bot, page: AgentsPage },
     { id: 'capabilities', label: { zh: '能力', en: 'Capabilities' }, icon: Puzzle, page: CapabilitiesPage },

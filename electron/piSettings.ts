@@ -246,6 +246,22 @@ export async function setDefaultModel(cwd: unknown, provider: unknown, model: un
     }))
 }
 
+/** pi's enabledModels as the merged settings have it: the patterns, or null when every model is in. */
+export async function enabledModels(cwd: unknown): Promise<string[] | null> {
+    const list = (await mergedSettings(cwd)).enabledModels
+    return Array.isArray(list) && list.length ? list.filter((p): p is string => typeof p === 'string') : null
+}
+
+/** /scoped-models, saved: pi's TUI writes enabledModels, and removes the key for "all models". */
+export async function setEnabledModels(patterns: unknown): Promise<void> {
+    if (patterns !== null && !(Array.isArray(patterns) && patterns.every(p => typeof p === 'string' && p)))
+        throw new Error('expected model patterns or null')
+    await updateGlobalSettings((current) => {
+        const { enabledModels: _old, ...rest } = current
+        return patterns === null || !patterns.length ? rest : { ...rest, enabledModels: patterns }
+    })
+}
+
 /** pi's TUI thinking selector, "set as default". */
 export async function setDefaultThinkingLevel(level: unknown): Promise<void> {
     const valid = THINKING_LEVELS.find(l => l === level)

@@ -377,6 +377,16 @@ export interface PiTrustQuestion {
     options: string[]
 }
 
+/** Settings → Models (pi's /scoped-models): the models pi has a login for, and which of them enabledModels covers. */
+export interface ScopedModels {
+    /** enabledModels as the merged settings have it; null when there is none (every model is in). */
+    patterns: string[] | null
+    models: { provider: string, id: string, name: string }[]
+    /** `provider/id` of the models the patterns cover (all of them when there are no patterns). */
+    scoped: string[]
+    warnings: string[]
+}
+
 /** What pi's trust.json and defaultProjectTrust say of a project (Settings → Project trust). */
 export interface ProjectTrust {
     cwd: string
@@ -534,6 +544,12 @@ export interface PiBridge {
     projectTrust: (cwds: string[]) => Promise<ProjectTrust[]>
     /** Writes a project's decision through pi's ProjectTrustStore (null forgets it). Threads already running keep the trust they started with. */
     setProjectTrust: (cwd: string, decision: boolean | null) => Promise<ProjectTrust>
+    /** The models pi has, and which ones enabledModels (pi's /scoped-models) covers. */
+    scopedModels: (cwd: string) => Promise<ScopedModels>
+    /** Saves enabledModels as pi's /scoped-models does; null removes it (all models). */
+    setScopedModels: (cwd: string, patterns: string[] | null) => Promise<ScopedModels>
+    /** pi's CHANGELOG.md (pi's /changelog), or null when the install has none. */
+    piChangelog: () => Promise<string | null>
     /** pi's `defaultProvider` + `defaultModel`, as its TUI's "set as default" writes them. */
     setDefaultModel: (cwd: string, provider: string, model: string) => Promise<PiDefaults>
     /** pi's `defaultThinkingLevel`. */
@@ -707,6 +723,9 @@ export const IPC = {
     answerPiTrust: 'pi:answer-trust',
     projectTrust: 'pi:project-trust',
     setProjectTrust: 'pi:set-project-trust',
+    scopedModels: 'pi:scoped-models',
+    setScopedModels: 'pi:set-scoped-models',
+    piChangelog: 'pi:changelog',
     setDefaultModel: 'pi:set-default-model',
     setDefaultThinkingLevel: 'pi:set-default-thinking-level',
     gitStatus: 'git:status',

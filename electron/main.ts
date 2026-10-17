@@ -25,7 +25,7 @@ import { applyWorktree, createWorktree, gitBranch, gitCommit, gitDiscard, gitFil
 import { mainLang, setMainLang, tr } from './i18n'
 import { installPackage, WEB_ACCESS } from './piPackages'
 import { listSkills, shareSkills } from './skills'
-import { agentDir, compactionInfo, globalCompaction, piDefaults, piSettingsState, setCacheWarming, setCapabilities, setDefaultModel, setDefaultThinkingLevel, setGlobalCompaction, setWebAccess, watchSettings } from './piSettings'
+import { agentDir, compactionInfo, enabledModels, globalCompaction, piDefaults, piSettingsState, setCacheWarming, setCapabilities, setDefaultModel, setDefaultThinkingLevel, setEnabledModels, setGlobalCompaction, setWebAccess, watchSettings } from './piSettings'
 import { ChannelTests } from './channelTests'
 import { priceList, readPricesFrom, refreshPrices } from './prices'
 import { endpointSaveOf, helperLaunch, ProviderHelper, ProviderService } from './providers'
@@ -547,6 +547,18 @@ function registerIpc() {
             throw new Error('expected a project folder and true, false or null')
         return (await providers.service.helper.setTrust(cwd, decision))[0]
     })
+    const scopedModels = async (cwd: unknown) => {
+        const patterns = await enabledModels(cwd)
+        const found = await providers.service.helper.scopedModels(patterns ?? [])
+        // No patterns: every model is in.
+        return { patterns, ...found, scoped: patterns ? found.scoped : found.models.map(m => `${m.provider}/${m.id}`) }
+    }
+    ipcMain.handle(IPC.scopedModels, (_e, cwd: unknown) => scopedModels(cwd))
+    ipcMain.handle(IPC.setScopedModels, async (_e, cwd: unknown, patterns: unknown) => {
+        await setEnabledModels(patterns)
+        return scopedModels(cwd)
+    })
+    ipcMain.handle(IPC.piChangelog, () => providers.service.helper.changelog())
     ipcMain.handle(IPC.setDefaultModel, async (_e, cwd: unknown, provider: unknown, model: unknown) => {
         await setDefaultModel(cwd, provider, model)
         return piDefaults(cwd)

@@ -9,12 +9,14 @@
 //   in   { id, op: 'prices' }   every model's price and cache lifetime (pi-capabilities/lib/prices PriceList)
 //   in   { id, op: 'trust' | 'answerTrust', cwd, label? }   pi's project trust question, and the choice made (→ { trusted, saved })
 //   in   { id, op: 'trustState', cwds } / { id, op: 'setTrust', cwd, decision }   what trust.json says of projects, and a change to it (→ ProjectTrust[])
+//   in   { id, op: 'scopedModels', patterns }   the models pi has, and which of them settings.json's enabledModels covers, by pi's own matching (→ ScopedModels without the patterns)
+//   in   { id, op: 'changelog' }   pi's CHANGELOG.md (→ string | null)
 //   in   { op: 'answer', login, promptId, value } | { op: 'cancel', login } | { op: 'probeCancel', probe }
 //   out  { update: LoginUpdate }   while a login runs (prompts and notices)
 import type * as Pi from '@earendil-works/pi-coding-agent'
 import type { ProjectTrust } from '../shared/ipc.ts'
 import type { AuthMethod, LoginNotice, LoginPrompt, LoginUpdate, ProviderInfo, ProviderList } from '../shared/providers.ts'
-import { realpathSync } from 'node:fs'
+import { existsSync, readFileSync, realpathSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import process from 'node:process'
@@ -430,6 +432,10 @@ async function handle(message: Record<string, any>) {
             setTrust(String(message.cwd), typeof message.decision === 'boolean' ? message.decision : null)
             result = trustState([String(message.cwd)])
         }
+        else if (op === 'scopedModels')
+            result = await scopedModels(Array.isArray(message.patterns) ? message.patterns.map(String) : [])
+        else if (op === 'changelog')
+            result = changelog()
         else if (op === 'apiKey')
             result = (await (await pi.ModelRuntime.create()).getAuth(String(message.provider)).catch(() => undefined))?.auth.apiKey ?? null
         else
@@ -439,6 +445,29 @@ async function handle(message: Record<string, any>) {
     catch (error) {
         const text = errorText(error)
         send({ id, error: text, cancelled: text === 'Login cancelled' || (error instanceof Error && error.name === 'AbortError') || undefined })
+    }
+}
+
+/** The models pi has with a login, and the ones the patterns (enabledModels) cover, as pi's --models and /scoped-models resolve them. */
+async function scopedModels(patterns: string[]) {
+    const runtime = await pi.ModelRuntime.create()
+    const models = await runtime.getAvailable()
+    const { scopedModels: scoped, diagnostics } = await pi.resolveModelScopeWithDiagnostics(patterns, runtime)
+    return {
+        models: models.map(m => ({ provider: m.provider, id: m.id, name: m.name })),
+        scoped: scoped.map(sm => `${sm.model.provider}/${sm.model.id}`),
+        warnings: diagnostics.map(d => d.message),
+    }
+}
+
+/** pi's own CHANGELOG.md, next to its package.json. */
+function changelog(): string | null {
+    for (let dir = path.dirname(realpathSync(entry)); ; dir = path.dirname(dir)) {
+        const file = path.join(dir, 'CHANGELOG.md')
+        if (existsSync(file))
+            return readFileSync(file, 'utf8')
+        if (path.dirname(dir) === dir)
+            return null
     }
 }
 

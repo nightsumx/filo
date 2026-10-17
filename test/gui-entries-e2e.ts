@@ -42,7 +42,7 @@ async function main() {
         return { text: `echo: ${prompt}`, usage: { input: 1234, output: 56 } }
     })
     await writeFile(path.join(agentDir, 'models.json'), JSON.stringify({
-        providers: { mock: { baseUrl: llm.baseUrl, api: 'openai-completions', apiKey: 'mock', models: [{ id: 'mock-1', contextWindow: 100_000, maxTokens: 1000 }] } },
+        providers: { mock: { baseUrl: llm.baseUrl, api: 'openai-completions', apiKey: 'mock', models: [{ id: 'mock-1', contextWindow: 100_000, maxTokens: 1000 }, { id: 'mock-2', contextWindow: 100_000, maxTokens: 1000 }] } },
     }))
     // Never trusting keeps pi from asking before the thread starts; the Trust page changes that per project.
     await writeFile(path.join(agentDir, 'settings.json'), JSON.stringify({ defaultProvider: 'mock', defaultModel: 'mock-1', defaultThinkingLevel: 'off', defaultProjectTrust: 'never' }))
@@ -286,6 +286,51 @@ async function main() {
         await until('the project\'s own decision', async () => (await trustOf())[repo] === false)
         check((await trustOf())[WORK] === true, 'its own decision is written next to the parent\'s, which stays')
         await js(`(() => { window.__app.setSettingsOpen(false); return true })()`)
+
+        // ---------------------------------------------------------------- Scoped models, Changelog
+        {
+            const settingsFile = path.join(agentDir, 'settings.json')
+            const enabledOf = async () => JSON.parse(await readFile(settingsFile, 'utf8')).enabledModels as string[] | undefined
+            await js(`(() => { window.__app.openSettings('pi'); return true })()`)
+            const modelChip = (name: string) => `[...document.querySelectorAll('[data-provider="mock"] label')].find(l => l.textContent.trim() === ${JSON.stringify(name)})`
+            await until('the Pi page', () => js<boolean>(`!!${modelChip('mock-1')} && !!${modelChip('mock-2')}`))
+            const ticked = (name: string) => js<boolean>(`${modelChip(name)}.querySelector('input').checked`)
+            check(await ticked('mock-1') && await ticked('mock-2') && await enabledOf() === undefined, 'with no enabledModels every model is ticked')
+            await shot('pi-page')
+            await js(`(() => { ${modelChip('mock-2')}.click(); return true })()`)
+            await until('enabledModels to hold only mock-1', async () => JSON.stringify(await enabledOf()) === JSON.stringify(['mock/mock-1']))
+            check(!(await ticked('mock-2')) && await ticked('mock-1'), 'unticking a model writes enabledModels, as pi\'s /scoped-models does')
+            await js(`(() => { ${modelChip('mock-1')}.click(); return true })()`)
+            await sleep(500)
+            check(await ticked('mock-1') && JSON.stringify(await enabledOf()) === JSON.stringify(['mock/mock-1']), 'the last ticked model cannot be unticked: pi would have nothing to cycle')
+            // The composer's model menu opens on the scoped models, with the rest one click away.
+            await js(`(() => { window.__app.setSettingsOpen(false); return true })()`)
+            const openModelMenu = async () => {
+                await js(`(() => { [...document.querySelectorAll('button')].find(b => b.querySelector('.lucide-cpu')).dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, pointerType: 'mouse' })); return true })()`)
+                await until('the model menu', () => js<boolean>(`!!document.querySelector('[role="menuitem"]')`))
+            }
+            const menuItems = () => js<string[]>(`[...document.querySelectorAll('[role="menuitem"]')].map(e => e.textContent.trim())`)
+            await openModelMenu()
+            await until('the scoped list', async () => (await menuItems()).some(t => t.startsWith('Show all models')))
+            let scopedMenu = await menuItems()
+            check(scopedMenu.some(t => t.startsWith('mock-1')) && !scopedMenu.some(t => t.startsWith('mock-2')), `the model menu lists only the scoped model (${scopedMenu.join(' | ')})`)
+            await shot('scoped-model-menu')
+            await js(`(() => { [...document.querySelectorAll('[role="menuitem"]')].find(e => e.textContent.trim().startsWith('Show all models')).click(); return true })()`)
+            await sleep(300)
+            scopedMenu = await menuItems()
+            check(scopedMenu.some(t => t.startsWith('mock-2')) && scopedMenu.some(t => t.startsWith('Show scoped models only')), 'Show all models adds the rest')
+            await js(`(() => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); return true })()`)
+            await js(`(() => { window.__app.openSettings('pi'); return true })()`)
+            await until('the Pi page again', () => js<boolean>(`!!${modelChip('mock-1')}`))
+            await js(`(() => { [...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'All models').click(); return true })()`)
+            await until('enabledModels to go', async () => (await enabledOf()) === undefined)
+            check(await ticked('mock-1') && await ticked('mock-2'), 'All models removes enabledModels, like /scoped-models')
+            const changelog = await js<{ headings: number, text: number }>(`(() => { const e = document.querySelector('[data-changelog]'); return { headings: e ? e.querySelectorAll('h2').length : 0, text: e ? e.textContent.length : 0 } })()`)
+            check(changelog.headings > 0 && changelog.text > 100, `the changelog shows pi's CHANGELOG.md (${changelog.headings} versions)`)
+            await shot('pi-changelog')
+            await js(`(() => { window.__app.setSettingsOpen(false); return true })()`)
+
+        }
 
         // ---------------------------------------------------------------- Clone thread, Rewind to here
         const shot31 = async (name: string) => {

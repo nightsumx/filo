@@ -197,6 +197,16 @@ export class ProviderHelper {
         return this.call({ op: 'setTrust', cwd, decision })
     }
 
+    /** The models pi has a login for, and which of them these enabledModels patterns cover (pi's own matching). */
+    scopedModels(patterns: string[]): Promise<{ models: { provider: string, id: string, name: string }[], scoped: string[], warnings: string[] }> {
+        return this.call({ op: 'scopedModels', patterns })
+    }
+
+    /** pi's CHANGELOG.md, or null when the install has none. */
+    changelog(): Promise<string | null> {
+        return this.call({ op: 'changelog' })
+    }
+
     /** The API of each model id pi knows from its maker. */
     nativeApis(models: string[]): Promise<Record<string, string>> {
         return this.call({ op: 'nativeApis', models })

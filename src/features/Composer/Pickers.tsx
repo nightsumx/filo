@@ -81,6 +81,9 @@ export const ModelPicker = observer(({ thread }: { thread: Thread }) => {
     const [adding, setAdding] = useState(false)
     const [defaults, setDefaults] = useState<PiDefaults>()
     const [menuOpen, setMenuOpen] = useState(false)
+    // pi's enabledModels (/scoped-models): the menu opens on those, as pi's /model does; the rest is one click away.
+    const [scoped, setScoped] = useState<Set<string> | null>(null)
+    const [showAll, setShowAll] = useState(false)
     if (lacksModels(thread)) {
         return (
             <button type="button" className={cn(pill, 'text-ide-accent hover:text-ide-accent')} onClick={() => appStore.openProviders()}>
@@ -106,7 +109,9 @@ export const ModelPicker = observer(({ thread }: { thread: Thread }) => {
     }
     const byProvider = new Map<string, PiModel[]>()
     // On a channel, the agent's own list is its vendor's, not what the channel serves.
-    for (const model of onChannel ? [] : thread.models.filter(m => !isGroupModel(m))) {
+    const listed = onChannel ? [] : thread.models.filter(m => !isGroupModel(m))
+    const shown = scoped && !showAll ? listed.filter(m => scoped.has(modelKey(m)) || (current?.provider === m.provider && current.id === m.id)) : listed
+    for (const model of shown) {
         const list = byProvider.get(model.provider) ?? []
         list.push(model)
         byProvider.set(model.provider, list)
@@ -133,8 +138,10 @@ export const ModelPicker = observer(({ thread }: { thread: Thread }) => {
                 open={menuOpen}
                 onOpenChange={(open) => {
                     setMenuOpen(open)
-                    if (open && thread.agent === 'pi')
+                    if (open && thread.agent === 'pi') {
                         void window.pi.piDefaults(thread.cwd).then(setDefaults, () => setDefaults(undefined))
+                        void window.pi.scopedModels(thread.cwd).then(s => setScoped(s.patterns ? new Set(s.scoped) : null), () => setScoped(null))
+                    }
                     if (open && channelAgent) {
                         void thread.refreshChannel()
                         void window.pi.routeCatalog()
@@ -160,6 +167,15 @@ export const ModelPicker = observer(({ thread }: { thread: Thread }) => {
                             ))}
                         </div>
                     ))}
+                    {scoped && (showAll || shown.length < listed.length) ? (
+                        <DropdownMenuItem onSelect={(e) => {
+                            e.preventDefault()
+                            setShowAll(!showAll)
+                        }}
+                        >
+                            <span className="flex-1 truncate">{showAll ? tr('只显示常用模型', 'Show scoped models only') : tr(`显示全部模型（${listed.length}）`, `Show all models (${listed.length})`)}</span>
+                        </DropdownMenuItem>
+                    ) : null}
                     {!!channelAgent && (
                         <>
                             {!!byProvider.size && <DropdownMenuSeparator />}
