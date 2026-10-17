@@ -330,6 +330,9 @@ async function main() {
             if (how === 'note')
                 check(await js<string>(`${customNotes}.at(-1).title`) === command, `${command}'s note sits under ${command}`)
             check(how !== 'bare' && !note.includes('\u001B'), `${command}: ${how === 'note' ? `shows what Claude Code printed ("${note.trim().replaceAll('\n', ' ').slice(0, 60)}")` : 'answered on its screen: the thread is not left running, and shows the TUI'}`)
+            // The terminal behind the dialog redraws a moment after the thread shows it.
+            if (how === 'tui')
+                await sleep(2500)
             await shot(`${shotN++}-claude-${command.slice(1).replaceAll(' ', '-')}${how === 'tui' ? '-tui' : ''}`)
             await js(`${T}.showTui(false)`)
             check(!(await js<boolean>(`${T}.running`)), `${command}: the thread is idle again`)
@@ -344,6 +347,9 @@ async function main() {
         check(true, 'a prompt after a screen-only command still runs (the dialog it left open was closed first)')
         await until('the /usage printout', () => js<boolean>(`${customNotes}.some(s => s.title === '/usage')`), 8000)
         check(true, '/cost\'s printout shows under it once the dialog is closed')
+        // Each command ran: /context was not swallowed by /cost's dialog (hiding the TUI sends focus reports, which are not keys).
+        await until('the /context printout', () => js<boolean>(`${customNotes}.some(s => s.title === '/context')`), 8000)
+        check(true, '/context ran after /cost and shows its own printout')
         await shot(`${shotN++}-claude-after-commands`)
 
         // ------------------------------------------------------------------ pi
@@ -355,7 +361,7 @@ async function main() {
         names = (await menu()).join(' | ')
         check(['new', 'resume', 'settings', 'login', 'copy', 'export'].every(n => names.includes(n)), `pi's menu keeps every app command (${names.slice(0, 120)})`)
         check(!names.includes('diff'), 'and has no /diff, which pi\'s terminal does not either')
-        await shot('23-pi-slash-menu')
+        await shot('24-pi-slash-menu')
         await js(`${T}.draft = ''`)
         console.log(`all command checks passed; screenshots in ${SHOTS}`)
     }

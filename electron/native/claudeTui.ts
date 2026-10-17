@@ -188,6 +188,9 @@ export function sessionFile(dir: string, cwd: string, sessionId: string): string
 
 /** Bracketed paste, so newlines stay in the input; a paste-end inside the text would end it early. */
 const paste = (text: string) => `\x1B[200~${text.replaceAll('\x1B[201~', '')}\x1B[201~`
+/** xterm's focus reports (mode 1004), sent as the terminal gains or loses focus. */
+const FOCUS_IN = `${String.fromCharCode(27)}[I`
+const FOCUS_OUT = `${String.fromCharCode(27)}[O`
 const ESC = '\x1B'
 const ENTER = '\r'
 /** How long the TUI gets to come up before the thread shows it (a question it asks first). */
@@ -696,8 +699,10 @@ export class ClaudeTuiAgent implements AgentAdapter {
 
     /** Keys a window typed into the TUI: a line in progress there holds the GUI's prompts back. */
     private typed(data: string) {
-        // The user is at the TUI: whatever it shows is theirs to close.
-        this.screenDialog = false
+        // The user is at the TUI: whatever it shows is theirs to close. (Not the focus reports the terminal sends
+        // when its pane is shown or hidden: hiding the TUI after /cost is not closing its dialog.)
+        if (data !== FOCUS_IN && data !== FOCUS_OUT)
+            this.screenDialog = false
         // Sign-in and the folder question come before the prompt (no hooks: no telling when).
         if (!this.started && !this.hooksIssue)
             return
