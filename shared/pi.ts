@@ -109,6 +109,14 @@ export interface RpcSessionState {
 }
 
 export interface SessionStats {
+    /** pi's own; the other agents report only tokens, cost and contextUsage. */
+    sessionFile?: string
+    sessionId?: string
+    userMessages?: number
+    assistantMessages?: number
+    toolCalls?: number
+    toolResults?: number
+    totalMessages?: number
     cost?: number
     tokens?: { input: number, output: number, cacheRead: number, cacheWrite: number, total: number }
     contextUsage?: { tokens: number | null, contextWindow: number, percent: number | null }

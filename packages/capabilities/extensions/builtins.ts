@@ -4,13 +4,16 @@
 // through ctx.ui, which the app shows in the thread. Commands that are the app's own (/new opens a
 // tab, /settings, /copy) stay in the app.
 //
-// Also the app's "ask again from here" (/gui-rewind): /tree to before a prompt, without asking.
+// Also the app's "ask again from here" (/gui-rewind): /tree to before a prompt, without asking; and its
+// "reload extensions and skills" (/gui-reload), which only an extension command's ctx can do.
 //
 // Not a capability: the app loads it whatever capabilities are on; pi-cc-tui does not load it.
 import type { ExtensionAPI, ExtensionCommandContext } from '@earendil-works/pi-coding-agent'
+import type { GuiCommands } from '../protocol'
 import { thinkingLevels } from '../lib/thinking.ts'
 
 const MARK = 'gui-rewind'
+const RELOAD_COMMAND: GuiCommands['reload'] = 'gui-reload'
 
 const textOf = (content: unknown): string => typeof content === 'string'
     ? content
@@ -165,6 +168,16 @@ export default function builtins(pi: ExtensionAPI) {
                 return
             await ctx.reload()
             ctx.ui.notify('已重新加载', 'info')
+        },
+    })
+
+    // The app's "reload extensions and skills" menu item: the same as /reload, but the app words the success itself.
+    pi.registerCommand(RELOAD_COMMAND, {
+        description: 'Internal: reload extensions, skills, prompt templates and context files',
+        handler: async (_args, ctx) => {
+            if (busy(ctx))
+                return
+            await ctx.reload()
         },
     })
 }

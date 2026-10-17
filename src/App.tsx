@@ -12,6 +12,7 @@ import { SearchDialog } from './features/Search'
 import { SettingsDialog } from './features/Settings'
 import { Sidebar } from './features/Sidebar'
 import { StatusBar } from './features/StatusBar'
+import { SessionInfoDialog } from './features/Tabs/SessionInfo'
 import { TerminalPanel, TerminalResizer, useTerminalViews } from './features/Terminal'
 import { closeTabWithConfirm, TabBar } from './features/Tabs/TabBar'
 import { ShortcutHints, ThreadPane } from './features/Thread'
@@ -230,6 +231,7 @@ export const App = observer(() => {
             </div>
             <SettingsDialog />
             <SearchDialog />
+            <SessionInfoDialog />
             <Toaster position="top-center" />
         </TooltipProvider>
     )

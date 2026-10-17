@@ -89,11 +89,7 @@ const APP_COMMANDS: { name: string, description: Localized, piHas?: false, run: 
     {
         name: 'export',
         description: { zh: '导出会话为 HTML', en: 'Export the session as HTML' },
-        run: async (thread) => {
-            const { data } = await thread.request<{ path: string }>({ type: 'export_html' })
-            if (data)
-                void window.pi.revealPath(data.path)
-        },
+        run: thread => thread.exportHtml(),
     },
 ]
 

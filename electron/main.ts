@@ -5,7 +5,7 @@ import { SETUP_TOOL_IDS, SETUP_VERSION } from '@shared/setup'
 import { APP_INFO } from '@shared/app'
 import { resolveLang } from '@shared/i18n'
 import { AGENT_APIS, TERMINAL_AGENTS } from '@shared/routes'
-import { stat } from 'node:fs/promises'
+import { appendFile, stat } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import process from 'node:process'
@@ -589,7 +589,14 @@ function registerIpc() {
         if (error)
             throw new Error(error)
     })
-    ipcMain.handle(IPC.revealPath, (_e, target: unknown) => shell.showItemInFolder(absolutePath(target)))
+    ipcMain.handle(IPC.revealPath, async (_e, target: unknown) => {
+        const file = absolutePath(target)
+        // A background run must not open the file manager over the user's work; the call is written down for the script to read.
+        if (BACKGROUND)
+            await appendFile(path.join(app.getPath('userData'), 'revealed.log'), `${file}\n`)
+        else
+            shell.showItemInFolder(file)
+    })
     ipcMain.handle(IPC.listDir, (_e, dir: unknown) => listDir(absolutePath(dir)))
     ipcMain.handle(IPC.readFile, (_e, file: unknown) => readText(absolutePath(file)))
     ipcMain.handle(IPC.writeFile, (_e, file: unknown, text: unknown, options: { expected?: unknown, bom?: unknown } | undefined) => {

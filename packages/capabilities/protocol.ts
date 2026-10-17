@@ -31,6 +31,8 @@ export interface GuiCommands {
     reviewCancel: 'gui-review-cancel'
     /** `/gui-rewind <entryId>`: back to before that user prompt, in the same session (extensions/builtins.ts, always loaded). */
     rewind: 'gui-rewind'
+    /** `/gui-reload`: reloads extensions, skills, prompt templates and context files (extensions/builtins.ts); refused while a run is going. */
+    reload: 'gui-reload'
     /** `/gui-autopilot on|off`: the supervisor answers for the user in this thread. */
     autopilot: 'gui-autopilot'
     /** `/gui-autopilot-answer <cardId> <AutopilotAnswer JSON>`: the user decides a card. */

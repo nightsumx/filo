@@ -5,7 +5,7 @@ import type { Thread } from '@/store/thread'
 import type { SessionSummary } from '@shared/ipc'
 import { confirm } from '@/lib/confirm'
 import { appStore, isFileTab } from '@/store/app'
-import { AppWindow, Archive, ArrowRightToLine, EyeOff, FolderOpen, GitFork, Pencil, Trash2, X, XCircle } from 'lucide-react'
+import { AppWindow, Archive, ArrowRightToLine, EyeOff, FileDown, FolderOpen, GitFork, Info, Pencil, RefreshCw, Trash2, X, XCircle } from 'lucide-react'
 import { AgentIcon } from '@/components/AgentIcon'
 import { agentsStore } from '@/store/agents'
 import { useEffect } from 'react'
@@ -13,6 +13,7 @@ import { observable, runInAction } from 'mobx'
 import { observer } from 'mobx-react-lite'
 import { tr } from '@/lib/i18n'
 import { keys, showInFolderLabel } from '@/platform'
+import { showSessionInfo } from './SessionInfo'
 
 interface MenuParts {
     Item: React.ComponentType<{ onSelect?: () => void, disabled?: boolean, className?: string, children: React.ReactNode }>
@@ -106,6 +107,16 @@ export const ThreadActions = observer(({ thread, parts: { Item, Separator } }: {
                             {tr('压缩上下文', 'Compact context')}
                         </Item>
                     )}
+                    {thread.agent === 'pi' && (
+                        <Item onSelect={() => void thread.exportHtml()}>
+                            <FileDown size={14} />
+                            {tr('导出为 HTML', 'Export as HTML')}
+                        </Item>
+                    )}
+                    <Item onSelect={() => showSessionInfo(thread)}>
+                        <Info size={14} />
+                        {tr('会话信息', 'Session info')}
+                    </Item>
                     {acp && caps?.fork && thread.sessionPath && (
                         <Item disabled={thread.running} onSelect={() => void forkSession(thread)}>
                             <GitFork size={14} />
@@ -119,6 +130,12 @@ export const ThreadActions = observer(({ thread, parts: { Item, Separator } }: {
                         </Item>
                     ))}
                 </>
+            )}
+            {thread.agent === 'pi' && (
+                <Item disabled={thread.running} onSelect={() => void thread.reloadResources()}>
+                    <RefreshCw size={14} />
+                    {tr('重新加载扩展和技能', 'Reload extensions and skills')}
+                </Item>
             )}
             <Item onSelect={() => void window.pi.openFolder(thread.cwd)}>
                 <FolderOpen size={14} />

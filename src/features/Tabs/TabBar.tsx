@@ -232,7 +232,7 @@ const TabView = observer(({ tab, index, visible }: { tab: TabItem, index: number
             </button>
         </div>
             </ContextMenuTrigger>
-            <ContextMenuContent className="w-52" onCloseAutoFocus={e => renaming.key && e.preventDefault()}>
+            <ContextMenuContent className="w-60" onCloseAutoFocus={e => renaming.key && e.preventDefault()}>
                 {file ? <FileActions tab={file} parts={contextParts} /> : <ThreadActions thread={thread!} parts={contextParts} />}
             </ContextMenuContent>
         </ContextMenu>
@@ -250,7 +250,7 @@ const ActiveTabMenu = observer(() => {
             <DropdownMenuTrigger className={iconBtn} aria-label={file ? tr('文件操作', 'File actions') : tr('线程操作', 'Thread actions')} title={file ? tr('文件操作（也可右键标签）', 'File actions (or right-click a tab)') : tr('线程操作（也可右键标签）', 'Thread actions (or right-click a tab)')}>
                 <MoreHorizontal size={15} />
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-52" onCloseAutoFocus={e => renaming.key && e.preventDefault()}>
+            <DropdownMenuContent align="end" className="w-60" onCloseAutoFocus={e => renaming.key && e.preventDefault()}>
                 {isFileTab(tab) ? <FileActions tab={tab} parts={dropdownParts} /> : <ThreadActions thread={tab} parts={dropdownParts} />}
             </DropdownMenuContent>
         </DropdownMenu>

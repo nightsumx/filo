@@ -28,6 +28,7 @@ import { threadActivity } from '@/lib/threadActivity'
 import { blockTimeKey, buildTurns, contentImages, contentText, pendingCards } from '@/lib/timeline'
 import type { WaitingKind } from '@/lib/threadActivity'
 import { tuiTitle } from '@/lib/toolMeta'
+import { isAbsolutePath, joinPath, pathParts } from '@/platform'
 import { agentFeatures, agentLabel, agentOfKey } from '@shared/agents'
 import { APPROVAL_MODES, APPROVAL_TITLE_PREFIX, GUI_COMMAND_PREFIX, GUI_STATUS } from '@shared/capabilities'
 import { isShownEntry } from '@shared/entries'
@@ -1357,6 +1358,38 @@ export class Thread {
         catch (error: any) {
             toast.error(`${tr('分叉失败：', 'Fork failed: ')}${error.message}`)
             return undefined
+        }
+    }
+
+    /** pi writes the session to an HTML file (in the project folder unless told otherwise) and the app shows it in the file manager. */
+    async exportHtml() {
+        try {
+            const { data } = await this.request<{ path: string }>({ type: 'export_html' })
+            if (!data?.path)
+                throw new Error(tr('pi 没有返回文件路径', 'pi returned no file path'))
+            // pi names the file relative to the folder it runs in.
+            const file = isAbsolutePath(data.path) ? data.path : joinPath(this.cwd, data.path)
+            void window.pi.revealPath(file)
+            toast.success(tr(`已导出 ${pathParts(file).pop()}`, `Exported ${pathParts(file).pop()}`))
+        }
+        catch (error: any) {
+            toast.error(`${tr('导出失败：', 'Export failed: ')}${error.message}`)
+        }
+    }
+
+    /** Extensions, skills, prompt templates and context files are read again, by the same call as /reload. */
+    async reloadResources() {
+        if (this.running) {
+            toast.error(tr('运行中不能重新加载，先停止或等它结束', 'Cannot reload while running; stop it or wait for it to finish'))
+            return
+        }
+        try {
+            await this.guiCommand('gui-reload', '')
+            await Promise.all([this.refreshCommands(), this.refreshStats()])
+            toast.success(tr('已重新加载扩展和技能', 'Reloaded extensions and skills'))
+        }
+        catch (error: any) {
+            toast.error(`${tr('重新加载失败：', 'Reload failed: ')}${error.message}`)
         }
     }
 
