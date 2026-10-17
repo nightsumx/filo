@@ -172,6 +172,10 @@ export class Thread {
     widgets: Record<string, { lines: string[], placement: 'aboveEditor' | 'belowEditor' }> = {}
 
     draft = ''
+    /** The skill or command picked in the picker, sent as `/name <draft>`; shown as a chip above the draft. */
+    chip: string | null = null
+    /** The skills and commands picker is open (⌘/ opens it). In memory only. */
+    pickerOpen = false
     images: ImageContent[] = []
     /** Set on another agent's review of a thread: the reviewed thread's key, for sending the report back. In memory only. */
     reviewOf: string | undefined = undefined
@@ -290,6 +294,7 @@ export class Thread {
             statuses: this.statuses,
             widgets: this.widgets,
             draft: this.draft,
+            chip: this.chip,
             images: this.images,
             subagentView: this.subagentView,
             unread: this.unread,
@@ -877,11 +882,13 @@ export class Thread {
 
     /** As in pi's TUI: during a run, Enter steers it and Alt+Enter queues a follow-up; idle, both start a turn. */
     async send(mode: 'steer' | 'followUp' = 'steer') {
-        const text = this.draft.trim()
+        const typed = this.draft.trim()
+        const text = this.chip ? `/${this.chip}${typed ? ` ${typed}` : ''}` : typed
         const images = toJS(this.images)
         if (!text && !images.length)
             return
         this.draft = ''
+        this.chip = null
         this.images = []
         await this.submit(text, images, mode)
     }

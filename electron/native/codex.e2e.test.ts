@@ -573,9 +573,9 @@ describe.skipIf(!codex)('Codex native adapter against codex app-server', () => {
         expect(originators.at(-1)).toMatch(/^codex_/)
     }, 30_000)
 
-    it('offers /compact as a command', async () => {
+    it('lists no commands (the app has a button for compaction), and still compacts for a typed /compact', async () => {
         const { agent, events, settled } = await start()
-        expect((await ok(agent, { type: 'get_commands' })).commands.map((c: any) => c.name)).toContain('compact')
+        expect((await ok(agent, { type: 'get_commands' })).commands).toEqual([])
         script = [{ text: 'answer' }]
         await ok(agent, { type: 'prompt', message: 'hi' })
         await settled()

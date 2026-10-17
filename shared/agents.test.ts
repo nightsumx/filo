@@ -21,7 +21,9 @@ describe('agentFeatures', () => {
         expect(agentFeatures('grok', caps, [{ name: 'compact' }])).toMatchObject({ capabilities: false, compaction: true, compactInstructions: false, autoCompaction: false, fork: false, forkSession: true, images: false, configOptions: true, rename: true })
         // The agent keeps no name: none to give.
         expect(agentFeatures('gemini', { ...caps, rename: false }).rename).toBe(false)
-        expect(agentFeatures('codex', caps, [{ name: 'review' }]).compaction).toBe(false)
+        // An ACP agent compacts when it lists /compact; Claude Code and Codex always can (they list nothing).
+        expect(agentFeatures('opencode', caps, [{ name: 'review' }]).compaction).toBe(false)
+        expect(agentFeatures('codex').compaction && agentFeatures('claude').compaction).toBe(true)
         // Claude Code's /compact takes a note, Codex's compaction does not.
         expect(agentFeatures('claude').compactInstructions).toBe(true)
         expect(agentFeatures('codex').compactInstructions).toBe(false)

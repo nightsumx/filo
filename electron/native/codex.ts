@@ -1763,7 +1763,8 @@ export class CodexAgent implements AgentAdapter {
                 case 'get_available_thinking_levels':
                     return ok({ levels: (this.currentModel()?.efforts ?? []).map(e => e.value) })
                 case 'get_commands':
-                    return ok({ commands: [{ name: 'compact', description: tr('压缩上下文，腾出空间', 'Summarize the conversation to free up context'), source: 'builtin' }] })
+                    // app-server has no command list; compaction is the app's button (thread/compact/start).
+                    return ok({ commands: [] })
                 case 'get_session_stats': {
                     const tokens = this.transcript.totals()
                     const context = this.context

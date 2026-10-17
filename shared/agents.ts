@@ -227,8 +227,8 @@ export function agentFeatures(kind: AgentKind, caps?: AcpAgentCaps, commands: re
     const pi = kind === 'pi'
     return {
         capabilities: pi,
-        // ACP agents compact with their own /compact command, when they have one.
-        compaction: pi || commands.some(c => c.name === 'compact'),
+        // Claude Code and Codex compact through their own protocols; an ACP agent says so by listing /compact.
+        compaction: pi || kind === 'claude' || kind === 'codex' || commands.some(c => c.name === 'compact'),
         compactInstructions: pi || kind === 'claude',
         autoCompaction: pi,
         fork: pi || !!caps?.forkAt,

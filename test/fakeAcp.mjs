@@ -114,7 +114,7 @@ async function prompt(session, params) {
 }
 
 function commandsSoon(session) {
-    const availableCommands = [{ name: 'review', description: 'Review the changes' }, { name: 'compact', description: 'Summarize the conversation' }]
+    const availableCommands = [{ name: 'review', description: 'Review the changes' }, { name: 'compact', description: 'Summarize the conversation' }, { name: 'init', description: 'Create AGENTS.md' }]
     setTimeout(() => update(session, { sessionUpdate: 'available_commands_update', availableCommands }, { record: false }), 10)
 }
 

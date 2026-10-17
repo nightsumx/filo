@@ -80,15 +80,6 @@ export const ModelPicker = observer(({ thread }: { thread: Thread }) => {
     const [adding, setAdding] = useState(false)
     const [defaults, setDefaults] = useState<PiDefaults>()
     const [menuOpen, setMenuOpen] = useState(false)
-    // /model: each request once, as the composer's focus requests are.
-    const asked = useRef(appStore.modelMenu.n)
-    const request = appStore.modelMenu
-    useEffect(() => {
-        if (request.key !== thread.key || asked.current === request.n)
-            return
-        asked.current = request.n
-        setMenuOpen(true)
-    }, [request.n, request.key, thread.key])
     if (lacksModels(thread)) {
         return (
             <button type="button" className={cn(pill, 'text-ide-accent hover:text-ide-accent')} onClick={() => appStore.openProviders()}>

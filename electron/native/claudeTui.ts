@@ -32,6 +32,7 @@ import { askQuestions } from '../acp/transcript'
 import { platform } from '../platform'
 import { priceList } from '../prices'
 import { tr } from '../i18n'
+import { claudeCommands } from './claudeCommands'
 import { ClaudeLog, parseLines, readRecords } from './claudeLog'
 import { registerHooks } from './claudeHooks'
 
@@ -894,7 +895,9 @@ export class ClaudeTuiAgent implements AgentAdapter {
                 case 'get_available_thinking_levels':
                     return ok({ levels: [] })
                 case 'get_commands':
-                    return ok({ commands: [{ name: 'compact', description: tr('压缩上下文，腾出空间', 'Summarize the conversation to free up context'), source: 'builtin' }] })
+                    // Its skills and custom commands, from the folders it reads. Its built-ins are on the app's own controls
+                    // (and the terminal view); the TUI lists nothing a program can read.
+                    return ok({ commands: await claudeCommands(this.dir, this.options.cwd) })
                 case 'get_session_stats':
                     return ok({ tokens: this.log.transcript.totals(), cost: undefined })
                 case 'prompt': {

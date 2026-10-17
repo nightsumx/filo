@@ -183,6 +183,11 @@ function useShortcuts() {
                     e.preventDefault()
                     appStore.setSearchOpen(!appStore.searchOpen)
                     break
+                case 'commands':
+                    e.preventDefault()
+                    if (appStore.active)
+                        appStore.active.pickerOpen = true
+                    break
             }
         }
         // Editor tabs save on their own shortly after typing stops; leaving the window saves now.

@@ -1,11 +1,13 @@
-// Slash commands typed into the composer of each agent in the built app, with a screenshot of each
-// case in SHOTS (default ~/Documents/filo-command-shots):
-//   - Grok Build (test/fakeGrok.mjs): the menu, a command that prints nothing, /compact typed,
-//     /compact from the context figure, /compact while running (queued), an unknown command, /new, /resume
-//   - OpenCode (test/fakeAcp.mjs): a listed command goes through, an unlisted one is refused
-//   - Codex (the real `codex app-server`, scripted model): the menu, an unlisted command is refused
-//   - Claude Code (the real `claude`, scripted API): what a local command prints shows under it
-//   - pi: the menu keeps all of its app commands
+// Skills and commands in the composer of each agent in the built app, with a screenshot of each case in
+// SHOTS (default ~/Documents/filo-command-shots). There is no slash menu: typing "/" is typing, the text goes
+// to the agent as written, and the picker beside the toolbar lists what the agent reports.
+//   - Grok Build (test/fakeGrok.mjs): the picker (without /compact, which has a button), a command that prints
+//     nothing, the context figure and the compact button, an unlisted command reaches the agent
+//   - OpenCode (test/fakeAcp.mjs): the picker, a listed and an unlisted command both reach the agent
+//   - Codex (the real `codex app-server`, scripted model): no picker (it lists no commands), the compact button
+//   - Claude Code (the real `claude`, scripted API): the picker lists the skills in its folder; what a local
+//     command prints shows under it; /compact shows working and the order; the compact button with a note
+//   - pi: the picker
 //
 //   bun run build && bun run e2e:commands
 import type { AddressInfo } from 'node:net'
@@ -99,6 +101,11 @@ async function main() {
     execFileSync('git', ['-c', 'user.email=a@b', '-c', 'user.name=t', 'init', '-q'], { cwd: repo })
     await writeFile(path.join(claudeConfig, '.claude.json'), JSON.stringify({ hasCompletedOnboarding: true, theme: 'dark', projects: { [repo]: { hasTrustDialogAccepted: true } } }))
     await writeFile(path.join(claudeConfig, 'settings.json'), JSON.stringify({ disableAllHooks: false }))
+    // What Claude Code lists under "/" besides its built-ins: a skill and a custom command in its folder.
+    await mkdir(path.join(claudeConfig, 'skills', 'demo-skill'), { recursive: true })
+    await writeFile(path.join(claudeConfig, 'skills', 'demo-skill', 'SKILL.md'), '---\ndescription: a skill for the picker test\n---\nSay hi.\n')
+    await mkdir(path.join(claudeConfig, 'commands'), { recursive: true })
+    await writeFile(path.join(claudeConfig, 'commands', 'tidy.md'), '---\ndescription: tidy up\n---\nTidy $ARGUMENTS\n')
 
     const server = modelServer()
     await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
@@ -170,10 +177,29 @@ async function main() {
                 await page.call('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', text: '\r', windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13 })
                 await page.call('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13 })
             }
-            // A command typed out in full goes with one Enter, menu open or not.
             await enter()
         }
-        const menu = () => js<string[]>(`[...document.querySelectorAll('[role=option]')].map(o => o.textContent)`)
+        // The picker (Skills button): what it lists, and picking one by name. No `/` menu exists.
+        const pickerButton = () => js<boolean>(`!!document.querySelector('button[aria-label="Skills and commands"]')`)
+        const openPicker = async () => {
+            await js(`(() => { document.querySelector('button[aria-label="Skills and commands"]').click(); return true })()`)
+            await until('the picker', () => js<boolean>(`!!document.querySelector('#command-picker-list')`))
+        }
+        const listed = () => js<string[]>(`[...document.querySelectorAll('#command-picker-list [role="option"]')].map(o => o.querySelector('span')?.textContent ?? '')`)
+        const closePicker = async () => {
+            await page.call('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 })
+            await page.call('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 })
+            await until('the picker closed', () => js<boolean>(`!document.querySelector('#command-picker-list')`))
+        }
+        const pickCommand = async (name: string) => {
+            await js(`(() => { [...document.querySelectorAll('#command-picker-list [role="option"]')].find(o => o.querySelector('span')?.textContent === ${JSON.stringify(name)}).click(); return true })()`)
+            await until('the chip', () => js<boolean>(`document.querySelector('[data-command-chip]')?.getAttribute('data-command-chip') === ${JSON.stringify(name)}`))
+        }
+        const sendEnter = async () => {
+            await page.call('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', text: '\r', windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13 })
+            await page.call('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13 })
+        }
+        const noMenu = () => js<boolean>(`!document.querySelector('[role="listbox"]')`)
         const toasts = () => js<string[]>(`[...document.querySelectorAll('[data-sonner-toast]')].map(t => t.textContent)`)
         const turns = () => js<number>(`${T}.turns.length`)
         const settled = (what: string, needle: string, ms = 30_000) => until(what, async () => !(await js<boolean>(`${T}.running`)) && (await js<string>(`JSON.stringify(${T}.turns.at(-1)?.steps ?? [])`)).includes(needle), ms)
@@ -183,60 +209,51 @@ async function main() {
         console.log('# Grok Build')
         await startThread('grok')
         await until('Grok commands', () => js<boolean>(`${T}.commands.some(c => c.name === 'compact')`))
+        // Typing "/" is typing: no menu, and the text stays as it is.
         await typeLine('/', false)
-        await until('the menu', async () => (await menu()).length > 0)
-        let names = (await menu()).join(' | ')
-        check(names.includes('new') && names.includes('resume') && names.includes('compact'), `the menu lists /new and /resume beside Grok's own commands (${names})`)
-        await shot('01-grok-slash-menu')
-        // A partial name is completed by Enter, not sent.
-        await typeLine('/cont')
-        await until('the name completed', async () => (await js<string>(`${T}.draft`)) === '/context ')
-        check((await turns()) === 0, 'Enter on a partial name completes it and sends nothing')
-
+        await sleep(300)
+        check(await noMenu() && (await js<string>(`${T}.draft`)) === '/', 'typing "/" opens no menu and changes nothing')
         await js(`${T}.draft = ''`)
+        await until('the picker button', pickerButton)
+        await openPicker()
+        let names = (await listed()).join(' | ')
+        check(names === 'context', `the picker lists Grok's /context, and not /compact, which has a button (${names})`)
+        await shot('01-grok-picker')
+        await closePicker()
+
         await typeLine('hello')
         await settled('the first answer', 'echo: hello')
         const before = await js<number>(`${T}.stats?.contextUsage?.tokens ?? 0`)
         check(before > 0, `the status line has a context figure (${before} tokens)`)
         await shot('02-grok-after-first-prompt')
 
+        // Pick /context in the picker, send: Grok gets "/context" and prints nothing, so there is a note, not a bare prompt.
         const t0 = await turns()
-        await typeLine('/context')
+        await openPicker()
+        await pickCommand('context')
+        await shot('03-grok-picked-command')
+        await sendEnter()
         await until('the note', async () => (await notes('Done, with no output')) === 1)
-        check((await turns()) === t0 + 1, '/context (Grok prints nothing) makes one turn, with a note instead of a bare prompt')
-        check(await js<boolean>(`${T}.draft === ''`), 'the draft is cleared')
+        check((await turns()) === t0 + 1, 'the picked /context (Grok prints nothing) makes one turn, with a note instead of a bare prompt')
+        check(await js<boolean>(`${T}.draft === '' && !document.querySelector('[data-command-chip]')`), 'the draft and the chip are cleared')
+        check(await js<boolean>(`JSON.stringify(${T}.turns.at(-1)).includes('/context')`), 'and the user message is "/context", as a terminal would send it')
         await shot('03-grok-silent-command')
 
-        await typeLine('/compact')
-        // It takes a while: the thread says so (a working line), not nothing.
+        // The context figure and the compact button: the compaction shows working, then the note.
+        await typeLine('hello again')
+        await settled('a second answer', 'echo: hello again')
+        await until('the figure button', () => js<boolean>(`!!document.querySelector('button[title^="Context usage"]')`))
+        await shot('05-grok-context-figure')
+        await js(`(() => { document.querySelector('button[title^="Context usage"]').click(); return true })()`)
         const workingLine = () => js<boolean>(`[...document.querySelectorAll('span')].some(e => e.children.length === 0 && e.textContent === 'Compacting context…')`)
         await until('the compacting line', workingLine, 5000)
         check(true, 'while Grok compacts the thread shows a "Compacting context…" working line')
         await shot('04a-grok-compacting')
         await until('compacted', async () => (await notes('Context compacted')) === 1, 15_000)
         check(!(await workingLine()), 'and the line is gone once it is done')
-        check(await js<number>(`${T}.stats.contextUsage.tokens`) < before + 100, 'typed /compact compacts, and the context figure shrinks without reopening the thread')
-        check(!(await js<boolean>(`${T}.compacting`)) && (await js<string>(`${T}.draft`)) === '', 'the compacting state ends and the draft is cleared')
-        await shot('04-grok-compact-typed')
-
-        await typeLine('hello again')
-        await settled('a second answer', 'echo: hello again')
-        await until('the figure button', () => js<boolean>(`!!document.querySelector('button[title^="Context usage"]')`))
-        await shot('05-grok-context-figure')
-        await js(`(() => { document.querySelector('button[title^="Context usage"]').click(); return true })()`)
-        await until('compacted again', async () => (await notes('Context compacted')) === 2, 15_000)
-        check(true, 'clicking the context figure compacts too, with its own note')
+        check(await js<number>(`${T}.stats.contextUsage.tokens`) < before + 100, 'clicking the context figure compacts, and the figure shrinks without reopening the thread')
+        check(!(await js<boolean>(`${T}.compacting`)), 'the compacting state ends')
         await shot('06-grok-compact-click')
-
-        await typeLine('bash')
-        await until('running', () => js<boolean>(`${T}.running`))
-        await typeLine('/compact')
-        // Enter while it runs steers, as in pi: the text reaches the agent as a message, no compaction starts on top of the command.
-        await until('steered', () => js<boolean>(`JSON.stringify(${T}.turns.at(-1)).includes('/compact')`))
-        check(!(await js<boolean>(`${T}.compacting`)), '/compact typed while a command runs is steered like any text; no compaction starts on top of it')
-        await shot('07-grok-compact-while-running')
-        await until('the run ends', () => js<boolean>(`!${T}.running`), 40_000)
-        check(await notes('Context compacted') === 2, 'and no third compaction note appeared')
 
         // The compact button beside the pickers: Grok takes no note on what to keep, so the popover has no field for it.
         const pill = `document.querySelector('button[aria-label="Compact context"]')`
@@ -246,89 +263,66 @@ async function main() {
         check(!(await js<boolean>(`!!document.querySelector('[role="dialog"] input')`)), 'Grok: the compact popover has no "what to keep" field, since Grok takes none')
         await shot('06a-grok-compact-button')
         await js(`(() => { [...document.querySelectorAll('[role="dialog"] button')].find(b => b.textContent.trim() === 'Compact').click(); return true })()`)
-        await until('compacted by the button', async () => (await notes('Context compacted')) === 3, 15_000)
+        await until('compacted by the button', async () => (await notes('Context compacted')) === 2, 15_000)
         check(true, 'Grok: the compact button compacts, and the popover closes')
 
+        // Whatever else is typed is the agent's to read: no refusal, no routing.
         const t1 = await turns()
         await typeLine('/nonsense')
-        await until('the toast', async () => (await toasts()).some(t => t.includes('has no /nonsense')))
-        check((await turns()) === t1 && (await js<string>(`${T}.draft`)) === '/nonsense', 'an unlisted command is refused with a toast: nothing is sent, the text stays')
-        await shot('08-grok-unknown-command')
-
-        const tabs = await js<number>(`window.__app.tabs.length`)
-        const grokKey = await js<string>(`${T}.key`)
-        await js(`${T}.draft = ''`)
+        await settled('the agent got /nonsense', 'echo: /nonsense')
+        check((await turns()) === t1 + 1 && (await toasts()).length === 0, 'a command Grok does not list is not refused: it reaches Grok as written')
+        await shot('08-grok-unlisted-command')
         await typeLine('/new')
-        await until('a new tab', () => js<boolean>(`${T}.key !== ${JSON.stringify(grokKey)} && ${T}.isEmpty`))
-        check((await js<number>(`window.__app.tabs.length`)) === tabs + 1, '/new opens a new thread (the app\'s own command)')
-        await shot('09-grok-new')
-        await js(`window.__app.closeTab(${T}.key)`)
-        await until('back on Grok', () => js<boolean>(`${T}.key === ${JSON.stringify(grokKey)}`))
-
-        await typeLine('/resume')
-        await until('search open', () => js<boolean>(`window.__app.searchOpen === true`))
-        check(true, '/resume opens the session search')
-        await shot('10-grok-resume')
-        await js(`(() => { window.__app.setSearchOpen(false); return true })()`)
-        await js(`${T}.draft = ''`)
+        await settled('the agent got /new', 'echo: /new')
+        check(await js<number>(`window.__app.tabs.length`) === 1, '/new is not the app\'s: it reaches Grok as written, and no tab opens')
 
         // ------------------------------------------------------------------ OpenCode
         console.log('# OpenCode')
         await startThread('opencode')
         await until('OpenCode commands', () => js<boolean>(`${T}.commands.some(c => c.name === 'review')`))
-        await typeLine('/re', false)
-        await until('the menu', async () => (await menu()).length > 0)
-        names = (await menu()).join(' | ')
-        check(names.includes('review') && names.includes('resume'), `the menu filters the agent's and the app's commands (${names})`)
-        await shot('11-opencode-slash-menu')
-        await js(`${T}.draft = ''`)
+        await until('the picker button', pickerButton)
+        await openPicker()
+        names = (await listed()).join(' | ')
+        check(names === 'init', `the picker lists /init, and not /review (the app has its own) or /compact (a button) (${names})`)
+        await shot('11-opencode-picker')
+        await closePicker()
         await typeLine('/review')
         await settled('the review ran', 'echo: /review')
-        check(true, 'a command the agent lists (/review) goes to it')
+        check(true, 'typed /review goes to the agent')
         await shot('12-opencode-listed-command')
         const o0 = await turns()
         await typeLine('/undo')
-        await until('the toast', async () => (await toasts()).some(t => t.includes('has no /undo')))
-        check((await turns()) === o0, 'a command it does not list (/undo) is refused, not sent to the model')
-        await shot('13-opencode-unknown-command')
-        await js(`${T}.draft = ''`)
+        await settled('the agent got /undo', 'echo: /undo')
+        check((await turns()) === o0 + 1, 'a command it does not list (/undo) reaches it as written too')
+        await shot('13-opencode-unlisted-command')
 
         // ------------------------------------------------------------------ Codex
         console.log('# Codex')
         await startThread('codex')
+        check(!(await pickerButton()), 'Codex lists no commands, so there is no Skills button')
         await typeLine('/', false)
-        await until('the menu', async () => (await menu()).length > 0)
-        names = (await menu()).join(' | ')
-        check(names.includes('compact') && names.includes('new') && names.includes('resume'), `the menu lists /compact, /new, /resume (${names})`)
-        await shot('14-codex-slash-menu')
+        await sleep(300)
+        check(await noMenu(), 'and typing "/" opens no menu')
+        await shot('14-codex-no-menu')
         await js(`${T}.draft = ''`)
         await typeLine('hello codex')
         await settled('the answer', 'Hello from the fake model')
         check(true, 'a plain prompt still runs')
         const c0 = await turns()
         await typeLine('/status')
-        await until('the toast', async () => (await toasts()).some(t => t.includes('has no /status')))
-        check((await turns()) === c0 && (await js<string>(`${T}.draft`)) === '/status', 'Codex\'s terminal-only /status is refused with a toast, not sent as text')
-        await shot('15-codex-unknown-command')
-        await js(`${T}.draft = ''`)
-        // Codex's /diff has a place in the app: the changes panel.
-        const d0 = await turns()
-        const panel = () => js<boolean>(`window.__app.reviewOpen`)
-        const open0 = await panel()
-        await typeLine('/diff')
-        await until('the panel toggled', async () => (await panel()) !== open0)
-        check((await turns()) === d0 && (await js<string>(`${T}.draft`)) === '', '/diff opens the changes panel, sends nothing and clears the draft')
-        await shot('16-codex-diff')
-        // Codex's /model opens the model menu.
-        const menuOpen = () => js<boolean>(`!!document.querySelector('[role="menu"]')`)
-        await typeLine('/model')
-        await until('the model menu', menuOpen)
-        check((await turns()) === d0 && (await js<string>(`${T}.draft`)) === '', '/model opens the model menu and sends nothing')
-        await shot('17-codex-model')
-        await js(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`)
-        await until('the menu closed', async () => !(await menuOpen()))
-        await typeLine('/diff')
-        await until('the panel toggled back', async () => (await panel()) === open0)
+        await settled('the model got /status', 'Hello from the fake model')
+        check((await turns()) === c0 + 1 && (await toasts()).length === 0, 'Codex\'s /status is not refused: it goes to Codex as written')
+        await shot('15-codex-unlisted-command')
+        // The compact button: Codex takes no note either.
+        const cpill = `document.querySelector('button[aria-label="Compact context"]')`
+        await until('the compact button', () => js<boolean>(`!!${cpill} && !${cpill}.disabled`))
+        await js(`(() => { ${cpill}.click(); return true })()`)
+        await until('the compact popover', () => js<boolean>(`!![...document.querySelectorAll('[role="dialog"] button')].find(b => b.textContent.trim() === 'Compact')`))
+        check(!(await js<boolean>(`!!document.querySelector('[role="dialog"] input')`)), 'Codex: the compact popover has no "what to keep" field')
+        await shot('16-codex-compact-button')
+        await js(`(() => { [...document.querySelectorAll('[role="dialog"] button')].find(b => b.textContent.trim() === 'Compact').click(); return true })()`)
+        await until('Codex compacted', () => js<boolean>(`${T}.turns.flatMap(t => t.steps).some(s => s.kind === 'note' && s.variant === 'compaction')`), 30_000)
+        check(!(await js<boolean>(`${T}.compacting`)), 'Codex: the compact button compacts, and the compacting state ends')
 
         // ------------------------------------------------------------------ Claude Code
         console.log('# Claude Code')
@@ -339,6 +333,19 @@ async function main() {
         await settled('the answer', 'Hello from the fake model')
         const customNotes = `${T}.turns.flatMap(t => t.steps).filter(s => s.kind === 'note' && s.variant === 'command')`
         let shotN = 18
+        // The picker lists the skills and commands in Claude Code's folders (it reports none itself), not its built-ins.
+        await until('Claude Code\'s skills', () => js<boolean>(`${T}.commands.some(c => c.name === 'demo-skill')`))
+        await openPicker()
+        names = (await listed()).join(' | ')
+        check(names === 'demo-skill | tidy', `the picker lists the skill and the custom command from its folders (${names})`)
+        await shot('17a-claude-picker')
+        await pickCommand('tidy')
+        await page.call('Input.insertText', { text: 'the desk' })
+        const k0 = await turns()
+        await sendEnter()
+        await until('Claude Code ran the picked command', () => js<boolean>(`!${T}.running && ${T}.turns.length > ${k0} && JSON.stringify(${T}.turns.at(-1)).includes('tidy')`), 30_000)
+        check(await js<boolean>(`JSON.stringify(${T}.turns.at(-1)).includes('/tidy') && JSON.stringify(${T}.turns.at(-1)).includes('the desk')`), 'the picked command and what was typed after it reach Claude Code as "/tidy the desk"')
+        await shot('17b-claude-picked-command')
         for (const command of ['/cost', '/context', '/zzz-unknown']) {
             await js(`${T}.showTui(false)`)
             const k0 = await js<number>(`${customNotes}.length`)
@@ -429,12 +436,16 @@ async function main() {
         await js(`(() => { window.__app.newThread(${R}); return true })()`)
         await until('a pi thread', () => js<boolean>(`!!${T} && ${T}.isEmpty && ${T}.agent === 'pi'`))
         await typeLine('/', false)
-        await until('the menu', async () => (await menu()).length > 0)
-        names = (await menu()).join(' | ')
-        check(['new', 'resume', 'settings', 'login', 'copy', 'export'].every(n => names.includes(n)), `pi's menu keeps every app command (${names.slice(0, 120)})`)
-        check(!names.includes('diff'), 'and has no /diff, which pi\'s terminal does not either')
-        await shot('27-pi-slash-menu')
+        await sleep(300)
+        check(await noMenu() && (await js<string>(`${T}.draft`)) === '/', 'pi: typing "/" opens no menu either')
         await js(`${T}.draft = ''`)
+        if (await pickerButton()) {
+            await openPicker()
+            names = (await listed()).join(' | ')
+            check(!['compact', 'model', 'tree', 'fork', 'clone', 'reload', 'name', 'autopilot'].some(n => names.split(' | ').includes(n)), `pi: the picker has none of the commands the app has a control for (${names.slice(0, 100)})`)
+            await shot('27-pi-picker')
+            await closePicker()
+        }
         console.log(`all command checks passed; screenshots in ${SHOTS}`)
     }
     catch (error) {

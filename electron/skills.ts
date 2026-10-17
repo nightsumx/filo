@@ -39,7 +39,7 @@ async function scan(dirs: { dir: string, agents: AgentKind[] }[]) {
 }
 
 /** The frontmatter's description, folded onto one line. */
-function description(skillMd: string) {
+export function description(skillMd: string) {
     const lines = skillMd.split('\n')
     if (lines[0]?.trim() !== '---')
         return ''

@@ -109,9 +109,9 @@ async function main() {
         check(JSON.stringify(await js<string[]>(`[...${T}.thinkingLevels]`)) === '["low","high"]', 'effort levels come from the agent\'s thought_level option')
         await until('the mode picker', () => js<boolean>(`!![...document.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'Mode: Read-only')`))
         check(true, 'the agent\'s own Mode option gets a picker')
-        check(await js<string>(`document.querySelector('textarea').placeholder`) === 'Ask OpenCode to do something, or type / for commands', 'the composer names the agent')
+        check(await js<string>(`document.querySelector('textarea').placeholder`) === 'Ask OpenCode to do something', 'the composer names the agent')
         await until('slash commands', () => js<boolean>(`${T}.commands.some(c => c.name === 'review')`))
-        check(true, 'available_commands_update fills the slash menu')
+        check(true, 'available_commands_update fills the command list')
 
         await js(`(() => { const t = ${T}; t.draft = 'edit notes.txt'; void t.send(); return true })()`)
         await until('the approval prompt', () => js<boolean>(`${T}.uiRequests[0]?.approval?.toolCallId === 'edit-1'`))
@@ -226,7 +226,7 @@ async function main() {
         await until('another new thread', () => js<boolean>(`!!${T} && ${T}.isEmpty && ${T}.key !== ${JSON.stringify(key)}`))
         await js(`${T}.setAgent('claude')`)
         await until('Claude ready', () => js<boolean>(`${T}.agent === 'claude' && ${T}.agentStatus === 'ready'`))
-        check(await js<string>(`document.querySelector('textarea').placeholder`) === 'Ask Claude Code to do something, or type / for commands', 'a Claude Code thread names its agent')
+        check(await js<string>(`document.querySelector('textarea').placeholder`) === 'Ask Claude Code to do something', 'a Claude Code thread names its agent')
         // It runs Claude Code's own TUI, not ACP: test/claude-tui-e2e.ts runs it against the real CLI.
         await js(`window.__app.closeTab(${T}.key)`)
 
