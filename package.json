@@ -126,6 +126,10 @@
         ],
         "extraResources": [
             {
+                "from": "build/licenses/litcode-THIRD-PARTY-NOTICES.md",
+                "to": "licenses/litcode-THIRD-PARTY-NOTICES.md"
+            },
+            {
                 "from": "electron/providerHelper.mts",
                 "to": "providerHelper.mts"
             },
