@@ -78,7 +78,13 @@ export default defineConfig(({ command }) => {
                 ...(isBuild || !existsSync(litcodeDev) ? {} : { 'lite-monaco': resolve(litcodeDev, 'src/index.ts') }),
             },
         },
-        server: { port: 5288, fs: { allow: [searchForWorkspaceRoot(process.cwd()), ...modules, litcodeDev] } },
+        server: {
+            port: 5288,
+            fs: { allow: [searchForWorkspaceRoot(process.cwd()), ...modules, litcodeDev] },
+            // litcode's modules have no hot-update boundary, so every save under it (also one made in Filo's own editor)
+            // would reload the whole window. Not watched unless asked for; Cmd+R picks up its changes.
+            watch: process.env.FILO_WATCH_LITCODE ? undefined : { ignored: [`${litcodeDev}/**`] },
+        },
         clearScreen: false,
         test: {
             include: ['src/**/*.test.ts', 'electron/**/*.test.ts', 'shared/**/*.test.ts', 'test/**/*.test.ts'],
