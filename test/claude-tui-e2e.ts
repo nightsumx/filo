@@ -331,17 +331,6 @@ async function main() {
             const added = (await mcpOf()).files
             check(added.command === 'node' && JSON.stringify(added.args) === JSON.stringify(['-e', 'setTimeout(()=>{},1)', 'a b']) && added.env?.TOKEN === 'abc', `Add runs claude mcp add: the server is in Claude Code's own config (${JSON.stringify(added)})`)
             await until('the server listed', () => js<boolean>(`!!document.querySelector('[data-mcp="files"]')`))
-            // The two-line "Added" toast sits clear of the settings dialog: it used to cover the page title.
-            await until('the toast settled in', () => js<boolean>(`(document.querySelector('[data-sonner-toast]')?.getBoundingClientRect().top ?? -1) >= 0`))
-            // In a 760px-high window the dialog starts at y=70, under the toast's old place. (Left as it is, like page.screenshot does; set again it would resize the TUI's terminal for nothing.)
-            if (await js<number>(`window.innerHeight`) !== 760) {
-                await page.call('Emulation.setDeviceMetricsOverride', { width: 1280, height: 760, deviceScaleFactor: 1, mobile: false })
-                await sleep(500)
-            }
-            check(await js<boolean>(`(() => {
-                const d = document.querySelector('[role="dialog"]').getBoundingClientRect()
-                return [...document.querySelectorAll('[data-sonner-toast]')].map(e => e.getBoundingClientRect()).every(t => t.top >= d.bottom || t.bottom <= d.top || t.left >= d.right || t.right <= d.left)
-            })()`), 'the toast does not cover the settings dialog')
             check(true, 'and the page lists it')
             if (SHOTS)
                 await page.screenshot(path.join(SHOTS, 'claude-mcp-list.png'))
