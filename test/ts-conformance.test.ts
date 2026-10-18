@@ -63,6 +63,8 @@ async function editorErrors(configPath: string, files: string[], base = root): P
     for (const file of files) {
         if (!project.files.has(file))
             continue
+        // Let the worker answer vitest's RPC between files: one unbroken run over the repo outlasts its 60 s timeout.
+        await new Promise(resolve => setTimeout(resolve))
         for (const d of [...service.getSyntacticDiagnostics(vpath(file)), ...service.getSemanticDiagnostics(vpath(file))]) {
             if (d.category !== category)
                 continue
