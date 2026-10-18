@@ -1,17 +1,19 @@
 import type { FileTab } from './fileTab'
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { dirname, join } from 'node:path/posix'
 import { getTSService, setTsLibLoader } from 'lite-monaco'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { nodeProjectFs } from '../../test/projectFs'
 import { appStore } from './app'
+import { slashed } from '@/lib/tsProject'
 import { codeIntel } from './codeIntel'
 
 const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }))
 vi.mock('sonner', () => ({ toast }))
 
-const root = realpathSync(mkdtempSync(join(tmpdir(), 'code-intel-')))
+// The editor works on slashed paths (codeIntel slashes what it gets), so the fixtures do too, on Windows as well.
+const root = slashed(realpathSync(mkdtempSync(`${tmpdir()}/code-intel-`)))
 const put = (rel: string, text: string) => {
     mkdirSync(dirname(join(root, rel)), { recursive: true })
     writeFileSync(join(root, rel), text)

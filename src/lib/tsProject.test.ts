@@ -1,13 +1,14 @@
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { dirname, join } from 'node:path/posix'
 import { clearTSServiceCache, getTSService, setTsCompilerOptions, setTsFiles, setTsLibLoader, setTsResolutions } from 'lite-monaco'
 import ts from 'typescript'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { nodeProjectFs } from '../../test/projectFs'
-import { checkOptions, loadConfig, namedImports, Project } from './tsProject'
+import { checkOptions, loadConfig, namedImports, Project, slashed } from './tsProject'
 
-const root = realpathSync(mkdtempSync(join(tmpdir(), 'ts-project-')))
+// The editor works on slashed paths (codeIntel slashes what it gets), so the fixtures do too, on Windows as well.
+const root = slashed(realpathSync(mkdtempSync(`${tmpdir()}/ts-project-`)))
 const put = (rel: string, text: string) => {
     mkdirSync(dirname(join(root, rel)), { recursive: true })
     writeFileSync(join(root, rel), text)
