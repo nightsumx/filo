@@ -116,7 +116,7 @@ const McpSection = observer(() => {
             control={() => <span className="text-[12px] tabular-nums text-[var(--jb-comment)]">{servers ? servers.length : ''}</span>}
         >
             {servers?.length === 0 && <Comment className="mt-2">{tr('还没有 MCP 服务器。', 'No MCP servers yet.')}</Comment>}
-            <ul className="mt-2 flex flex-col gap-1" data-mcp-list>
+            <ul className="m-0 mt-2 flex list-none flex-col gap-1 p-0" data-mcp-list>
                 {servers?.map(server => (
                     <li key={`${server.scope}:${server.name}`} className="flex flex-col gap-1 rounded-[6px] bg-[var(--jb-fill)] px-3 py-2 text-[13px]" data-mcp={server.name}>
                         <div className="flex items-center gap-2">

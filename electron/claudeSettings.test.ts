@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { claudeJsonPath, claudeMcpServers, claudeMemory, codexMcpTable, codexPluginChange, codexServerName, commandWords, mcpAddArgs, mcpRemoveArgs, setClaudeAutoMemory } from './claudeSettings'
+import { claudeJsonPath, claudeMcpServers, claudeMemory, codexMcpTable, codexPluginChange, commandLine, codexServerName, commandWords, mcpAddArgs, mcpRemoveArgs, setClaudeAutoMemory } from './claudeSettings'
 import { projectSlug } from './native/claudeTui'
 
 describe('commandWords', () => {
@@ -142,5 +142,14 @@ describe('codexPluginChange', () => {
             { action: 'enable', id: 'a.b@c', enabled: true }, { action: 'enable', id: 'a@c', enabled: 'yes' }, { action: 'enable', id: 'a@b.c', enabled: true },
             { action: 'addMarketplace', source: '  ' }, { action: 'uninstall' }])
             expect(() => codexPluginChange(bad), JSON.stringify(bad)).toThrow()
+    })
+})
+
+describe('commandLine', () => {
+    it('quotes only the words that need it, and reads back as the same words', () => {
+        const words = ['node', '-e', 'console.log("hi there")', 'a b', "it's", 'back\\slash', '', 'plain']
+        expect(commandLine(['node', '-e', 'x', 'a', 'b'])).toBe('node -e x a b')
+        expect(commandLine(['say', 'hello world'])).toBe('say "hello world"')
+        expect(commandWords(commandLine(words))).toEqual(words)
     })
 })

@@ -9,7 +9,7 @@ describe('parseGrokMcp', () => {
             { url: 'https://x.example/sse', type: 'sse', enabled: true, name: 'old', scope: 'user' },
         ])
         expect(parseGrokMcp(output)).toEqual([
-            { name: 'files', scope: 'user', transport: 'stdio', target: 'node -e 1 a b', enabled: true },
+            { name: 'files', scope: 'user', transport: 'stdio', target: 'node -e 1 "a b"', enabled: true },
             { name: 'web', scope: 'project', transport: 'http', target: 'https://example.com/mcp', enabled: false },
             { name: 'old', scope: 'user', transport: 'sse', target: 'https://x.example/sse', enabled: true },
         ])

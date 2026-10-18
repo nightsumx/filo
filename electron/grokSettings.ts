@@ -2,7 +2,7 @@
 // (user) and ./.grok/config.toml (project). Everything goes through the user's own `grok mcp`, which reads and
 // writes those files, so the terminal's grok sees the same. `grok mcp list --json` reads files only.
 import type { GrokMcpAdd, GrokMcpServer } from '@shared/ipc'
-import { codexServerName, commandWords } from './claudeSettings'
+import { codexServerName, commandLine, commandWords } from './claudeSettings'
 import { tr } from './i18n'
 
 const isObject = (v: unknown): v is Record<string, any> => !!v && typeof v === 'object' && !Array.isArray(v)
@@ -26,7 +26,7 @@ export function parseGrokMcp(output: string): GrokMcpServer[] {
             name: item.name,
             scope: item.scope === 'project' ? 'project' : 'user',
             transport: item.type === 'sse' ? 'sse' : url ? 'http' : 'stdio',
-            target: url ?? [item.command, ...args].filter(a => typeof a === 'string' && a).join(' '),
+            target: url ?? commandLine([item.command, ...args].filter(a => typeof a === 'string' && a)),
             enabled: item.enabled !== false,
         }
     })

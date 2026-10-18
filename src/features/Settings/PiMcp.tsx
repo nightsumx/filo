@@ -118,7 +118,7 @@ export const PiMcpSection = observer(() => {
         >
             {hasProject && !trusted && <Comment className="mt-2" id="pi-mcp-untrusted">{tr('这个项目还没被信任，它自己的 .pi/mcp.json 不会加载（设置 → 项目信任）。', 'This project is not trusted, so its own .pi/mcp.json is not loaded (Settings → Project trust).')}</Comment>}
             {servers?.length === 0 && <Comment className="mt-2">{tr('还没有 MCP 服务器。', 'No MCP servers yet.')}</Comment>}
-            <ul className="mt-2 flex flex-col gap-1" data-mcp-list>
+            <ul className="m-0 mt-2 flex list-none flex-col gap-1 p-0" data-mcp-list>
                 {servers?.map(server => (
                     <li key={`${server.scope}:${server.name}`} className="flex flex-col gap-1 rounded-[6px] bg-[var(--jb-fill)] px-3 py-2 text-[13px]" data-mcp={server.name} data-scope={server.scope}>
                         <div className="flex items-center gap-2">

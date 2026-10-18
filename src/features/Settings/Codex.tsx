@@ -103,7 +103,7 @@ const McpSection = observer(() => {
         >
             {failed && <Comment className="mt-2">{failed}</Comment>}
             {servers?.length === 0 && <Comment className="mt-2">{tr('还没有 MCP 服务器。', 'No MCP servers yet.')}</Comment>}
-            <ul className="mt-2 flex flex-col gap-1" data-mcp-list>
+            <ul className="m-0 mt-2 flex list-none flex-col gap-1 p-0" data-mcp-list>
                 {servers?.map(server => (
                     <li key={server.name} className="flex flex-col gap-0.5 rounded-[6px] bg-[var(--jb-fill)] px-3 py-1.5 text-[13px]" data-mcp={server.name}>
                         <div className="flex items-center gap-2">
@@ -209,7 +209,7 @@ const PluginsSection = observer(() => {
                             <span className="flex-1" />
                             <Button variant="ghost" size="sm" disabled={busy} onClick={() => void removeMarketplace(marketplace.name)}>{tr('移除插件源', 'Remove marketplace')}</Button>
                         </div>
-                        <ul className="flex flex-col gap-1">
+                        <ul className="m-0 flex list-none flex-col gap-1 p-0">
                             {marketplace.plugins.length === 0 && <Comment>{tr('这个插件源里没有插件。', 'No plugins in this marketplace.')}</Comment>}
                             {marketplace.plugins.map(plugin => (
                                 <li key={plugin.id} className="flex flex-col gap-0.5 rounded-[6px] bg-[var(--jb-fill)] px-3 py-2 text-[13px]" data-plugin={plugin.id}>

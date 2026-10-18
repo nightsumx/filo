@@ -24,6 +24,7 @@ import { AcpConnection, RpcError } from '../acp/connection'
 import { AcpTranscript } from '../acp/transcript'
 import { costOf, pricedModel } from 'pi-capabilities/lib/prices.ts'
 import { priceList } from '../prices'
+import { commandLine } from '../claudeSettings'
 
 const STDERR_LIMIT = 64 * 1024
 
@@ -1989,7 +1990,7 @@ export function codexMcpServers(launch: CodexLaunch, cwd: string): Promise<Codex
             return {
                 name,
                 transport: url ? 'http' : 'stdio',
-                target: url ?? [spec.command, ...args].filter(a => typeof a === 'string' && a).join(' '),
+                target: url ?? commandLine([spec.command, ...args].filter(a => typeof a === 'string' && a)),
                 enabled: spec.enabled !== false,
                 error: typeof seen?.toolsError === 'string' && seen.toolsError ? seen.toolsError : undefined,
                 tools,

@@ -37,7 +37,7 @@ function serversOf(table: unknown, scope: ClaudeMcpServer['scope']): ClaudeMcpSe
     return Object.entries(table).filter(([, spec]) => isObject(spec)).map(([name, spec]) => {
         const transport = typeof spec.type === 'string' ? spec.type : spec.url ? 'http' : 'stdio'
         const args = Array.isArray(spec.args) ? spec.args.filter((a: unknown) => typeof a === 'string') : []
-        const target = typeof spec.url === 'string' ? spec.url : [spec.command, ...args].filter(a => typeof a === 'string' && a).join(' ')
+        const target = typeof spec.url === 'string' ? spec.url : commandLine([spec.command, ...args].filter(a => typeof a === 'string' && a))
         return { name, scope, transport, target }
     })
 }
@@ -48,6 +48,11 @@ export async function claudeMcpServers(cwd: string, env: Env = process.env, home
     const local = isObject(json.projects) && isObject(json.projects[cwd]) ? json.projects[cwd].mcpServers : undefined
     const project = (await readJson(path.join(cwd, '.mcp.json'))).mcpServers
     return [...serversOf(local, 'local'), ...serversOf(project, 'project'), ...serversOf(json.mcpServers, 'user')]
+}
+
+/** Words as one command line that commandWords reads back as the same words: only those with spaces, quotes or backslashes get quoted. */
+export function commandLine(words: readonly string[]): string {
+    return words.map(w => (w === '' || /[\s"'\\]/.test(w) ? `"${w.replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"` : w)).join(' ')
 }
 
 /** A command line as words: spaces separate them, single or double quotes keep a word together, a backslash escapes the next character. */

@@ -5,7 +5,7 @@ import type { PiMcpAdd, PiMcpServer } from '@shared/ipc'
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import process from 'node:process'
-import { codexServerName, commandWords } from './claudeSettings'
+import { codexServerName, commandLine, commandWords } from './claudeSettings'
 import { tr } from './i18n'
 import { agentDir } from './piSettings'
 
@@ -37,7 +37,7 @@ function serversOf(table: unknown, scope: PiMcpServer['scope']): PiMcpServer[] {
             scope,
             // An entry with no command or url in a project only switches a user-level server on or off there.
             transport: url ? 'http' : command ? 'stdio' : 'override',
-            target: url ?? [command, ...args].filter(Boolean).join(' '),
+            target: url ?? commandLine([command, ...args].filter(Boolean)),
             enabled: spec.enabled !== false,
             exposure: typeof spec.exposure === 'string' ? spec.exposure : 'codemode',
         }
