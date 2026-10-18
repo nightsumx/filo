@@ -5,7 +5,7 @@ import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import process from 'node:process'
-import { clearTSServiceCache, getTSService, setTsCompilerOptions, setTsFiles, setTsLibLoader } from 'lite-monaco'
+import { clearTSServiceCache, getTSService, setTsCompilerOptions, setTsFiles, setTsLibLoader, setTsResolutions } from 'lite-monaco'
 import ts from 'typescript'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { checkOptions, loadConfig, Project, slashed } from '../src/lib/tsProject'
@@ -18,6 +18,10 @@ beforeAll(() => {
     setTsLibLoader(async () => new Map(readdirSync(libs).filter(f => /^lib\..*\.d\.ts$/.test(f)).map(f => [f, readFileSync(join(libs, f), 'utf8')] as const)))
 })
 
+/** The text of every error seen, by its key, for the report of a difference. */
+const said = new Map<string, string>()
+const say = (key: string, d: { messageText: unknown }) => said.set(key, ts.flattenDiagnosticMessageText(d.messageText as never, ' ').slice(0, 300))
+
 /** What tsc reports for the project: "file:code:start" for every error. */
 function tscErrors(configPath: string, base = root): { errors: Set<string>, files: string[] } {
     const read = ts.readConfigFile(configPath, ts.sys.readFile)
@@ -28,8 +32,11 @@ function tscErrors(configPath: string, base = root): { errors: Set<string>, file
         const source = program.getSourceFile(file)
         if (!source)
             continue
-        for (const d of [...program.getSyntacticDiagnostics(source), ...program.getSemanticDiagnostics(source)])
-            errors.add(`${file.slice(base.length + 1)}:${d.code}:${d.start}`)
+        for (const d of [...program.getSyntacticDiagnostics(source), ...program.getSemanticDiagnostics(source)]) {
+            const key = `${file.slice(base.length + 1)}:${d.code}:${d.start}`
+            errors.add(key)
+            say(key, d)
+        }
     }
     return { errors, files: parsed.fileNames.map(slashed) }
 }
@@ -48,6 +55,7 @@ async function editorErrors(configPath: string, files: string[], base = root): P
     // The same options codeIntel hands the service.
     setTsCompilerOptions({ strict: false, ...checkOptions(config.options) } as never, { lang: 'typescript' })
     setTsFiles(project.output(), { lang: 'typescript' })
+    setTsResolutions(project.resolutions(), { lang: 'typescript' })
     const session = getTSService({ lang: 'typescript', fileName: first })
     const service = await session.ensure()
     const category = ts.DiagnosticCategory.Error
@@ -56,12 +64,17 @@ async function editorErrors(configPath: string, files: string[], base = root): P
         if (!project.files.has(file))
             continue
         for (const d of [...service.getSyntacticDiagnostics(file), ...service.getSemanticDiagnostics(file)]) {
-            if (d.category === category)
-                errors.add(`${file.slice(base.length + 1)}:${d.code}:${d.start}`)
+            if (d.category !== category)
+                continue
+            const key = `${file.slice(base.length + 1)}:${d.code}:${d.start}`
+            errors.add(key)
+            say(key, d)
         }
     }
     return errors
 }
+
+const LENIENT = new Set([5097, 7016])
 
 describe('editor diagnostics against tsc', () => {
     for (const name of ['tsconfig.app.json', 'tsconfig.node.json']) {
@@ -73,7 +86,7 @@ describe('editor diagnostics against tsc', () => {
             const got = await editorErrors(configPath, expected.files)
             const extra = [...got].filter(e => !expected.errors.has(e))
             const missing = [...expected.errors].filter(e => !got.has(e))
-            expect({ extra: extra.slice(0, 20), missing: missing.slice(0, 20) }).toEqual({ extra: [], missing: [] })
+            expect({ extra: extra.slice(0, 20).map(e => `${e} ${said.get(e)}`), missing: missing.slice(0, 20).map(e => `${e} ${said.get(e)}`) }).toEqual({ extra: [], missing: [] })
         }, 300_000)
     }
 
@@ -102,4 +115,20 @@ describe('editor diagnostics against tsc', () => {
             rmSync(dir, { recursive: true, force: true })
         }
     }, 60_000)
+
+    // Other projects on this machine, by hand: CONFORM_PROJECTS=/a/tsconfig.json:/b/tsconfig.json bunx vitest run test/ts-conformance.test.ts
+    const others = (process.env.CONFORM_PROJECTS ?? '').split(':').filter(Boolean)
+    for (const configPath of others) {
+        it(`${configPath}: the same errors`, async () => {
+            const base = dirname(configPath)
+            const expected = tscErrors(configPath, base)
+            const got = await editorErrors(configPath, expected.files, base)
+            const extra = [...got].filter(e => !expected.errors.has(e))
+            // Where the editor is more lenient than tsc, on purpose: a relative `.js` file without declarations is `any` to it (7016),
+            // and a `.ts` extension in an import is not refused (5097).
+            const missing = [...expected.errors].filter(e => !got.has(e) && !LENIENT.has(Number(e.split(':')[1])))
+            console.log(`${configPath}: ${expected.files.length} files, tsc ${expected.errors.size} errors, editor ${got.size}`)
+            expect({ extra: extra.slice(0, 20).map(e => `${e} ${said.get(e)}`), missing: missing.slice(0, 20).map(e => `${e} ${said.get(e)}`) }).toEqual({ extra: [], missing: [] })
+        }, 600_000)
+    }
 })

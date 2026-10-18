@@ -8,7 +8,7 @@
 import type { DirChange, EditorIntel } from '@shared/ipc'
 import type { Config, ProjectFs, TsModule } from '@/lib/tsProject'
 import type { FileTab } from './fileTab'
-import { getTSService, setTsCompilerOptions, setTsFiles } from 'lite-monaco'
+import { getTSService, setTsCompilerOptions, setTsFiles, setTsResolutions } from 'lite-monaco'
 import { computed, observable, runInAction } from 'mobx'
 import { toast } from 'sonner'
 import { tr } from '@/lib/i18n'
@@ -240,8 +240,14 @@ class CodeIntel {
             if (e.family === family)
                 Object.assign(table, e.project.output())
         }
+        const pointed: Record<string, Record<string, string>> = {}
+        for (const e of this.entries.values()) {
+            if (e.family === family)
+                Object.assign(pointed, e.project.resolutions())
+        }
         this.published.set(family, table)
         setTsFiles(table, { lang: family })
+        setTsResolutions(pointed, { lang: family })
         this.updateDirs()
     }
 
@@ -267,7 +273,7 @@ class CodeIntel {
                 const names = change.names.includes('') ? entry.project.own().filter(f => dirOf(f) === dir).map(f => f.slice(dir.length + 1)) : change.names
                 for (const name of names) {
                     const path = `${dir}/${name}`
-                    const known = entry.project.files.has(path)
+                    const known = entry.project.files.has(path) || entry.project.imported(path)
                     // A new file is taken in when it is part of what this level reads.
                     const wanted = SOURCE_FILE.test(path) && !isNodeModules(path) && entry.project.config.covers(path) && (entry.level === 'full' || DECLARATION_FILE.test(path))
                     if (known || (change.listed && wanted))

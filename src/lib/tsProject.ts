@@ -90,7 +90,16 @@ function globToRegExp(dir: string, pattern: string): RegExp {
     // A bare folder name stands for everything in it.
     if (!/[*?]/.test(last) && !/\.[a-z]+$/i.test(last))
         p = `${p}/**/*`
-    const abs = p.startsWith('/') || /^[a-z]:/i.test(p) ? p : `${dir}/${p}`
+    const joined = p.startsWith('/') || /^[a-z]:/i.test(p) ? p : `${dir}/${p}`
+    // `../src/**/*` in a config one folder down: the dots go before the pattern is read.
+    const parts: string[] = []
+    for (const part of joined.split('/')) {
+        if (part === '..' && parts.length > 1)
+            parts.pop()
+        else if (part !== '.')
+            parts.push(part)
+    }
+    const abs = parts.join('/')
     let re = ''
     for (let i = 0; i < abs.length; i++) {
         const c = abs[i]
@@ -235,7 +244,7 @@ export async function loadConfig(ts: TsModule, fs: ProjectFs, file: string, fall
 /** Options for lite-monaco's service: what changes the errors it shows, not where files are. */
 export function checkOptions(options: TS.CompilerOptions): TS.CompilerOptions {
     const out: Record<string, unknown> = { ...options }
-    for (const key of ['paths', 'pathsBasePath', 'baseUrl', 'rootDir', 'rootDirs', 'typeRoots', 'types', 'outDir', 'outFile', 'declarationDir', 'tsBuildInfoFile', 'configFilePath', 'project', 'composite', 'incremental', 'plugins', 'lib', 'noLib', 'noEmit', 'allowJs', 'moduleResolution'])
+    for (const key of ['paths', 'pathsBasePath', 'baseUrl', 'rootDir', 'rootDirs', 'typeRoots', 'types', 'outDir', 'outFile', 'declarationDir', 'tsBuildInfoFile', 'configFilePath', 'project', 'composite', 'incremental', 'plugins', 'noLib', 'noEmit', 'allowJs', 'moduleResolution'])
         delete out[key]
     return out as TS.CompilerOptions
 }
@@ -270,6 +279,67 @@ function anyModule(names: Iterable<string>): string {
     return `declare const m: any\nexport default m\n${named.map(n => `export declare const ${n}: any\n`).join('')}`
 }
 
+/** The type TypeScript gives a JSON value (as the type of the literal, widened): objects, arrays of one merged shape, primitives. */
+function jsonType(value: unknown, depth = 0): string {
+    if (value === null)
+        return 'null'
+    if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean')
+        return typeof value
+    if (depth > 12 || typeof value !== 'object')
+        return 'any'
+    if (Array.isArray(value)) {
+        if (!value.length)
+            return 'never[]'
+        const objects = value.filter((v): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v))
+        const parts = new Set(value.filter(v => !objects.includes(v as never)).map(v => jsonType(v, depth + 1)))
+        if (objects.length) {
+            // Elements that are objects become one shape: a key some lack is optional, as TypeScript normalises them.
+            const keys = new Map<string, { types: Set<string>, count: number }>()
+            for (const o of objects) {
+                for (const [k, v] of Object.entries(o)) {
+                    const at = keys.get(k) ?? { types: new Set<string>(), count: 0 }
+                    at.types.add(jsonType(v, depth + 1))
+                    at.count++
+                    keys.set(k, at)
+                }
+            }
+            parts.add(`{ ${[...keys].map(([k, at]) => `${JSON.stringify(k)}${at.count < objects.length ? '?' : ''}: ${[...at.types].join(' | ')}`).join('; ')} }`)
+        }
+        const one = [...parts]
+        return one.length === 1 ? `${one[0].includes(' | ') ? `(${one[0]})` : one[0]}[]` : `(${one.join(' | ')})[]`
+    }
+    return `{ ${Object.entries(value).map(([k, v]) => `${JSON.stringify(k)}: ${jsonType(v, depth + 1)}`).join('; ')} }`
+}
+
+/** Largest JSON file given a type; a bigger one is `any` to the importer (the type would cost more than it tells). */
+const MAX_JSON_TYPE = 1_000_000
+
+/** A JSON file as a module: its default export (and each top-level key) with the type TypeScript gives it; null when it is not JSON or too big. */
+function jsonModule(text: string): string | null {
+    if (text.length > MAX_JSON_TYPE)
+        return null
+    let value: unknown
+    try {
+        value = JSON.parse(text)
+    }
+    catch {
+        return null
+    }
+    const type = jsonType(value)
+    if (type.length > MAX_JSON_TYPE)
+        return null
+    const named = value && typeof value === 'object' && !Array.isArray(value) ? Object.keys(value).filter(k => /^[A-Za-z_$][\w$]*$/.test(k) && k !== 'default') : []
+    return `declare const m: ${type}\nexport default m\n${named.map(k => `export declare const ${k}: (typeof m)["${k}"]\n`).join('')}`
+}
+
+/** A short stable tag for a path (names of the other versions of a package). */
+function tag(text: string): string {
+    let h = 0
+    for (const c of text)
+        h = (Math.imul(h, 31) + c.charCodeAt(0)) >>> 0
+    return h.toString(36)
+}
+
 /** One line re-exporting `target`, to file under a name the service resolves. */
 function shimOf(shimDir: string, target: string, text: string): string {
     // `x.d.mts` next to `x.d.ts` (a package with both an ESM and a CJS build): the extensionless name would be the CJS one.
@@ -279,7 +349,7 @@ function shimOf(shimDir: string, target: string, text: string): string {
 function reexport(spec: string, text: string): string {
     if (/^\s*export\s*=/m.test(text))
         return `import m = require('${spec}')\nexport = m\n`
-    const hasDefault = /\bexport\s+default\b|\bas\s+default\b/.test(text)
+    const hasDefault = /\bexport\s+default\b|\bas\s+default\b|\bexport\s*(?:type\s*)?\{[^}]*\bdefault\b(?!\s+as\b)[^}]*\}/.test(text)
     return `export * from '${spec}'\n${hasDefault ? `export { default } from '${spec}'\n` : ''}`
 }
 
@@ -290,6 +360,9 @@ export class Project {
     /** Where each shim leads, so a jump to "the module" lands on the real file. */
     private readonly shimTargets = new Map<string, string>()
     private readonly stubs = new Map<string, Set<string>>()
+    /** JSON files imported (with `resolveJsonModule`): the module text typed from them, and the stubs that stand for each. */
+    private readonly jsonModules = new Map<string, string | null>()
+    private readonly jsonStubs = new Map<string, Set<string>>()
     /** File → the files it imports, for "who is affected by this change". */
     private readonly edges = new Map<string, Set<string>>()
     private readonly known = new Map<string, Entry>()
@@ -491,7 +564,7 @@ export class Project {
             }
             for (const r of modules) {
                 const mod = resolvedModules.get(keyOf(r))
-                const relativeSpec = r.spec.startsWith('./') || r.spec.startsWith('../')
+                const relativeSpec = r.spec === '.' || r.spec === '..' || r.spec.startsWith('./') || r.spec.startsWith('../')
                 const asked = named.get(r.from)?.get(r.spec) ?? []
                 const stubKey = relativeSpec ? `${slashed(join(dirOf(r.from), r.spec))}.d.ts` : `/node_modules/${r.spec}/index.d.ts`
                 if (!mod) {
@@ -503,8 +576,16 @@ export class Project {
                 const typed = DECLARATION.test(target) || TS_SOURCE.test(target)
                 const project = SOURCE.test(target) && !mod.isExternalLibraryImport
                 if (!typed && !project) {
-                    // JSON, JavaScript from a package, ...: the importer gets `any`.
+                    // JavaScript from a package, ...: the importer gets `any`; a JSON file, its own type.
                     this.stub(stubKey, asked)
+                    if (/\.json$/i.test(target) && options.resolveJsonModule) {
+                        if (!this.jsonModules.has(target))
+                            this.jsonModules.set(target, jsonModule((await this.entry(target)).text ?? ''))
+                        const stubs = this.jsonStubs.get(target) ?? new Set<string>()
+                        stubs.add(stubKey)
+                        this.jsonStubs.set(target, stubs)
+                        link(r.from, target)
+                    }
                     continue
                 }
                 if (!relativeSpec)
@@ -524,8 +605,9 @@ export class Project {
 
     /**
      * The name a package import is filed under for the service, which finds `x` only at /node_modules/x:
-     * one place for the whole project. Two versions of `x` (a plugin's own copy of `vite`, say) cannot both live
-     * there, so the second gets a name of its own, and the importing file is told it in `output()`.
+     * one place for the whole project. Two versions of `x` (a plugin's own copy of `vite`, a workspace package's own
+     * `zod`) cannot both live there, so the others get a name of their own and the importing file is pointed at it
+     * in `resolutions()`.
      */
     private shimSpec(spec: string, target: string, from: string, atRoot: string | undefined): string {
         const known = this.variants.get(spec) ?? new Map<string, string>()
@@ -535,8 +617,7 @@ export class Project {
             known.set(slashed(atRoot), spec)
         let name = known.get(target)
         if (!name) {
-            // The project's files cannot be renamed (the editor holds their text), a package's can.
-            name = isNodeModules(from) && known.size ? `${spec}/__v${known.size + 1}` : spec
+            name = known.size ? `${spec}/__v${tag(target)}` : spec
             known.set(target, name)
         }
         if (name !== spec) {
@@ -547,14 +628,15 @@ export class Project {
         return name
     }
 
-    /** The importing file's text with the names `shimSpec` chose. */
-    private renamed(path: string, text: string): string {
-        const renames = this.renames.get(path)
-        if (!renames)
-            return text
-        let out = text
-        for (const [spec, name] of renames)
-            out = out.replace(new RegExp(String.raw`(\b(?:from|import|require)\s*\(?)(['"])${spec.replace(/[$()*+.?[\\\]^{|}]/g, String.raw`\$&`)}\2`, 'g'), `$1$2${name}$2`)
+    /** Where the imports that do not go to the plain name lead: importing file → what it writes → the shim it gets. */
+    resolutions(): Record<string, Record<string, string>> {
+        const out: Record<string, Record<string, string>> = {}
+        for (const [from, renames] of this.renames) {
+            const table: Record<string, string> = {}
+            for (const [spec, name] of renames)
+                table[spec] = vpath(`/node_modules/${name}/index.d.ts`)
+            out[vpath(from)] = table
+        }
         return out
     }
 
@@ -645,10 +727,21 @@ export class Project {
         return this.serial(() => this.refreshNow(path))
     }
 
+    /** True for a JSON file some file imports, which `refresh` reads again too. */
+    imported(path: string): boolean {
+        return this.jsonModules.has(path)
+    }
+
     private async refreshNow(path: string): Promise<boolean> {
         this.known.delete(path)
         this.reading.delete(path)
         const entry = await this.entry(path)
+        if (this.jsonModules.has(path)) {
+            const next = jsonModule(entry.text ?? '')
+            const changed = next !== this.jsonModules.get(path)
+            this.jsonModules.set(path, next)
+            return changed
+        }
         const had = this.files.get(path)
         if (entry.text === null) {
             if (had === undefined)
@@ -717,10 +810,17 @@ export class Project {
         const out: Record<string, string> = {}
         for (const [k, v] of this.shims)
             out[k] = v
+        const jsonOf = (stub: string) => {
+            for (const [json, stubs] of this.jsonStubs) {
+                if (stubs.has(stub))
+                    return this.jsonModules.get(json) ?? null
+            }
+            return null
+        }
         for (const [k, names] of this.stubs)
-            out[vpath(k)] = anyModule(names)
+            out[vpath(k)] = jsonOf(k) ?? anyModule(names)
         for (const [k, v] of this.files)
-            out[vpath(k)] = isNodeModules(k) ? this.dotted(k, this.renamed(k, v)) : v
+            out[vpath(k)] = isNodeModules(k) ? this.dotted(k, v) : v
         // The service looks for `./x.mjs` as x.ts / x.d.ts only: ESM-only files (x.mts, x.d.mts) also go under those names, where free.
         for (const [k, v] of this.files) {
             const alias = k.replace(/\.d\.[cm]ts$/, '.d.ts').replace(/(?<!\.d)\.[cm]ts$/, '.ts')

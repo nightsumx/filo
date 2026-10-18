@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { clearTSServiceCache, getTSService, setTsCompilerOptions, setTsFiles, setTsLibLoader } from 'lite-monaco'
+import { clearTSServiceCache, getTSService, setTsCompilerOptions, setTsFiles, setTsLibLoader, setTsResolutions } from 'lite-monaco'
 import ts from 'typescript'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { nodeProjectFs } from '../../test/projectFs'
@@ -57,6 +57,10 @@ beforeAll(() => {
     put('node_modules/tsext/dist/index.d.ts', 'import type { Cb } from "./cb.ts"\nexport declare function on(cb: Cb): void\nexport interface Opts { a: 1 }\n')
     put('node_modules/tsext/dist/sub.d.ts', 'export type { Opts } from "."\n')
     put('node_modules/tsext/dist/cb.d.ts', 'export type Cb = (n: number) => void\n')
+    // A package whose index re-exports a default: `export { default } from`.
+    put('node_modules/redefault/package.json', '{ "name": "redefault", "types": "index.d.ts" }')
+    put('node_modules/redefault/index.d.ts', "export { UseIt } from './impl.js'\nexport { default } from './impl.js'\n")
+    put('node_modules/redefault/impl.d.ts', 'export type UseIt = number\ndeclare function useIt(): UseIt\nexport default useIt\n')
     // Two versions of one package: the project's and a dependency's own copy.
     put('node_modules/shared/package.json', '{ "name": "shared", "types": "index.d.ts" }')
     put('node_modules/shared/index.d.ts', 'export declare const v: 1\n')
@@ -64,6 +68,19 @@ beforeAll(() => {
     put('node_modules/host/index.d.ts', 'import { v } from "shared"\nexport declare const w: typeof v\n')
     put('node_modules/host/node_modules/shared/package.json', '{ "name": "shared", "types": "index.d.ts" }')
     put('node_modules/host/node_modules/shared/index.d.ts', 'export declare const v: 2\n')
+    // JSON modules and `lib`: a folder of their own with a tsconfig that asks for them.
+    put('json/tsconfig.json', '{ "compilerOptions": { "strict": true, "module": "esnext", "moduleResolution": "bundler", "resolveJsonModule": true, "lib": ["es2020"], "target": "es2020" }, "include": ["src"] }')
+    put('json/src/audio.json', '{ "bgm": 1, "sfx": { "hit": "a.ogg", "list": [1, 2] }, "tags": ["a", "b"], "mixed": [{ "x": 1 }, { "y": "s" }], "none": null, "empty": [], "odd-key": true }')
+    put('json/src/broken.json', '{ not json')
+    put('json/src/big.json', JSON.stringify({ big: 'x'.repeat(1_100_000) }))
+    // A workspace: a package with its own copy of a dependency the root has at another version.
+    put('ws/tsconfig.json', '{ "compilerOptions": { "strict": true, "module": "esnext", "moduleResolution": "bundler" }, "include": ["app", "pkg"] }')
+    put('ws/node_modules/ver/package.json', '{ "name": "ver", "types": "index.d.ts" }')
+    put('ws/node_modules/ver/index.d.ts', 'export declare const v: 4\nexport declare const sub: 4\n')
+    put('ws/pkg/node_modules/ver/package.json', '{ "name": "ver", "types": "index.d.ts" }')
+    put('ws/pkg/node_modules/ver/index.d.ts', 'export declare const v: 3\n')
+    put('ws/app/a.ts', 'import { v } from "ver"\nexport const a: 4 = v\n')
+    put('ws/pkg/b.ts', 'import { v } from "ver"\nexport const b: 3 = v\n')
     symlinkSync(join(root, 'node_modules/.store/linked@1/node_modules/linked'), join(root, 'node_modules/linked'))
     const libs = join(process.cwd(), 'node_modules/typescript/lib')
     setTsLibLoader(async () => new Map(readdirSync(libs).filter(f => /^lib\..*\.d\.ts$/.test(f)).map(f => [f, readFileSync(join(libs, f), 'utf8')] as const)))
@@ -83,6 +100,7 @@ async function diagnose(rel: string, text: string, mode: 'standard' | 'full' = '
         await project.loadAll()
     setTsCompilerOptions({ strict: false, ...checkOptions(config.options) }, { lang: 'typescript' })
     setTsFiles(project.output())
+    setTsResolutions(project.resolutions())
     const session = getTSService({ lang: rel.endsWith('x') ? 'tsx' : 'typescript', fileName: path })
     session.update(text)
     const service = await session.ensure()
@@ -120,6 +138,14 @@ describe('loadConfig', () => {
         // `include` comes from the parent when the child has none; the parent's folder is what it is relative to
         expect(config.covers(join(root, 'cfg/base-src/x.ts'))).toBe(true)
         expect(config.covers(join(root, 'cfg/app/a.ts'))).toBe(false)
+    })
+    it('`include` of a parent config may point up out of its folder', async () => {
+        put('up/.cfg/base.json', '{ "include": ["../**/*", "./gen.d.ts"], "exclude": ["../out"] }')
+        put('up/tsconfig.json', '{ "extends": "./.cfg/base.json" }')
+        put('up/src/a.ts', 'export {}\n')
+        const config = await loadConfig(ts, fs, join(root, 'up/src/a.ts'), root)
+        for (const [rel, covered] of [['src/a.ts', true], ['top.ts', true], ['out/x.ts', false], ['.cfg/gen.d.ts', true]] as const)
+            expect([rel, config.covers(join(root, 'up', rel))]).toEqual([rel, covered])
     })
     it('uses a jsconfig where there is no tsconfig', async () => {
         put('js/jsconfig.json', '{ "compilerOptions": { "checkJs": true } }')
@@ -161,6 +187,58 @@ describe('loadConfig', () => {
     })
 })
 
+describe('JSON modules and lib', () => {
+    const j = (body: string) => diagnose('json/src/a.ts', body)
+    it('gives a JSON import the type of its contents', async () => {
+        expect(await j('import audio from "./audio.json"\nexport const a: number = audio.bgm\nexport const b: string = audio.sfx.hit\nexport const c: number[] = audio.sfx.list\nexport const d: string[] = audio.tags\nexport const n: null = audio.none\nexport const o: boolean = audio["odd-key"]\n')).toEqual([])
+        const wrong = await j('import audio from "./audio.json"\nexport const a: string = audio.bgm\nexport const b = audio.missing\n')
+        expect(wrong.map(e => e.split(':')[0])).toEqual(['2322', '2339'])
+    })
+    it('`keyof typeof` a JSON file is the keys it has', async () => {
+        expect(await j('import audio from "./audio.json"\nexport type K = keyof typeof audio\nexport const k: K = "bgm"\n')).toEqual([])
+        expect((await j('import audio from "./audio.json"\nexport type K = keyof typeof audio\nexport const k: K = "nope"\n'))[0]).toContain('2322')
+    })
+    it('lets the top-level keys be imported by name', async () => {
+        expect(await j('import { bgm, sfx } from "./audio.json"\nexport const a: number = bgm\nexport const b: string = sfx.hit\n')).toEqual([])
+    })
+    it('merges the objects of an array: a key some lack is optional', async () => {
+        expect(await j('import audio from "./audio.json"\nexport const x: number | undefined = audio.mixed[0].x\nexport const y: string | undefined = audio.mixed[1].y\n')).toEqual([])
+    })
+    it('an empty array is never[], as in TypeScript', async () => {
+        expect(await j('import audio from "./audio.json"\nexport const e: never[] = audio.empty\n')).toEqual([])
+        expect((await j('import audio from "./audio.json"\nexport const e: string = audio.empty\n'))[0]).toContain('2322')
+    })
+    it('a JSON file that is not valid, or too big, is `any`', async () => {
+        expect(await j('import b from "./broken.json"\nimport big from "./big.json"\nexport const x: number = b.q + big.big.z\n')).toEqual([])
+    })
+    it('without resolveJsonModule the import is `any` as before', async () => {
+        expect(await diagnose('src/lib/a.ts', 'import d from "../data.json"\nexport const x: string = d.a\n')).toEqual([])
+    })
+    it('takes in a JSON file that changed', async () => {
+        clearTSServiceCache()
+        const path = join(root, 'json/src/a.ts')
+        const text = 'import audio from "./audio.json"\nexport const a: number = audio.bgm\n'
+        const project = new Project(ts, fs, await loadConfig(ts, fs, path, root))
+        await project.add([{ path, text }])
+        expect(project.imported(join(root, 'json/src/audio.json'))).toBe(true)
+        expect(project.output()[`${join(root, 'json/src/audio.json')}.d.ts`]).toContain('"bgm": number')
+        const file = join(root, 'json/src/changing.json')
+        writeFileSync(file, '{ "v": 1 }')
+        await project.add([{ path, text: `${text}import c from "./changing.json"\nexport const v: number = c.v\n` }])
+        expect(await project.refresh(file)).toBe(false)
+        writeFileSync(file, '{ "v": "now a string" }')
+        expect(await project.refresh(file)).toBe(true)
+        expect(project.output()[`${file}.d.ts`]).toContain('"v": string')
+    })
+    it('checks against the libraries the tsconfig asks for', async () => {
+        // es2020 has no String.prototype.replaceAll (es2021) nor Array.prototype.at (es2022)
+        const errors = await j('export const a = "x".replaceAll("x", "y")\nexport const b = [1].at(0)\nexport const c = [1].map(n => n * 2)\nexport const d = Promise.resolve(1)\nexport const e = new Map<string, number>().size\n')
+        expect(errors.map(e => e.split(':')[0])).toEqual(['2550', '2550'])
+        // and no `lib`: everything the service has
+        expect(await diagnose('src/lib/a.ts', 'export const a = "x".replaceAll("x", "y")\nexport const b = [1].at(0)\n')).toEqual([])
+    })
+})
+
 describe('Project', () => {
     it('resolves relative imports', async () => {
         expect(await diagnose('src/lib/a.ts', 'import { keyOS, type KeyOS } from "../core/keyos"\nimport { CODICON_ICON_CSS } from "../core/chrome/codicon-font"\nconst k: KeyOS = keyOS()\nconst n: number = CODICON_ICON_CSS\nexport { k, n }\n')).toEqual([])
@@ -182,6 +260,32 @@ describe('Project', () => {
     it('takes the ESM build of a package that has both, and follows its .mjs imports', async () => {
         expect(await diagnose('src/lib/a.ts', 'import dual, { dual as named, more } from "dual"\nexport const a: string = named(more) + dual(1)\n')).toEqual([])
         expect(await diagnose('src/lib/a.ts', 'import { dual } from "dual"\nexport const a: number = dual(1)\n')).toHaveLength(1)
+    })
+    it('files of a workspace package get the copy of a dependency next to them, whichever opens first', async () => {
+        const a = 'import { v } from "ver"\nexport const a: 4 = v\n'
+        const b = 'import { v } from "ver"\nexport const b: 3 = v\n'
+        for (const order of [['app/a.ts', 'pkg/b.ts'], ['pkg/b.ts', 'app/a.ts']]) {
+            clearTSServiceCache()
+            const config = await loadConfig(ts, fs, join(root, 'ws/app/a.ts'), root)
+            const project = new Project(ts, fs, config)
+            for (const rel of order)
+                await project.add([{ path: join(root, 'ws', rel), text: rel === 'app/a.ts' ? a : b }])
+            setTsCompilerOptions({ strict: true }, { lang: 'typescript' })
+            setTsFiles(project.output())
+            setTsResolutions(project.resolutions())
+            const session = getTSService({ lang: 'typescript', fileName: join(root, 'ws/app/a.ts') })
+            const service = await session.ensure()
+            const errors = (rel: string) => service.getSemanticDiagnostics(join(root, 'ws', rel)).map(d => d.code)
+            expect([order[0], errors('app/a.ts'), errors('pkg/b.ts')]).toEqual([order[0], [], []])
+        }
+    })
+    it('a project file importing its own folder (`from \'.\'`) and the one above (`from \'..\'`)', async () => {
+        expect(await diagnose('src/lib/dot.ts', 'import { os } from "."\nimport { Box } from "../ui/Box"\nexport const s: string = os\nexport { Box }\n')).toEqual([])
+        expect(await diagnose('src/lib/sub/dot.ts', 'import { os } from ".."\nexport const s: number = os\n')).toHaveLength(1)
+    })
+    it('a default re-exported by `export { default } from` is callable', async () => {
+        expect(await diagnose('src/lib/a.ts', 'import useIt, { type UseIt } from "redefault"\nexport const n: UseIt = useIt()\n')).toEqual([])
+        expect((await diagnose('src/lib/a.ts', 'import useIt from "redefault"\nexport const n: string = useIt()\n'))[0]).toContain('2322')
     })
     it('follows `./x.ts` imports between a package\'s declaration files', async () => {
         expect(await diagnose('src/lib/a.ts', 'import { on } from "tsext"\non((n) => { const s: string = n })\n')).toHaveLength(1)
