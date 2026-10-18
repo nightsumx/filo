@@ -111,3 +111,32 @@ Filo 是 Electron，只跑 Chromium，所以跨浏览器那一行对我们基本
 - 当前用法（单文件编辑、TS 补全、多 tab、分屏）：继续用 litcode，没必要换回 Monaco。
 - 换回 Monaco 才划算的情况：要接非 TS 语言服务（LSP）、要 inline diff / moved blocks、要稳定的无障碍。
 - 值得补的验证（我没做）：同一台机器上，同一个 1 万行文件，两边测载入、打字延迟、滚动，得到一张有 Monaco 对照的数字；中文输入法真机过一遍。
+
+## 9. 再对比 CodeMirror 6
+
+CodeMirror 6 没装在本仓库，我在临时目录里装了 `codemirror@6.0.2` 加 `@codemirror/lang-javascript@6.2.4`（view 6.43.14）量了体积，之后删掉。其余 CM6 的说法来自 litcode 自己的 `CM6-LEFTOVER.md`、`CAPABILITIES.md` 和我对 CM6 的了解，没有另测。
+
+前提：litcode 不是 CM6 的竞争对手，是从它长出来的。核心（文档模型、事务、Facet、heightmap、输入和 IME 处理）是照 CM6 的源码移植加重写的（文档里叫 CM7），“浏览器输入的坑”直接搬了 CM6 的做法。所以问题实际是：CM6 的原版内核加你自己拼功能，还是 litcode 这套拼好的 Monaco 风格成品。
+
+| 项 | CM6 | litcode | 来源 |
+|---|---|---|---|
+| 体积 | `basicSetup` 加 JS 语言：491 KB，gzip 168 KB | 1.5 MB，gzip 401 KB，但含 minimap、find 面板、命令面板、TS 智能、Diff | ✅ |
+| 成熟度 | 多年、大量生产使用，6.x 内 API 稳定 | 0.x，约三个月，一个人维护 | 📄 |
+| 浏览器和输入法 | 多平台长期打磨 | 移植了 CM6 的主要处理，Chrome 外没验证 | 📄 |
+| 高亮 | Lezer 增量解析，语法树可用于导航和折叠 | Shiki（VS Code 同款颜色），没有语法树，不能按语法节点导航 | 📄 |
+| TS 补全、hover、跳转、诊断 | 要自己接（社区有包） | 内置 | 📄 |
+| Monaco/VS Code 外观和键位 | 要自己做 | 内置，按键位对过 Monaco | 📄 |
+| minimap、sticky scroll、peek、命令面板、Diff 编辑器 | 大多要找社区包或自己写 | 内置 | 📄 |
+| 扩展机制 | ViewPlugin、通用 gutter/panel/tooltip，生态大 | 专用 overlay，没有通用插件 API，不兼容 CM6 插件 | 📄 |
+| 可监测（读内部状态做测试） | 内部值私有 | `introspect()` / `snapshot()` | 📄 |
+| 横向滚动稳定性 | 靠 DOM 的 scrollWidth | 有全文档行宽表 | 📄 |
+| 无障碍、RTL | 完整 | 有基础，RTL 命令偏逻辑方向 | 📄 |
+
+**哪个强，看比的是什么：**
+
+- **引擎的可靠性和生态：CM6 强。** 它经过更多真实场景，扩展点完整，语法树能支撑更多编辑命令。litcode 在这一层是“CM6 的子集加自己的取舍”，不会比原版更稳。
+- **开箱即用的 Monaco 体验和 TS 智能：litcode 强。** CM6 要达到同样的效果，得自己组装十几个包，TS 那部分要自己接语言服务。
+- **体积：** CM6 的最小配置更小，但那是没有这些功能的配置。同功能下谁小，我没量，不下结论。
+- **性能：** 两边我都没测，没有结论。
+
+对 Filo：它要的是 VS Code 风格、带 TS 补全和跳转、多 tab 的编辑器，litcode 更省事。代价是引擎层没有 CM6 的稳定性和生态；输入法、Safari 一类的边角问题得自己修。如果以后要接别的语言服务，或要按语法节点做编辑命令，CM6 加 Lezer 是更稳的底座。
