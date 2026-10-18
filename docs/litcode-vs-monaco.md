@@ -140,3 +140,9 @@ CodeMirror 6 没装在本仓库，我在临时目录里装了 `codemirror@6.0.2`
 - **性能：** 两边我都没测，没有结论。
 
 对 Filo：它要的是 VS Code 风格、带 TS 补全和跳转、多 tab 的编辑器，litcode 更省事。代价是引擎层没有 CM6 的稳定性和生态；输入法、Safari 一类的边角问题得自己修。如果以后要接别的语言服务，或要按语法节点做编辑命令，CM6 加 Lezer 是更稳的底座。
+
+## 10. 许可证和来源（2026-10-18 核查）
+
+我把 litcode 的 130 个源文件转成同样的 JS 后，和本机的 CodeMirror 6 与 Monaco 0.52.2 源码逐 token 比对：约 8.5% 的 token 落在“连续 20 个以上完全一致”的片段里，几乎都来自 CM6（heightmap、rangeset、change、rope、browser 等，最长一段连续 231 个 token 一字不差）。来自 Monaco 的是补全的 fuzzy 打分，和 minimap 的预烤字形表（与 Monaco 的数据逐字节相同）。Monaco 的词操作（`words.ts`）没有发现复制。
+
+处理：litcode 加了 `THIRD-PARTY-NOTICES.md` 并随包发布，相关源文件头加了来源注释，README 和 `package.json` 不再说“自研 / from-scratch”，README 顶部注明与微软无关；Filo 的应用包里也带了这份声明。未解决：Monaco 名字有没有商标限制，我没查到结论；codicon 字体是 CC BY 4.0 还是 MIT，按更严的署名处理。
