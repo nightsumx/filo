@@ -360,6 +360,8 @@ export class Project {
     /** Where each shim leads, so a jump to "the module" lands on the real file. */
     private readonly shimTargets = new Map<string, string>()
     private readonly stubs = new Map<string, Set<string>>()
+    /** The file a stand-in module stands for, by the stand-in's name in the service's table. */
+    private readonly stubTargets = new Map<string, string>()
     /** JSON files imported (with `resolveJsonModule`): the module text typed from them, and the stubs that stand for each. */
     private readonly jsonModules = new Map<string, string | null>()
     private readonly jsonStubs = new Map<string, Set<string>>()
@@ -568,8 +570,11 @@ export class Project {
                 const asked = named.get(r.from)?.get(r.spec) ?? []
                 const stubKey = relativeSpec ? `${slashed(join(dirOf(r.from), r.spec))}.d.ts` : `/node_modules/${r.spec}/index.d.ts`
                 if (!mod) {
-                    if (ASSET.test(r.spec))
+                    if (ASSET.test(r.spec)) {
                         this.stub(stubKey, asked)
+                        if (relativeSpec)
+                            this.stubTargets.set(vpath(stubKey), slashed(join(dirOf(r.from), r.spec.replace(/[?#].*$/, ''))))
+                    }
                     continue
                 }
                 const target = slashed(mod.resolvedFileName)
@@ -578,6 +583,7 @@ export class Project {
                 if (!typed && !project) {
                     // JavaScript from a package, ...: the importer gets `any`; a JSON file, its own type.
                     this.stub(stubKey, asked)
+                    this.stubTargets.set(vpath(stubKey), target)
                     if (/\.json$/i.test(target) && options.resolveJsonModule) {
                         if (!this.jsonModules.has(target))
                             this.jsonModules.set(target, jsonModule((await this.entry(target)).text ?? ''))
@@ -777,7 +783,7 @@ export class Project {
 
     /** The real file behind a name the service was given (a shim stands for a module; anything else is itself). */
     realOf(key: string): string {
-        return this.shimTargets.get(key) ?? key
+        return this.shimTargets.get(key) ?? this.stubTargets.get(key) ?? key
     }
 
     /** Files that import `path`, directly. */

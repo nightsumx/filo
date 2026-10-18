@@ -316,4 +316,45 @@ describe('codeIntel: jumping', () => {
         expect(to?.path).toBe(at('node_modules/typed/index.d.ts'))
         link.release()
     })
+
+    it('a stylesheet import leads to the file itself', async () => {
+        put('src/style.css', 'a {}\n')
+        const text = 'import css from "./style.css"\nexport const c = css\n'
+        const link = await codeIntel.attach(tabOf('src/main.ts'), 'typescript', 'standard', text)
+        await session('src/main.ts').ensure()
+        expect(codeIntel.definitionElsewhere(tabOf('src/main.ts'), 'typescript', text, text.indexOf('style.css'))).toEqual({ path: at('src/style.css'), line: 1, col: 1 })
+        link.release()
+    })
+})
+
+describe('codeIntel: the link under ⌘', () => {
+    const text = 'import { double } from "./util"\nimport nothing from "./missing"\nexport const out = double(2) + nothing\n'
+    const span = (needle: string, offset = 1, source = text) => codeIntel.definitionSpan(tabOf('src/main.ts'), 'typescript', source, source.indexOf(needle) + offset)
+
+    it('is the name, or the path without its quotes', async () => {
+        const link = await codeIntel.attach(tabOf('src/main.ts'), 'typescript', 'standard', text)
+        await session('src/main.ts').ensure()
+        const sliced = (r: { from: number, to: number } | null) => r && text.slice(r.from, r.to)
+        expect(sliced(span('double(2)'))).toBe('double')
+        expect(sliced(span('./util', 2))).toBe('./util')
+        link.release()
+    })
+
+    it('is also a name defined in the same file', async () => {
+        const link = await codeIntel.attach(tabOf('src/main.ts'), 'typescript', 'standard', text)
+        await session('src/main.ts').ensure()
+        expect(span('out', 1)).toBeNull() // the declaration itself has nowhere further to go
+        const source = 'const a = 1\nexport const b = a + 1\n'
+        const r = span('a + 1', 0, source)
+        expect(r && source.slice(r.from, r.to)).toBe('a')
+        link.release()
+    })
+
+    it('is none for a module that does not exist, or for plain syntax', async () => {
+        const link = await codeIntel.attach(tabOf('src/main.ts'), 'typescript', 'standard', text)
+        await session('src/main.ts').ensure()
+        expect(span('./missing', 2)).toBeNull()
+        expect(span('import', 1)).toBeNull()
+        link.release()
+    })
 })

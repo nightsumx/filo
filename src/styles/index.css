@@ -442,3 +442,19 @@ html .diff-tailwindcss-wrapper[data-theme='light'] .diff-style-root {
     --diff-hunk-content-color--: rgb(var(--gray-500));
     --diff-hunk-lineNumber-hover--: var(--ide-accent);
 }
+
+/* ⌘/Ctrl-hover on a name or path that leads somewhere (the editor's Go to Definition target): a link, as in WebStorm. */
+.cm-def-link {
+    --def-link: #2470b3;
+    cursor: pointer;
+    text-decoration: underline;
+    text-decoration-color: var(--def-link);
+    text-underline-offset: 2px;
+}
+.cm-def-link,
+.cm-def-link * {
+    color: var(--def-link) !important;
+}
+.dark .cm-def-link {
+    --def-link: #548af7;
+}

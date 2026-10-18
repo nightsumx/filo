@@ -109,6 +109,24 @@ const LIGHT_FEATURES: LitCodeFeatures = {
     tsUnusedFade: false,
 }
 
+/** The name or path under the pointer while ⌘ (Ctrl) is held and there is somewhere to go: underlined and made a link. */
+const setLink = core.StateEffect.define<{ from: number, to: number } | null>()
+const linkField = core.StateField.define<{ from: number, to: number } | null>({
+    create: () => null,
+    update: (value, tr) => {
+        for (const effect of tr.effects) {
+            if (effect.is(setLink))
+                return effect.value
+        }
+        return value && tr.docChanged ? null : value
+    },
+})
+const linkMark = core.Decoration.mark({ class: 'cm-def-link' })
+const linkDecorations = core.decorations.of((state) => {
+    const link = state.field(linkField, false)
+    return link && link.from < link.to && link.to <= state.doc.length ? core.RangeSet.of([linkMark.range(link.from, link.to)]) : core.RangeSet.empty
+})
+
 export interface EditorKit {
     hl: Highlighter
     /** Shiki id, loaded; 'text' when there is none. */
@@ -224,8 +242,11 @@ export function mountEditor(parent: HTMLElement, tab: FileTab, kit: EditorKit, d
         lang: kit.lang,
         theme,
         colors: colorsFor(kit.hl, theme),
+        // The tab's size follows the pane; lite-monaco defaults to Monaco's false and expects layout() calls.
+        options: { automaticLayout: true },
         fileName: tab.path,
         features: kit.level === 'light' ? LIGHT_FEATURES : undefined,
+        extensions: jumps ? [linkField, linkDecorations] : undefined,
         state: tab.state ?? undefined,
         doc: toLf(tab.base),
         keymap: [
@@ -263,6 +284,68 @@ export function mountEditor(parent: HTMLElement, tab: FileTab, kit: EditorKit, d
         document.addEventListener('mouseup', up, true)
     }
     view.dom.addEventListener('mousedown', onMouseDown, true)
+
+    // While ⌘ (Ctrl) is held the name or path under the pointer is underlined when it leads somewhere, as in WebStorm.
+    const held = (e: { metaKey: boolean, ctrlKey: boolean }) => (core.browser.mac ? e.metaKey : e.ctrlKey)
+    let point: { x: number, y: number } | null = null
+    let modifier = false
+    let frame = 0
+    let shown: { from: number, to: number } | null = null
+    let looked = { state: null as core.EditorState | null, at: -1 }
+    const show = (link: { from: number, to: number } | null) => {
+        if (link?.from === shown?.from && link?.to === shown?.to)
+            return
+        shown = link
+        view.dispatch(view.state.update({ effects: setLink.of(link) }))
+    }
+    const look = () => {
+        frame = 0
+        if (!jumps || !modifier || !point)
+            return show(null)
+        const pos = view.posAtCoords(point)
+        if (pos == null)
+            return show(null)
+        // posAtCoords rounds to the nearest boundary: the character under the pointer is the one before it when the pointer is left of it.
+        const edge = view.caretCoords(pos)
+        const at = edge && point.x < edge.left ? pos - 1 : pos
+        if (at < 0 || at >= view.state.doc.length)
+            return show(null)
+        if (shown && at >= shown.from && at < shown.to && looked.state === view.state)
+            return
+        if (looked.state === view.state && looked.at === at)
+            return
+        looked = { state: view.state, at }
+        const span = codeIntel.definitionSpan(tab, kit.lang, view.state.doc.toString(), at)
+        show(span && at >= span.from && at < span.to ? span : null)
+    }
+    const schedule = () => {
+        if (!frame)
+            frame = requestAnimationFrame(look)
+    }
+    const onMouseMove = (e: MouseEvent) => {
+        point = { x: e.clientX, y: e.clientY }
+        modifier = held(e) && e.buttons === 0
+        if (modifier || shown)
+            schedule()
+    }
+    const onKey = (e: KeyboardEvent) => {
+        const next = held(e)
+        if (next === modifier)
+            return
+        modifier = next
+        schedule()
+    }
+    const onLeave = () => {
+        point = null
+        schedule()
+    }
+    if (jumps) {
+        view.dom.addEventListener('mousemove', onMouseMove, true)
+        view.dom.addEventListener('mouseleave', onLeave)
+        window.addEventListener('keydown', onKey, true)
+        window.addEventListener('keyup', onKey, true)
+        window.addEventListener('blur', onLeave)
+    }
 
     const report = (state: core.EditorState) => {
         const { main } = state.selection
@@ -305,6 +388,12 @@ export function mountEditor(parent: HTMLElement, tab: FileTab, kit: EditorKit, d
         clearTimeout(resync)
         view.contentDOM.removeEventListener('focusout', onFocusOut)
         view.dom.removeEventListener('mousedown', onMouseDown, true)
+        cancelAnimationFrame(frame)
+        view.dom.removeEventListener('mousemove', onMouseMove, true)
+        view.dom.removeEventListener('mouseleave', onLeave)
+        window.removeEventListener('keydown', onKey, true)
+        window.removeEventListener('keyup', onKey, true)
+        window.removeEventListener('blur', onLeave)
         tab.scroll = { top: view.scrollDOM.scrollTop, left: view.scrollDOM.scrollLeft }
         tab.state = view.state
         if (tab.view === view)

@@ -456,6 +456,37 @@ class CodeIntel {
 
     // -- jumping
 
+    /**
+     * The name or path under `pos` that a Go to Definition would act on, as offsets in `text`: what the editor
+     * underlines while ⌘ (Ctrl) is held. Null when there is nothing to go to (also when the service is not up yet).
+     */
+    definitionSpan(tab: FileTab, lang: string, text: string, pos: number): { from: number, to: number } | null {
+        const session = getTSService({ lang: familyOf(lang), fileName: slashed(tab.path) })
+        session.update(text)
+        const service = session.service()
+        if (!service)
+            return null
+        try {
+            const found = service.getDefinitionAndBoundSpan(slashed(tab.path), pos)
+            // TS also answers for a path that leads nowhere, marked unverified; and for a declaration, with itself.
+            const defs = (found?.definitions ?? []).filter(d => !d.unverified)
+            const file = slashed(tab.path)
+            if (!found || !defs.length || defs.every(d => d.fileName === file && d.textSpan.start <= pos && pos < d.textSpan.start + d.textSpan.length))
+                return null
+            let from = found.textSpan.start
+            let to = from + found.textSpan.length
+            // A module specifier comes with its quotes; the path inside is what is underlined.
+            if (to - from > 2 && /['"`]/.test(text[from]) && text[to - 1] === text[from]) {
+                from++
+                to--
+            }
+            return from < to && to <= text.length ? { from, to } : null
+        }
+        catch {
+            return null
+        }
+    }
+
     /** Where "go to definition" at `pos` leads when it is not in this file: the real file and line/column; null otherwise. */
     definitionElsewhere(tab: FileTab, lang: string, text: string, pos: number): { path: string, line: number, col: number } | null {
         const family = familyOf(lang)
@@ -482,6 +513,9 @@ class CodeIntel {
             if (e.project.realOf(key) !== key)
                 real = e.project.realOf(key)
         }
+        // A stand-in for a file the service cannot read (a stylesheet, an image): the file itself, from its top.
+        if (real !== key && !session.getFileText(real))
+            return { path: real, line: 1, col: 1 }
         const body = session.getFileText(key) ?? ''
         const before = body.slice(0, target.textSpan.start)
         const line = before.split('\n').length

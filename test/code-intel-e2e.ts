@@ -77,6 +77,32 @@ async function main() {
         check(true, 'F12 on a name from another file opens it with the caret on the definition')
         await page.evaluate(`window.__app.focus(${JSON.stringify(`file:${main}`)})`)
         await until('back in main.ts', () => page.evaluate<boolean>(`window.__app.activeKey === ${JSON.stringify(`file:${main}`)} && !!document.querySelector('.cm-content')`))
+        // Holding ⌘ over a name or a path that leads somewhere underlines it as a link; over one that does not, nothing
+        const where_ = (needle: string, offset: number) => page.evaluate<{ x: number, y: number }>(`(() => { const v = window.__app.activeFile.view; const c = v.caretCoords(v.state.doc.toString().indexOf(${JSON.stringify(needle)}) + ${offset}); return { x: c.left + 2, y: (c.top + c.bottom) / 2 } })()`)
+        const linked = () => page.evaluate<string>(`[...document.querySelectorAll('.cm-def-link')].map(e => e.textContent).join('|')`)
+        const hover = async (needle: string, offset: number, modifiers = COMMAND) => {
+            await page.call('Input.dispatchMouseEvent', { type: 'mouseMoved', ...await where_(needle, offset), modifiers })
+        }
+        await hover('\'@/lib/util\'', 3)
+        await until('the alias path is a link', async () => (await linked()) === '@/lib/util', 5000)
+        check(true, '⌘-hover on an import path underlines the whole path')
+        const style = await page.evaluate<{ line: string, cursor: string }>(`(() => { const s = getComputedStyle(document.querySelector('.cm-def-link')); return { line: s.textDecorationLine, cursor: s.cursor } })()`)
+        check(style.line.includes('underline') && style.cursor === 'pointer', `the link is underlined with a pointer (${JSON.stringify(style)})`)
+        if (SHOTS)
+            await page.screenshot(path.join(SHOTS, 'code-intel-link.png'))
+        await hover('./style.css', 4)
+        await until('the stylesheet path is a link', async () => (await linked()) === './style.css', 5000)
+        await hover('depFn(double', 8)
+        await until('the name is a link', async () => (await linked()) === 'double', 5000)
+        await hover('./missing', 4)
+        await until('a path that does not exist is not', async () => (await linked()) === '', 5000)
+        check(true, '⌘-hover on a name, a stylesheet and a missing module: link, link, none')
+        await hover('depFn(double', 8)
+        await until('linked again', async () => (await linked()) === 'double', 5000)
+        await hover('depFn(double', 8, 0)
+        await until('released ⌘ clears it', async () => (await linked()) === '', 5000)
+        check(true, 'without ⌘ nothing is underlined')
+
         const spot = await page.evaluate<{ x: number, y: number }>(`(() => {
             const span = [...document.querySelectorAll('.cm-line span')].find(e => e.textContent === 'double')
             const r = span.getBoundingClientRect()
