@@ -1,5 +1,5 @@
 // File tree and editor tabs in the built app (no model calls):
-//   - ⌘⇧E shows the "Files" view: the project folder, gitignored entries dimmed, changed files
+//   - ⌘⇧E shows the "Files" view: the project folder, node_modules a labelled library root, other folders plain, changed files
 //     coloured by git, folders above a change coloured too
 //   - double click folds a folder and opens a file in an editor tab next to the threads
 //   - typing autosaves shortly after; a write from outside (an agent) shows up in place while
@@ -77,9 +77,9 @@ async function main() {
         check(true, '⌘⇧E shows the files view with the project folder open')
 
         const classOf = (p: string) => page.evaluate<string>(`document.querySelector(${JSON.stringify(row(p))} + ' span.truncate, ' + ${JSON.stringify(row(p))} + ' span.flex-1')?.className ?? ''`)
-        check((await classOf(path.join(repo, 'node_modules'))).includes('text-gray-400'), 'a gitignored folder is dimmed')
+        check((await classOf(path.join(repo, 'node_modules'))).includes('--ide-icon-excluded'), 'node_modules has an orange name')
         await until('git colours', async () => (await classOf(path.join(repo, 'README.md'))).includes('text-blue-600'))
-        check((await classOf(path.join(repo, 'src'))).includes('text-blue-600'), 'a modified file is blue, and so is the folder holding a change')
+        check(!(await classOf(path.join(repo, 'src'))).includes('text-blue-600'), 'a modified file is blue; the folder holding a change stays plain')
 
         await click(page, row(path.join(repo, 'src')), 2)
         await until('src expanded', () => page.evaluate<boolean>(`!!document.querySelector(${JSON.stringify(row(main))})`))

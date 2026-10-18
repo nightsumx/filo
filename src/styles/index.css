@@ -34,6 +34,11 @@
         /* Project panel: part of the frame, as a macOS sidebar is part of the window. */
         --ide-side: #f5f5f7;
         --ide-editor: #ffffff;
+        /* File-tree glyphs, as JetBrains draws them: folders and plain file marks, and the fold chevrons (quieter). */
+        --ide-icon: #6c707e;
+        --ide-chevron: #818594;
+        --ide-icon-excluded: #c77d2e;
+        --ide-library-bg: rgba(199, 125, 46, 0.09);
         --ide-border: #dedee3;
         --ide-line: #e8e8ed;
         --ide-hover: rgba(29, 29, 31, 0.05);
@@ -147,6 +152,10 @@
         --ide-side: #191a1c;
         --ide-input: #2b2d30;
         --ide-editor: #1e1f22;
+        --ide-icon: #ced0d6;
+        --ide-chevron: #9a9da6;
+        --ide-icon-excluded: #d99a4e;
+        --ide-library-bg: rgba(217, 154, 78, 0.1);
         --ide-border: #141517;
         --ide-line: #2b2d30;
         --ide-hover: rgba(255, 255, 255, 0.05);

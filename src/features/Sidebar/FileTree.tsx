@@ -3,7 +3,7 @@
 // selects, double click (or Enter) opens a file in an editor tab or folds a folder, like WebStorm.
 import type { TreeRow } from '@/store/fileTree'
 import type { FileMark } from '@/lib/fileMarks'
-import { FileIcon } from '@/components/FileIcon'
+import { FileIcon, FolderIcon } from '@/components/FileIcon'
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from '@/components/ui/context-menu'
 import { fileMarks } from '@/lib/fileMarks'
 import { tr } from '@/lib/i18n'
@@ -13,7 +13,7 @@ import { codeIntel } from '@/store/codeIntel'
 import { fileTreeStore } from '@/store/fileTree'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import copy from 'copy-to-clipboard'
-import { ChevronRight, ClipboardCopy, ExternalLink, File, Folder, FolderOpen, Link2 } from 'lucide-react'
+import { ChevronRight, ClipboardCopy, ExternalLink, File, FolderOpen, Link2 } from 'lucide-react'
 import { observer } from 'mobx-react-lite'
 import { useEffect, useRef, useState } from 'react'
 import { useGitStatus } from '../Review/useGitStatus'
@@ -54,9 +54,12 @@ function open(row: TreeRow) {
 
 const Row = observer(({ row, onMenu }: { row: TreeRow, onMenu: (row: TreeRow) => void }) => {
     const selected = fileTreeStore.selected === row.path
-    const mark = fileTreeStore.marks.get(row.root)?.get(row.path)
+    // Only files take the git colour; a folder with changes inside stays plain, as in WebStorm.
+    const mark = row.dir ? undefined : fileTreeStore.marks.get(row.root)?.get(row.path)
     // Errors the editor found in the project (Settings → Editor → Full) show red over the git colour.
     const failing = codeIntel.hasProblem(row.path)
+    // As in WebStorm: node_modules is a library root (orange icon and name, labelled, tinted row). Other folders look alike, ignored or not.
+    const library = row.dir && !row.isRoot && row.name === 'node_modules'
     const project = row.isRoot ? appStore.windowProjectList.find(p => p.cwd === row.root) : undefined
     if (row.more) {
         return (
@@ -81,7 +84,7 @@ const Row = observer(({ row, onMenu }: { row: TreeRow, onMenu: (row: TreeRow) =>
             }}
             className={cn(
                 'flex h-6 cursor-default items-center gap-1.5 rounded-md pr-1.5 text-[13px]',
-                selected ? 'bg-ide-sel-muted group-focus-within/tree:bg-ide-sel' : 'hover:bg-ide-hover',
+                selected ? 'bg-ide-sel-muted group-focus-within/tree:bg-ide-sel' : library ? 'bg-[var(--ide-library-bg)] hover:bg-ide-hover' : 'hover:bg-ide-hover',
             )}
             style={{ paddingLeft: 4 + row.depth * 16 }}
         >
@@ -96,17 +99,17 @@ const Row = observer(({ row, onMenu }: { row: TreeRow, onMenu: (row: TreeRow) =>
                                 fileTreeStore.select(row.path)
                                 fileTreeStore.toggle(row.path)
                             }}
-                            className="flex h-5 w-4 shrink-0 items-center justify-center text-gray-500"
+                            className="flex h-5 w-4 shrink-0 items-center justify-center text-[var(--ide-chevron)]"
                         >
-                            <ChevronRight size={14} className={cn('transition-transform duration-100', row.expanded && 'rotate-90')} />
+                            <ChevronRight size={16} strokeWidth={1.5} className={cn('transition-transform duration-100', row.expanded && 'rotate-90')} />
                         </button>
                     )
                 : <span className="w-4 shrink-0" />}
             {row.isRoot
                 ? <ProjectBadge name={row.name} size={16} className="rounded-[4px]" />
                 : row.dir
-                    ? (row.expanded ? <FolderOpen size={14} className="shrink-0 text-gray-500" aria-hidden /> : <Folder size={14} className="shrink-0 text-gray-500" aria-hidden />)
-                    : <FileIcon name={row.name} />}
+                    ? <FolderIcon size={16} excluded={library} />
+                    : <FileIcon name={row.name} size={16} />}
             {row.isRoot
                 ? (
                         <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
@@ -114,7 +117,12 @@ const Row = observer(({ row, onMenu }: { row: TreeRow, onMenu: (row: TreeRow) =>
                             <span className="min-w-0 truncate text-[12px] text-gray-500">{shortPath(row.path)}</span>
                         </span>
                     )
-                : <span className={cn('min-w-0 flex-1 truncate', failing ? 'text-red-600 dark:text-red-400' : mark ? MARK_TEXT[mark] : row.ignored ? 'text-gray-400' : 'text-gray-900')} title={failing && !row.dir ? tr(`${codeIntel.problemCount(row.path)} 个错误`, `${codeIntel.problemCount(row.path)} error(s)`) : undefined}>{row.name}</span>}
+                : (
+                        <>
+                            <span className={cn('truncate', library ? 'shrink-0' : 'min-w-0 flex-1', failing ? 'text-red-600 dark:text-red-400' : mark ? MARK_TEXT[mark] : library ? 'text-[var(--ide-icon-excluded)]' : row.ignored && !row.dir ? 'text-gray-400' : 'text-gray-900')} title={failing && !row.dir ? tr(`${codeIntel.problemCount(row.path)} 个错误`, `${codeIntel.problemCount(row.path)} error(s)`) : undefined}>{row.name}</span>
+                            {library && <span className="min-w-0 flex-1 truncate text-[12px] text-gray-500">{tr('库根目录', 'library root')}</span>}
+                        </>
+                    )}
             {row.link && <Link2 size={12} className="shrink-0 text-gray-400" aria-hidden />}
             {fileTreeStore.errors.has(row.path) && <span className="shrink-0 text-[11px] text-gray-400">{tr('无法读取', 'Unreadable')}</span>}
         </div>
