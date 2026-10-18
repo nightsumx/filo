@@ -28,7 +28,7 @@
         "diff": "8.0.4",
         "github-markdown-css": "5.8.1",
         "highlight.js": "11.11.1",
-        "lite-monaco": "./vendor/lite-monaco-0.3.0-r8.tgz",
+        "lite-monaco": "./vendor/lite-monaco-0.3.0-r9.tgz",
         "lucide-react": "0.503.0",
         "mobx": "6.13.7",
         "mobx-react-lite": "4.1.0",
@@ -1349,7 +1349,7 @@
 
     "lines-and-columns": ["lines-and-columns@1.2.4", "", {}, "sha512-7ylylesZQ/PV29jhEDl3Ufjo6ZX7gCqJr5F7PKrqc93v7fzSymt1BpwEU8nAUXs8qzzvqhbjhK5QZg6Mt/HkBg=="],
 
-    "lite-monaco": ["lite-monaco@./vendor/lite-monaco-0.3.0-r8.tgz", { "dependencies": { "@marijn/find-cluster-break": "^1.0.0" }, "peerDependencies": { "react": ">=18", "shiki": ">=2", "typescript": ">=5" }, "optionalPeers": ["react", "typescript"] }, "sha512-kXRaqt84LzZUifKDcqu+BXWECXJStr2wE1TTRicPZgp4FIxPv8B1DhjkfxY9u6WrOV8dLIbS1Dk0qRgxrLULWw=="],
+    "lite-monaco": ["lite-monaco@./vendor/lite-monaco-0.3.0-r9.tgz", { "dependencies": { "@marijn/find-cluster-break": "^1.0.0" }, "peerDependencies": { "react": ">=18", "shiki": ">=2", "typescript": ">=5" }, "optionalPeers": ["react", "typescript"] }, "sha512-CUZG4Xm9ZeWdHTMgG0be6rjJVIxUlp+/eB+ypfWp+qQ4ooE9h1yGVsRjnljI7VgGd7WKNg/diBwaeqizMy61tA=="],
 
     "local-pkg": ["local-pkg@1.2.1", "", { "dependencies": { "mlly": "^1.7.4", "pkg-types": "^2.3.0", "quansync": "^0.2.11" } }, "sha512-++gUqRDEvcnN6Zhqrr+y/CkVEHhlrR96vZn3nZZPYzMcBUyBtTKzB9NadClFIsIVSsu+3i9tfk/erqy9kAmt7Q=="],
 

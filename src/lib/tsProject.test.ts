@@ -59,6 +59,7 @@ beforeAll(() => {
     put('src/core/keyos.ts', 'export type KeyOS = "mac" | "win"\nexport function keyOS(): KeyOS { return "mac" }\n')
     put('src/core/chrome/codicon-font.ts', 'export const CODICON_FONT_FACE = "x"\nexport const CODICON_ICON_CSS = 1\n')
     put('src/lib/util.ts', 'import { keyOS } from "../core/keyos"\nexport const os = keyOS()\nexport default function d(): number { return 1 }\n')
+    put('src/lib/index.ts', 'export const os: string = "x"\n')
     put('src/ui/Box.tsx', 'export function Box(p: { n: number }) { return <div>{p.n}</div> }\n')
     put('src/style.css', '.a{}')
     put('src/env.d.ts', 'declare const __APP_VERSION__: string\ninterface ImportMeta { env: Record<string, string> }\n')
@@ -177,6 +178,9 @@ describe('Project', () => {
         // and `from "."` inside one
         expect(await diagnose('src/lib/a.ts', 'import type { Opts } from "tsext/dist/sub"\nexport const o: Opts = { a: 1 }\n')).toEqual([])
     })
+    it('resolves `from "."` and `from ".."` in the project\'s own files', async () => {
+        expect(await diagnose('src/lib/a.ts', 'import { os } from "."\nexport const a: string = os\n')).toHaveLength(0)
+    })
     it('finds the dependencies of a linked package next to its real folder', async () => {
         expect(await diagnose('src/lib/a.ts', 'import { linked } from "linked"\nexport const n: 42 = linked\n')).toEqual([])
     })
@@ -204,7 +208,7 @@ describe('Project', () => {
             return project.own().map(f => f.slice(root.length + 1)).sort()
         }
         expect(await read('standard')).toEqual(['src/lib/a.ts'])
-        expect(await read('full')).toEqual(['src/core/chrome/codicon-font.ts', 'src/core/keyos.ts', 'src/env.d.ts', 'src/lib/a.ts', 'src/lib/util.ts', 'src/ui/Box.tsx'])
+        expect(await read('full')).toEqual(['src/core/chrome/codicon-font.ts', 'src/core/keyos.ts', 'src/env.d.ts', 'src/lib/a.ts', 'src/lib/index.ts', 'src/lib/util.ts', 'src/ui/Box.tsx'])
     })
     it('knows who imports a file', async () => {
         const path = join(root, 'src/lib/util.ts')
