@@ -68,7 +68,7 @@ SOFTWARE.
 
 `src/core/chrome/codicon-font.ts` embeds the codicon icon font (copied from `monaco-editor`), used for the folding, search and completion icons.
 
-Source: https://github.com/microsoft/vscode-codicons. Copyright (c) Microsoft Corporation. The repository licenses its content under Creative Commons Attribution 4.0 International (https://creativecommons.org/licenses/by/4.0/) and its code under MIT. The font is credited here under the stricter of the two, CC BY 4.0: it is used unmodified apart from being base64 encoded into a stylesheet.
+Source: https://github.com/microsoft/vscode-codicons. Copyright (c) Microsoft Corporation. The npm package `@vscode/codicons` (the font's own distribution) declares its license as CC-BY-4.0 (https://creativecommons.org/licenses/by/4.0/). The copy here was taken from `monaco-editor` and is used unmodified apart from being base64 encoded into a stylesheet; no other change was made to the glyphs.
 
 ## find-cluster-break
 
