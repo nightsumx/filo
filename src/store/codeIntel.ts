@@ -159,7 +159,9 @@ class CodeIntel {
         const stopWatching = mine.session.onProjectChange(() => this.writeBackSoon(family))
         this.applyOptions(family, config)
 
-        if (level === 'standard' && mine.level === 'full') {
+        // An attach that began before the setting changed must not undo what the new level did.
+        const current = appStore.editorIntel === level
+        if (current && level === 'standard' && mine.level === 'full') {
             // Back from full: stop checking the whole project; what is read stays, it costs nothing now.
             mine.level = 'standard'
             mine.everything = null
@@ -169,7 +171,7 @@ class CodeIntel {
                     this.problems.delete(file)
             })
         }
-        if (level === 'full' && !mine.everything) {
+        if (current && level === 'full' && !mine.everything) {
             mine.level = 'full'
             mine.everything = mine.ready.then(() => mine.project.loadAll()).then(() => {
                 this.publish(mine)

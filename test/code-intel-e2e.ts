@@ -6,10 +6,10 @@
 //   - light: no diagnostics at all
 //
 //   bun run build && bun run e2e:code-intel
-import { mkdir, rm, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import process from 'node:process'
-import { check, launch, until, windows, workDir } from './app'
+import { check, COMMAND, launch, until, windows, workDir } from './app'
 
 const WORK = workDir('pi-gui-code-intel')
 
@@ -27,6 +27,7 @@ async function main() {
     await w('src/broken.ts', 'export const bad: number = \'text\'\n')
     await w('src/other.ts', 'export const fine = 1\n')
     const main = path.join(repo, 'src/main.ts')
+    const util = path.join(repo, 'src/lib/util.ts')
     await w('src/main.ts', 'import { depFn } from \'dep\'\nimport { double } from \'@/lib/util\'\nimport { fine } from \'./other\'\nimport css from \'./style.css\'\nimport nothing from \'./missing\'\n\nexport const out = depFn(double(fine)) + css + nothing\n')
     await w('src/style.css', 'a {}\n')
 
@@ -65,6 +66,27 @@ async function main() {
         const where = await page.evaluate<{ path: string, line: number } | null>(`(() => { const t = window.__app.activeFile; return window.__codeIntel.definitionElsewhere(t, 'typescript', t.view.state.doc.toString(), ${pos}) })()`)
         check(where?.path === path.join(repo, 'src/lib/util.ts') && where.line === 1, `standard: the definition of double is in util.ts line 1 (${JSON.stringify(where)})`)
 
+        // ⌘-click and F12 on a name from another file open that file at the definition
+        const caret = async (at: number) => page.evaluate(`(() => { const v = window.__app.activeFile.view; v.dispatch(v.state.update({ selection: { anchor: ${at} } })); v.focus() })()`)
+        await caret(pos + 2)
+        await page.call('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'F12', code: 'F12', windowsVirtualKeyCode: 123 })
+        await page.call('Input.dispatchKeyEvent', { type: 'keyUp', key: 'F12', code: 'F12', windowsVirtualKeyCode: 123 })
+        await until('F12 opened util.ts', () => page.evaluate<boolean>(`window.__app.activeKey === ${JSON.stringify(`file:${util}`)}`), 5000)
+        await until('caret on the definition', () => page.evaluate<boolean>(`(() => { const v = window.__app.activeFile.view; return !!v && v.state.doc.lineAt(v.state.selection.main.head).number === 1 })()`), 5000)
+        check(true, 'F12 on a name from another file opens it with the caret on the definition')
+        await page.evaluate(`window.__app.focus(${JSON.stringify(`file:${main}`)})`)
+        await until('back in main.ts', () => page.evaluate<boolean>(`window.__app.activeKey === ${JSON.stringify(`file:${main}`)} && !!document.querySelector('.cm-content')`))
+        const spot = await page.evaluate<{ x: number, y: number }>(`(() => {
+            const span = [...document.querySelectorAll('.cm-line span')].find(e => e.textContent === 'double')
+            const r = span.getBoundingClientRect()
+            return { x: r.x + r.width / 2, y: r.y + r.height / 2 }
+        })()`)
+        await page.call('Input.dispatchMouseEvent', { type: 'mousePressed', ...spot, button: 'left', clickCount: 1, modifiers: COMMAND })
+        await page.call('Input.dispatchMouseEvent', { type: 'mouseReleased', ...spot, button: 'left', clickCount: 1, modifiers: COMMAND })
+        await until('⌘-click opened util.ts', () => page.evaluate<boolean>(`window.__app.activeKey === ${JSON.stringify(`file:${util}`)}`), 5000)
+        check(true, '⌘-click on a name from another file opens it')
+        await page.evaluate(`window.__app.focus(${JSON.stringify(`file:${main}`)})`)
+
         // full
         await page.evaluate(`window.__app.setEditorIntel('full')`)
         await until('broken.ts is marked', () => page.evaluate<boolean>(`window.__codeIntel.problemCount(${JSON.stringify(path.join(repo, 'src/broken.ts'))}) > 0`), 30000)
@@ -72,6 +94,15 @@ async function main() {
         await writeFile(path.join(repo, 'src/broken.ts'), 'export const bad: number = 1\n')
         await until('broken.ts clears', () => page.evaluate<boolean>(`window.__codeIntel.problemCount(${JSON.stringify(path.join(repo, 'src/broken.ts'))}) === 0`), 30000)
         check(true, 'full: a change on disk is checked again')
+
+        // A rename (or quick fix) in the service edits other files; as in Monaco, they follow the edit wherever
+        // it lands, here onto the disk. Done with the service's own call, as the rename action does it.
+        const renamed = 'export function twice(n: number): number {\n    return n * 2\n}\n'
+        await page.evaluate(`(() => { const ci = window.__codeIntel; const e = [...ci.entries.values()][0]; e.session.updateFile(${JSON.stringify(util)}, ${JSON.stringify(renamed)}) })()`)
+        await until('edit written to the unopened file', async () => (await readFile(util, 'utf8')) === renamed, 5000)
+        check(true, 'an edit the service makes to a file that is not open is written to disk')
+        await writeFile(util, 'export function double(n: number): number {\n    return n * 2\n}\n')
+        await new Promise(r => setTimeout(r, 800))
 
         // light
         await page.evaluate(`window.__app.setEditorIntel('light')`)
