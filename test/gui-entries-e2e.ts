@@ -362,6 +362,16 @@ async function main() {
             check(added.command === 'node' && JSON.stringify(added.args) === JSON.stringify(['-e', '1', 'a b']) && added.env?.TOKEN === 'abc', `Add runs the user's pi mcp add (${JSON.stringify(added)})`)
             await until('the server listed', () => js<boolean>(`!!${row('files')}`))
             check(true, 'and the page lists it next to the project\'s')
+            // The "Added" toast sits clear of the settings dialog, down to the window's smallest height (it used to cover the page title).
+            for (const height of [760, 560]) {
+                await page.call('Emulation.setDeviceMetricsOverride', { width: 1280, height, deviceScaleFactor: 1, mobile: false })
+                await until(`the toast settled in at ${height}px`, () => js<boolean>(`(() => { const t = document.querySelector('[data-sonner-toast][data-visible="true"]')?.getBoundingClientRect(); return !!t && t.top >= 0 && t.bottom <= innerHeight })()`))
+                check(await js<boolean>(`(() => {
+                    const d = document.querySelector('[role="dialog"]').getBoundingClientRect()
+                    return [...document.querySelectorAll('[data-sonner-toast][data-visible="true"]')].map(e => e.getBoundingClientRect()).every(t => t.top >= d.bottom || t.bottom <= d.top || t.left >= d.right || t.right <= d.left)
+                })()`), `the toast does not cover the settings dialog in a ${height}px-high window`)
+            }
+            check(await js<boolean>(`(() => { const n = document.querySelector('nav[aria-label]'); return n.scrollHeight > n.clientHeight ? getComputedStyle(n).overflowY === 'auto' : true })()`), 'and the page list scrolls when the dialog is too short to show it all')
             // The switch and the exposure edit the file that defines the server.
             await js(`(() => { ${row('files')}.querySelector('[role="switch"]').click(); return true })()`)
             await until('enabled false', async () => (await mcpIn(userFile)).files.enabled === false)

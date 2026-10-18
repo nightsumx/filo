@@ -139,7 +139,7 @@ const PAGES: { id: SettingsPageId, label: Localized, icon: LucideIcon, page: Rea
 const PageList = observer(() => {
     const current = appStore.settingsPage
     return (
-        <nav aria-label={tr('设置分类', 'Settings sections')} className="group/nav flex w-[180px] shrink-0 flex-col gap-px bg-[var(--jb-dialog-side)] px-2 pb-3 pt-12">
+        <nav aria-label={tr('设置分类', 'Settings sections')} className="group/nav flex w-[180px] shrink-0 flex-col gap-px overflow-y-auto bg-[var(--jb-dialog-side)] px-2 pb-3 pt-12">
             {PAGES.map(({ id, label, icon: Icon }, i) => (
                 <button
                     key={id}
@@ -175,7 +175,7 @@ export const SettingsDialog = observer(() => {
     return (
         <Dialog open={appStore.settingsOpen} onOpenChange={open => appStore.setSettingsOpen(open)}>
             <DialogContent
-                className="h-[min(620px,max(480px,calc(100vh-170px)))] max-w-[780px] flex-row gap-0 overflow-hidden p-0"
+                className="h-[min(620px,max(400px,calc(100vh-170px)))] max-w-[780px] flex-row gap-0 overflow-hidden p-0"
                 // Focus the dialog itself rather than the first control, so no focus ring shows on open.
                 onOpenAutoFocus={(e) => {
                     e.preventDefault()

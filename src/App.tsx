@@ -240,7 +240,7 @@ export const App = observer(() => {
             <SearchDialog />
             <SessionInfoDialog />
             {/* Settings covers the top of the window up to its title: toasts go under it there, in the room its height leaves. */}
-            <Toaster position={appStore.settingsOpen ? 'bottom-center' : 'top-center'} offset={appStore.settingsOpen ? 8 : undefined} />
+            <Toaster position={appStore.settingsOpen ? 'bottom-center' : 'top-center'} offset={appStore.settingsOpen ? 8 : undefined} visibleToasts={appStore.settingsOpen ? 1 : 3} />
         </TooltipProvider>
     )
 })
