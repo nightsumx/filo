@@ -83,6 +83,9 @@ export default defineConfig(({ command }) => {
         test: {
             include: ['src/**/*.test.ts', 'electron/**/*.test.ts', 'shared/**/*.test.ts', 'test/**/*.test.ts'],
             environment: 'node',
+            // Several suites start a real pi or codex; on a busy machine (another run, a build) 5s is not enough for one.
+            testTimeout: 30_000,
+            hookTimeout: 30_000,
         },
     }
 })

@@ -40,15 +40,17 @@ export async function startTerminalPi(options: { agentDir: string, cwd: string, 
     const vars = { PI_CODING_AGENT_DIR: options.agentDir, PI_OFFLINE: '1', ...options.env }
     const line = ['env', ...Object.entries(vars).map(([k, v]) => `${k}=${quote(v)}`), quote(command.file), ...command.args.map(quote)].join(' ')
     const session = `pi-term-${process.pid}-${Math.random().toString(36).slice(2, 8)}`
-    await run('tmux', ['new-session', '-d', '-s', session, '-x', '140', '-y', '40', '-c', options.cwd, line])
-    const keys = async (...keys: string[]) => void await run('tmux', ['send-keys', '-t', session, ...keys])
+    // Its own tmux server (-L): the shared one exits when the last session ends, which fails a new-session of another run racing it ("server exited unexpectedly").
+    const tmux = (...args: string[]) => run('tmux', ['-L', session, ...args])
+    await tmux('new-session', '-d', '-s', session, '-x', '140', '-y', '40', '-c', options.cwd, line)
+    const keys = async (...keys: string[]) => void await tmux('send-keys', '-t', session, ...keys)
     return {
-        pane: async () => (await run('tmux', ['capture-pane', '-p', '-t', session])).stdout,
+        pane: async () => (await tmux('capture-pane', '-p', '-t', session)).stdout,
         keys,
         type: async (text) => {
             await keys('-l', text)
             await keys('Enter')
         },
-        kill: async () => void await run('tmux', ['kill-session', '-t', session]).catch(() => {}),
+        kill: async () => void await tmux('kill-server').catch(() => {}),
     }
 }

@@ -73,7 +73,8 @@ describe.runIf(hasTmux)('pi-cc-tui capabilities (real terminal pi, mock model)',
         await terminal.type('/capabilities')
         const menu = await until(async () => {
             const pane = await terminal.pane()
-            return pane.includes('shared with Filo') && pane
+            // The whole menu: under load the screen is read between two draws of it.
+            return pane.includes('shared with Filo') && pane.includes('[ ] Ask you') && pane
         }, 'menu')
         expect(menu).toContain('[x] Todo list')
         expect(menu).toContain('[ ] Ask you')
