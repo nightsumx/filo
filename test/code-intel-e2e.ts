@@ -12,6 +12,7 @@ import process from 'node:process'
 import { check, COMMAND, launch, until, windows, workDir } from './app'
 
 const WORK = workDir('pi-gui-code-intel')
+const SHOTS = process.env.SHOTS ?? ''
 
 async function main() {
     await rm(WORK, { recursive: true, force: true })
@@ -91,6 +92,14 @@ async function main() {
         await page.evaluate(`window.__app.setEditorIntel('full')`)
         await until('broken.ts is marked', () => page.evaluate<boolean>(`window.__codeIntel.problemCount(${JSON.stringify(path.join(repo, 'src/broken.ts'))}) > 0`), 30000)
         check(await page.evaluate<boolean>(`window.__codeIntel.hasProblem(${JSON.stringify(path.join(repo, 'src'))})`), 'full: the project is checked; a file with an error is marked, and its folder')
+        if (SHOTS) {
+            // The tree, with the failing file red and the folder above it
+            await page.evaluate(`window.__app.showSidebarView('files')`)
+            await page.evaluate(`window.__files.toggle(${JSON.stringify(path.join(repo, 'src'))}, true)`)
+            await new Promise(r => setTimeout(r, 800))
+            await page.screenshot(path.join(SHOTS, 'code-intel-tree.png'))
+            await page.evaluate(`window.__app.showSidebarView('threads')`)
+        }
         await writeFile(path.join(repo, 'src/broken.ts'), 'export const bad: number = 1\n')
         await until('broken.ts clears', () => page.evaluate<boolean>(`window.__codeIntel.problemCount(${JSON.stringify(path.join(repo, 'src/broken.ts'))}) === 0`), 30000)
         check(true, 'full: a change on disk is checked again')
@@ -103,6 +112,31 @@ async function main() {
         check(true, 'an edit the service makes to a file that is not open is written to disk')
         await writeFile(util, 'export function double(n: number): number {\n    return n * 2\n}\n')
         await new Promise(r => setTimeout(r, 800))
+
+        // The real thing: F2 on a name in util.ts, a new name, Enter. main.ts is not open and gets the new name on disk.
+        await open(util)
+        await page.evaluate(`(() => { const v = window.__app.activeFile.view; v.dispatch(v.state.update({ selection: { anchor: v.state.doc.toString().indexOf('double') + 2 } })); v.focus() })()`)
+        await page.call('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'F2', code: 'F2', windowsVirtualKeyCode: 113 })
+        await page.call('Input.dispatchKeyEvent', { type: 'keyUp', key: 'F2', code: 'F2', windowsVirtualKeyCode: 113 })
+        await until('rename box', () => page.evaluate<boolean>(`!!document.querySelector('.cm-rename-input')`), 8000)
+        await page.evaluate(`(() => { const i = document.querySelector('.cm-rename-input'); i.focus(); i.select() })()`)
+        await page.call('Input.insertText', { text: 'twice' })
+        if (SHOTS)
+            await page.screenshot(path.join(SHOTS, 'code-intel-rename.png'))
+        await page.call('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, text: '\r' })
+        await page.call('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 })
+        await until('main.ts renamed on disk', async () => (await readFile(main, 'utf8')).includes('import { twice }'), 10000)
+        await until('util.ts saved', async () => (await readFile(util, 'utf8')).includes('function twice'), 10000)
+        const after = await readFile(main, 'utf8')
+        check(after.includes('twice(fine)') && !after.includes('double'), 'F2 rename: the other file that was not open has the new name on disk, in the import and the call')
+
+        // The settings page
+        await page.evaluate(`window.__app.openSettings('editor')`)
+        await until('settings page', () => page.evaluate<boolean>(`document.body.innerText.includes('Light') || document.body.innerText.includes('轻量')`))
+        if (SHOTS)
+            await page.screenshot(path.join(SHOTS, 'code-intel-settings.png'))
+        check(await page.evaluate<boolean>(`document.body.innerText.includes('Standard') || document.body.innerText.includes('标准')`), 'the Editor settings page lists the levels')
+        await page.evaluate(`window.__app.setSettingsOpen(false)`)
 
         // light
         await page.evaluate(`window.__app.setEditorIntel('light')`)

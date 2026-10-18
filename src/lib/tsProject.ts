@@ -263,7 +263,11 @@ function anyModule(names: Iterable<string>): string {
 
 /** One line re-exporting `target`, to file under a name the service resolves. */
 function shimOf(shimDir: string, target: string, text: string): string {
-    const spec = relative(shimDir, target.replace(/(?:\.d)?\.[cm]?tsx?$/, ''))
+    // `x.d.mts` next to `x.d.ts` (a package with both an ESM and a CJS build): the extensionless name would be the CJS one.
+    return reexport(relative(shimDir, /\.[cm]ts$/.test(target) ? target : target.replace(/(?:\.d)?\.tsx?$/, '')), text)
+}
+
+function reexport(spec: string, text: string): string {
     if (/^\s*export\s*=/m.test(text))
         return `import m = require('${spec}')\nexport = m\n`
     const hasDefault = /\bexport\s+default\b|\bas\s+default\b/.test(text)
@@ -285,6 +289,7 @@ export class Project {
     private readonly wanted = new Set<string>()
     private readonly wantedReal = new Set<string>()
     private readonly pendingShims = new Map<string, string>()
+    private readonly dottedCache = new Map<string, { from: string, to: string }>()
     private touched = false
     private bytes = 0
     private listing: Promise<string[]> | null = null
@@ -642,6 +647,16 @@ export class Project {
     }
 
     /** The table for `setTsFiles`: real files by path, plus the files that stand for non-relative imports. */
+    /** `from '.'` and `from '..'` in a package's declarations, as `./index` and `../index`: the service resolves only names that start with `./` or `../`. */
+    private dotted(path: string, text: string): string {
+        const had = this.dottedCache.get(path)
+        if (had?.from === text)
+            return had.to
+        const to = text.replace(/(\b(?:from|import|require)\s*\(?)(['"])(\.\.?)\2/g, '$1$2$3/index$2')
+        this.dottedCache.set(path, { from: text, to })
+        return to
+    }
+
     output(): Record<string, string> {
         const out: Record<string, string> = {}
         for (const [k, v] of this.shims)
@@ -649,7 +664,22 @@ export class Project {
         for (const [k, names] of this.stubs)
             out[vpath(k)] = anyModule(names)
         for (const [k, v] of this.files)
-            out[vpath(k)] = v
+            out[vpath(k)] = isNodeModules(k) ? this.dotted(k, v) : v
+        // The service looks for `./x.mjs` as x.ts / x.d.ts only: ESM-only files (x.mts, x.d.mts) also go under those names, where free.
+        for (const [k, v] of this.files) {
+            const alias = k.replace(/\.d\.[cm]ts$/, '.d.ts').replace(/(?<!\.d)\.[cm]ts$/, '.ts')
+            if (alias !== k && !this.files.has(alias) && !(vpath(alias) in out))
+                out[vpath(alias)] = v
+        }
+        // Declaration files of packages import each other as `./x.ts` (TypeScript maps that to x.d.ts; the service does not): a name that leads there.
+        for (const [k, v] of this.files) {
+            const m = /^(.*)\.d\.([cm]?)ts$/.exec(k)
+            if (!m || !isNodeModules(k))
+                continue
+            const alias = `${m[1]}.${m[2]}ts`
+            if (!this.files.has(alias) && !(vpath(alias) in out))
+                out[vpath(alias)] = reexport(`./${k.slice(k.lastIndexOf('/') + 1)}`, v)
+        }
         return out
     }
 }

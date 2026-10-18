@@ -83,6 +83,16 @@ beforeAll(() => {
     put('node_modules/.store/linked@1/node_modules/linked/index.d.ts', 'import { dep } from "dep"\nexport declare const linked: typeof dep\n')
     put('node_modules/.store/linked@1/node_modules/dep/package.json', '{ "name": "dep", "types": "index.d.ts" }')
     put('node_modules/.store/linked@1/node_modules/dep/index.d.ts', 'export declare const dep: 42\n')
+    // Dual packages: an ESM build (.d.mts, "import" condition) beside a CJS one (.d.ts) that exports differently.
+    put('node_modules/dual/package.json', '{ "name": "dual", "exports": { ".": { "import": { "types": "./dual.d.mts" }, "default": { "types": "./dual.d.ts" } } } }')
+    put('node_modules/dual/dual.d.mts', 'export declare function dual(n: number): string\nexport { more } from "./more.mjs"\nexport default dual\n')
+    put('node_modules/dual/more.d.mts', 'export declare const more: 1\n')
+    put('node_modules/dual/dual.d.ts', 'declare function dual(n: number): string\nexport = dual\n')
+    // Declarations that import each other with the source extension, as some packages publish them.
+    put('node_modules/tsext/package.json', '{ "name": "tsext", "types": "dist/index.d.ts" }')
+    put('node_modules/tsext/dist/index.d.ts', 'import type { Cb } from "./cb.ts"\nexport declare function on(cb: Cb): void\nexport interface Opts { a: 1 }\n')
+    put('node_modules/tsext/dist/sub.d.ts', 'export type { Opts } from "."\n')
+    put('node_modules/tsext/dist/cb.d.ts', 'export type Cb = (n: number) => void\n')
     symlinkSync(join(root, 'node_modules/.store/linked@1/node_modules/linked'), join(root, 'node_modules/linked'))
     const libs = join(process.cwd(), 'node_modules/typescript/lib')
     setTsLibLoader(async () => new Map(readdirSync(libs).filter(f => /^lib\..*\.d\.ts$/.test(f)).map(f => [f, readFileSync(join(libs, f), 'utf8')] as const)))
@@ -156,6 +166,16 @@ describe('Project', () => {
     })
     it('resolves packages by their exports map, @types and untyped ones', async () => {
         expect(await diagnose('src/lib/a.ts', 'import { typed, more } from "typed"\nimport { sub } from "typed/sub"\nimport eq from "eq"\nimport u from "untyped"\nexport const s: string = typed(more) + eq() + eq.x + String(u) + sub\n')).toEqual([])
+    })
+    it('takes the ESM build of a package that has both, and follows its .mjs imports', async () => {
+        expect(await diagnose('src/lib/a.ts', 'import dual, { dual as named, more } from "dual"\nexport const a: string = named(more) + dual(1)\n')).toEqual([])
+        expect(await diagnose('src/lib/a.ts', 'import { dual } from "dual"\nexport const a: number = dual(1)\n')).toHaveLength(1)
+    })
+    it('follows `./x.ts` imports between a package\'s declaration files', async () => {
+        expect(await diagnose('src/lib/a.ts', 'import { on } from "tsext"\non((n) => { const s: string = n })\n')).toHaveLength(1)
+        expect(await diagnose('src/lib/a.ts', 'import { on } from "tsext"\non((n) => { const s: number = n })\n')).toEqual([])
+        // and `from "."` inside one
+        expect(await diagnose('src/lib/a.ts', 'import type { Opts } from "tsext/dist/sub"\nexport const o: Opts = { a: 1 }\n')).toEqual([])
     })
     it('finds the dependencies of a linked package next to its real folder', async () => {
         expect(await diagnose('src/lib/a.ts', 'import { linked } from "linked"\nexport const n: 42 = linked\n')).toEqual([])
