@@ -426,7 +426,10 @@ Codex（app-server 方法已用 `--experimental` 生成协议核对）
   - 这些里属于“兼容层”的（`/diff` `/model` 映射等）会在 M1 删除；属于“显示 agent 命令输出”的保留。
 - **2026-10 M4 / M7-c 补 GUI 缺口**：pi 设置页（`/scoped-models`、`/changelog`，composer 模型选择器按常用模型过滤）`cddbd66`；导入会话 `/import` `801497e`；设置页「Claude Code」MCP（`claude mcp add|remove`）`10ac257`；压缩弹层里的自动压缩阈值（`/autocompact`）`47d5cbc`；Claude Code 记忆开关和文件 `657bce5`；设置页「Codex」MCP 与 beta 功能开关 `685f84a`。
   - 之后又做：pi 内置 MCP（设置 → Pi）、Grok MCP（设置 → Grok Build，`grok mcp`）、Codex 插件（安装/卸载/开关/插件源，`plugin/*` 与 `marketplace/*` 在本地插件源上实测）`76eeeff`、Claude Code `/goal` 的目标按钮（读 JSONL 的 `goal_status` 记录，实测）`d468328`、M2-B 压缩按钮在 pi 和 Codex 的 e2e 里改成点按钮、`/inbox` 记入 `GUI_HAS`（它是终端里跨会话的 Autopilot 卡片列表，Filo 里每个线程自己显示卡片，侧栏标出等待的线程；只在终端里开着、Filo 没开的会话的卡片看不到，没做）。
-  - 没做：Claude `fast`（假接口下被组织策略禁用，无法验证）、Codex `apps`/`memories`（API key 用户基本为空、默认关）；`/bug`、`/share` 会把用户数据传给第三方，不做。
+  - 再之后又做：Codex 应用和记忆（设置 → Codex，`app/list`、`memory/status`、`memory/reset` 在临时 CODEX_HOME 上实测，清空会真的删文件）、Claude `fast`（思考强度弹层里的开/关，发 `/fast on|off`，回复显示在线程里）、设置页提示条不盖对话框（含 560 高的最小窗口）、ESLint（`bun run lint`，只查错不查格式）、测试在三路并发下不再偶发失败（30s 超时、每个终端 pi 独占 tmux server、等整个菜单画完）。
+  - 顺带修的真 bug：Claude Code 里不触发 hook 的本地斜杠命令（`/fast off`、`/goal clear`）结束后线程一直显示“运行中”（`claudeTui.ts` 的 `send` 现在等 1.5s，没有 turn 起来就当本地命令处理）。
+  - 验证不到的：Codex 应用只能验证空列表和开关写配置（有应用要 ChatGPT 登录）；Claude `fast` 的“开”只验证了“组织已禁用”的回复，成功路径要有支持 fast 的套餐。
+  - 没做：`/bug`、`/share` 会把用户数据传给第三方，不做；只在终端开着、Filo 没连的会话的 Autopilot 卡片在 Filo 里看不到。
   - 未验证：没有人手动用过这些新设置页（验证用的是临时配置目录和假接口）。
 - 截图：`~/Documents/filo-command-shots/` 27 张（`bun run e2e:commands` 生成）。
 
