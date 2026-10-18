@@ -408,13 +408,32 @@ const EffortSlider = observer(function EffortSlider({ levels, value, onChange }:
     )
 })
 
+/** Claude Code's /fast. It has no state to read back, so the two buttons send the command and Claude Code's answer shows in the thread. */
+function FastField({ thread, close }: { thread: Thread, close: () => void }) {
+    const send = (on: boolean) => {
+        close()
+        void thread.setFast(on)
+    }
+    return (
+        <div className="mt-3 border-t border-[var(--jb-separator)] pt-2.5" data-fast>
+            <div className="text-[12px] font-medium text-gray-800">{tr('快速模式（/fast）', 'Fast mode (/fast)')}</div>
+            <p className="mt-1 text-[12px] text-gray-500">{tr('输出更快，价格更高，只有部分模型和套餐可用。Claude Code 会在对话里回复结果。', 'Faster output at a higher price, on some models and plans only. Claude Code answers in the thread.')}</p>
+            <div className="mt-2 flex gap-2">
+                <Button size="sm" variant="outline" disabled={thread.running} onClick={() => send(true)}>{tr('开', 'On')}</Button>
+                <Button size="sm" variant="outline" disabled={thread.running} onClick={() => send(false)}>{tr('关', 'Off')}</Button>
+            </div>
+        </div>
+    )
+}
+
 export const ThinkingPicker = observer(({ thread }: { thread: Thread }) => {
+    const [open, setOpen] = useState(false)
     const levels = thread.thinkingLevels
     const current = thread.state?.thinkingLevel
     if (levels.length <= 1)
         return null
     return (
-        <Popover>
+        <Popover open={open} onOpenChange={setOpen}>
             <PopoverTrigger className={pill}>
                 <Brain size={13} />
                 <span>{current ? levelLabel(current) : tr('思考', 'Thinking')}</span>
@@ -422,6 +441,7 @@ export const ThinkingPicker = observer(({ thread }: { thread: Thread }) => {
             </PopoverTrigger>
             <PopoverContent align="start" sideOffset={6} className="w-[300px] px-4 pt-3 pb-2.5">
                 <EffortSlider levels={levels} value={current} onChange={level => thread.setThinkingLevel(level)} />
+                {thread.agent === 'claude' && <FastField thread={thread} close={() => setOpen(false)} />}
             </PopoverContent>
         </Popover>
     )

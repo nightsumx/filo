@@ -218,6 +218,8 @@ const ENTER = '\r'
 const STARTUP_GRACE_MS = 2500
 /** A submitted prompt's record lands within this; a hook-only turn (none) does not hold the thread. */
 const PROMPT_RECORD_MS = 8000
+/** How long a slash command that has landed in the session file gets to start a turn (its hook) before it is taken as a local one. */
+const LOCAL_COMMAND_MS = 1500
 /** How long a slash command may leave no trace before it counts as answered on the TUI's screen. */
 const SCREEN_ONLY_MS = 3000
 /** A prompt in the file with no UserPromptSubmit this long after: the hooks do not come. */
@@ -888,6 +890,17 @@ export class ClaudeTuiAgent implements AgentAdapter {
             this.emit({ type: 'tui_view', show: true, reason: 'command' })
             return { type: 'response', command: 'prompt', success: true, data: { disposition: 'handled' } }
         }
+        // A command that ran locally and printed to the session file (/fast, /goal clear): it fires no hook either, so no turn
+        // follows. A prompt command (a skill) has its hook and its turn; give that a moment to show.
+        if (!was.running && /^\/[\w:.-]+/.test(message.trim()) && this.log.fold.prompts > was.prompts) {
+            for (let waited = 0; waited < LOCAL_COMMAND_MS; waited += 100) {
+                if (this.submitted > was.submitted || this.running || this.waits.size || this.log.fold.turnOpen || this.exited)
+                    return { type: 'response', command: 'prompt', success: true, data: {} }
+                await SLEEP(100)
+                this.tail()
+            }
+            return { type: 'response', command: 'prompt', success: true, data: { disposition: 'handled' } }
+        }
         return { type: 'response', command: 'prompt', success: true, data: {} }
     }
 
@@ -976,6 +989,11 @@ export class ClaudeTuiAgent implements AgentAdapter {
                     // /autocompact takes 100K to 1M tokens ("500k", "1m") or auto, and writes it under the current model in settings.json.
                     const window = autoCompactWindow(command.window)
                     await this.command(`/autocompact ${window}`)
+                    return ok()
+                }
+                case 'set_fast': {
+                    // /fast on|off: Claude Code answers in its own words (or says the plan or organization has no fast mode).
+                    await this.command(command.enabled === true ? '/fast on' : '/fast off')
                     return ok()
                 }
                 case 'get_commands':

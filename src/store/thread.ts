@@ -357,6 +357,16 @@ export class Thread {
         return this.agent === 'claude' ? this.state?.goal : undefined
     }
 
+    /** Claude Code's /fast: faster output for a higher price, on the models and plans that have it. Its answer ("Fast mode OFF", or why it is unavailable) shows in the thread. */
+    async setFast(on: boolean) {
+        try {
+            await this.request({ type: 'set_fast', enabled: on })
+        }
+        catch (error: any) {
+            toast.error(error.message)
+        }
+    }
+
     /** /goal: with a condition Claude Code keeps working until it holds; null clears it. Sent as the text it takes, as in the terminal. */
     async setGoal(condition: string | null) {
         const text = condition === null ? '/goal clear' : `/goal ${condition.trim()}`

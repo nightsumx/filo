@@ -255,6 +255,32 @@ async function main() {
         if (SHOTS)
             await page.screenshot(path.join(SHOTS, 'claude-effort-low.png'))
 
+        // The thinking popover's fast mode (/fast): the buttons send it, Claude Code answers in the thread. Under the fake API key
+        // it answers that the organization disables fast mode for On (the on path itself needs a plan that has it); Off works.
+        {
+            const openThinking = async () => {
+                await js(`(() => { const b = [...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Low'); b.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, pointerType: 'mouse' })); b.click(); return true })()`)
+                await until('the fast field', () => js<boolean>(`!!document.querySelector('[data-fast]')`))
+            }
+            const press = (label: string) => js(`(() => { [...document.querySelectorAll('[data-fast] button')].find(b => b.textContent.trim() === ${JSON.stringify(label)}).click(); return true })()`)
+            await openThinking()
+            if (SHOTS)
+                await page.screenshot(path.join(SHOTS, 'claude-fast.png'))
+            await press('Off')
+            await settled('fast off answered', 'Fast mode OFF')
+            check(true, 'Off sends /fast off: Claude Code\'s answer is in the thread')
+            await openThinking()
+            await press('On')
+            await settled('fast on answered', 'Fast mode unavailable')
+            check(true, 'On sends /fast on: Claude Code\'s answer (here, that fast mode is unavailable) is in the thread')
+            check((await js<string>(`JSON.stringify(${T}.turns.map(t => t.user?.text))`)).includes('/fast on') && !(await js<boolean>(`${T}.running`)), 'and the command is the plain text it takes, with the thread idle after it')
+        }
+
+        // The same typed into the box (or picked from the skills picker) is a plain prompt: the thread must not stay "running" after a command that runs locally.
+        await send('/fast off')
+        await until('the typed /fast off answered and the thread idle', () => js<boolean>(`!${T}.running && JSON.stringify(${T}.turns.at(-1).steps).includes('Fast mode')`), 20_000)
+        check(true, 'a typed local command ends: the thread is idle after it')
+
         // The compact popover's auto-compact threshold (/autocompact): Claude Code writes it for the model in use.
         {
             const windowOf = async () => Object.values(JSON.parse(await readFile(path.join(config, 'settings.json'), 'utf8')).modelSettings ?? {}).map((m: any) => m.autoCompactWindow).find(w => w !== undefined)
