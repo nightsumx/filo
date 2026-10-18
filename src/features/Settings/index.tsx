@@ -175,7 +175,7 @@ export const SettingsDialog = observer(() => {
     return (
         <Dialog open={appStore.settingsOpen} onOpenChange={open => appStore.setSettingsOpen(open)}>
             <DialogContent
-                className="h-[min(620px,88vh)] max-w-[780px] flex-row gap-0 overflow-hidden p-0"
+                className="h-[min(620px,max(480px,calc(100vh-170px)))] max-w-[780px] flex-row gap-0 overflow-hidden p-0"
                 // Focus the dialog itself rather than the first control, so no focus ring shows on open.
                 onOpenAutoFocus={(e) => {
                     e.preventDefault()
