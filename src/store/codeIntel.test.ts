@@ -6,7 +6,7 @@ import { getTSService, setTsLibLoader } from 'lite-monaco'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { nodeProjectFs } from '../../test/projectFs'
 import { appStore } from './app'
-import { slashed } from '@/lib/tsProject'
+import { slashed, vpath } from '@/lib/tsProject'
 import { codeIntel } from './codeIntel'
 
 const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }))
@@ -95,7 +95,7 @@ describe('codeIntel: attaching', () => {
         const s = session('src/main.ts')
         s.update(MAIN)
         const service = await s.ensure()
-        expect(service.getSemanticDiagnostics(at('src/main.ts'))).toEqual([])
+        expect(service.getSemanticDiagnostics(vpath(at('src/main.ts')))).toEqual([])
         expect(s.getFileText(at('src/util.ts'))).toBe(UTIL)
         link.release()
     })
@@ -243,7 +243,7 @@ describe('codeIntel: the disk changes', () => {
         await until('new text', () => session('src/main.ts').getFileText(at('src/util.ts'))?.includes('string') === true)
         const service = await session('src/main.ts').ensure()
         session('src/main.ts').update(MAIN)
-        expect(service.getSemanticDiagnostics(at('src/main.ts')).map(d => d.code)).toEqual([2322])
+        expect(service.getSemanticDiagnostics(vpath(at('src/main.ts'))).map(d => d.code)).toEqual([2322])
         // not written back: it came from the disk
         await wait(900)
         expect(written).toEqual([])

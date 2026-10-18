@@ -8,7 +8,7 @@ import process from 'node:process'
 import { clearTSServiceCache, getTSService, setTsCompilerOptions, setTsFiles, setTsLibLoader, setTsResolutions } from 'lite-monaco'
 import ts from 'typescript'
 import { beforeAll, describe, expect, it } from 'vitest'
-import { checkOptions, loadConfig, Project, slashed } from '../src/lib/tsProject'
+import { checkOptions, loadConfig, Project, slashed, vpath } from '../src/lib/tsProject'
 import { nodeProjectFs } from './projectFs'
 
 const root = slashed(process.cwd())
@@ -63,7 +63,7 @@ async function editorErrors(configPath: string, files: string[], base = root): P
     for (const file of files) {
         if (!project.files.has(file))
             continue
-        for (const d of [...service.getSyntacticDiagnostics(file), ...service.getSemanticDiagnostics(file)]) {
+        for (const d of [...service.getSyntacticDiagnostics(vpath(file)), ...service.getSemanticDiagnostics(vpath(file))]) {
             if (d.category !== category)
                 continue
             const key = `${file.slice(base.length + 1)}:${d.code}:${d.start}`

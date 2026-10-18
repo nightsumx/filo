@@ -12,7 +12,7 @@ import { getTSService, setTsCompilerOptions, setTsFiles, setTsResolutions } from
 import { computed, observable, runInAction } from 'mobx'
 import { toast } from 'sonner'
 import { tr } from '@/lib/i18n'
-import { checkOptions, dirOf, isNodeModules, loadConfig, Project, slashed, vpath } from '@/lib/tsProject'
+import { checkOptions, dirOf, isNodeModules, loadConfig, Project, slashed, unvpath, vpath } from '@/lib/tsProject'
 import { appStore } from './app'
 
 export type Family = 'typescript' | 'javascript'
@@ -357,7 +357,7 @@ class CodeIntel {
                     await idle()
                     let count = 0
                     try {
-                        count = [...service.getSyntacticDiagnostics(file), ...service.getSemanticDiagnostics(file)].filter(d => d.category === category).length
+                        count = [...service.getSyntacticDiagnostics(vpath(file)), ...service.getSemanticDiagnostics(vpath(file))].filter(d => d.category === category).length
                     }
                     catch {}
                     runInAction(() => {
@@ -467,10 +467,10 @@ class CodeIntel {
         if (!service)
             return null
         try {
-            const found = service.getDefinitionAndBoundSpan(slashed(tab.path), pos)
+            const found = service.getDefinitionAndBoundSpan(vpath(slashed(tab.path)), pos)
             // TS also answers for a path that leads nowhere, marked unverified; and for a declaration, with itself.
             const defs = (found?.definitions ?? []).filter(d => !d.unverified)
-            const file = slashed(tab.path)
+            const file = vpath(slashed(tab.path))
             if (!found || !defs.length || defs.every(d => d.fileName === file && d.textSpan.start <= pos && pos < d.textSpan.start + d.textSpan.length))
                 return null
             let from = found.textSpan.start
@@ -497,7 +497,7 @@ class CodeIntel {
             return null
         let defs: readonly { fileName: string, textSpan: { start: number } }[] = []
         try {
-            defs = service.getDefinitionAtPosition(slashed(tab.path), pos) ?? service.getTypeDefinitionAtPosition(slashed(tab.path), pos) ?? []
+            defs = service.getDefinitionAtPosition(vpath(slashed(tab.path)), pos) ?? service.getTypeDefinitionAtPosition(vpath(slashed(tab.path)), pos) ?? []
         }
         catch {
             return null
@@ -514,12 +514,12 @@ class CodeIntel {
                 real = e.project.realOf(key)
         }
         // A stand-in for a file the service cannot read (a stylesheet, an image): the file itself, from its top.
-        if (real !== key && !session.getFileText(real))
-            return { path: real, line: 1, col: 1 }
+        if (real !== key && !session.getFileText(vpath(real)))
+            return { path: unvpath(real), line: 1, col: 1 }
         const body = session.getFileText(key) ?? ''
         const before = body.slice(0, target.textSpan.start)
         const line = before.split('\n').length
-        return { path: real, line, col: target.textSpan.start - (before.lastIndexOf('\n') + 1) + 1 }
+        return { path: unvpath(real), line, col: target.textSpan.start - (before.lastIndexOf('\n') + 1) + 1 }
     }
 }
 

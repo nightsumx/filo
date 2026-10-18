@@ -5,7 +5,7 @@ import { clearTSServiceCache, getTSService, setTsCompilerOptions, setTsFiles, se
 import ts from 'typescript'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { nodeProjectFs } from '../../test/projectFs'
-import { checkOptions, loadConfig, namedImports, Project, slashed } from './tsProject'
+import { checkOptions, loadConfig, namedImports, Project, slashed, vpath } from './tsProject'
 
 // The editor works on slashed paths (codeIntel slashes what it gets), so the fixtures do too, on Windows as well.
 const root = slashed(realpathSync(mkdtempSync(`${tmpdir()}/ts-project-`)))
@@ -106,7 +106,7 @@ async function diagnose(rel: string, text: string, mode: 'standard' | 'full' = '
     session.update(text)
     const service = await session.ensure()
     const compiler = session.ts()!
-    return [...service.getSyntacticDiagnostics(path), ...service.getSemanticDiagnostics(path)].map(d => `${d.code}: ${compiler.flattenDiagnosticMessageText(d.messageText, ' ')}`)
+    return [...service.getSyntacticDiagnostics(vpath(path)), ...service.getSemanticDiagnostics(vpath(path))].map(d => `${d.code}: ${compiler.flattenDiagnosticMessageText(d.messageText, ' ')}`)
 }
 
 describe('namedImports', () => {
@@ -276,7 +276,7 @@ describe('Project', () => {
             setTsResolutions(project.resolutions())
             const session = getTSService({ lang: 'typescript', fileName: join(root, 'ws/app/a.ts') })
             const service = await session.ensure()
-            const errors = (rel: string) => service.getSemanticDiagnostics(join(root, 'ws', rel)).map(d => d.code)
+            const errors = (rel: string) => service.getSemanticDiagnostics(vpath(join(root, 'ws', rel))).map(d => d.code)
             expect([order[0], errors('app/a.ts'), errors('pkg/b.ts')]).toEqual([order[0], [], []])
         }
     })

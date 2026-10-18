@@ -38,6 +38,8 @@ export const slashed = (p: string) => p.replace(/\\/g, '/').replace(/(.)\/+$/, '
 export const dirOf = (p: string) => p.slice(0, Math.max(p.lastIndexOf('/'), 0)) || '/'
 /** The key the service files a path under. */
 export const vpath = (p: string) => (p.startsWith('/') ? p : `/${p}`)
+/** The real path behind a service key: `/C:/x` is `C:/x`, a POSIX path stays as it is. */
+export const unvpath = (k: string) => (/^\/[a-z]:\//i.test(k) ? k.slice(1) : k)
 const isRoot = (dir: string) => dir === '/' || dir === dirOf(dir) || /^[a-z]:\/?$/i.test(dir)
 
 export function join(base: string, rel: string): string {
