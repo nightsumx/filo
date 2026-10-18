@@ -177,3 +177,56 @@ describe('editor tabs in the tab strip', () => {
         expect(appStore.files.size).toBe(0)
     })
 })
+
+describe('going to a position', () => {
+    /** A view with what goto needs: the state, dispatch and focus. */
+    function fakeView(tab: FileTab) {
+        const view = {
+            state: tab.state!,
+            focused: 0,
+            dispatch(tr: core.Transaction) {
+                view.state = view.state.applyTransaction(tr)
+            },
+            focus() {
+                view.focused++
+            },
+        }
+        return view
+    }
+    const head = (view: { state: core.EditorState }) => view.state.selection.main.head
+
+    it('moves the caret once a view shows the file, not before', async () => {
+        disk.set('/p/a.ts', 'one\ntwo three\nfour\n')
+        const tab = await openTab()
+        tab.goto(2, 5)
+        expect(tab.reveal).toEqual({ line: 2, col: 5 })
+        const view = fakeView(tab)
+        tab.view = view as never
+        tab.applyReveal()
+        expect(head(view)).toBe('one\n'.length + 4)
+        expect(tab.reveal).toBeNull()
+        expect(view.focused).toBe(1)
+        tab.applyReveal() // nothing left to do
+        expect(view.focused).toBe(1)
+    })
+
+    it('moves it at once when a view is already there', async () => {
+        disk.set('/p/a.ts', 'one\ntwo\n')
+        const tab = await openTab()
+        const view = fakeView(tab)
+        tab.view = view as never
+        tab.goto(1, 3)
+        expect(head(view)).toBe(2)
+    })
+
+    it('keeps a position past the end of the file inside it', async () => {
+        disk.set('/p/a.ts', 'one\ntwo\n')
+        const tab = await openTab()
+        const view = fakeView(tab)
+        tab.view = view as never
+        tab.goto(99, 99)
+        expect(head(view)).toBe(view.state.doc.length)
+        tab.goto(0, 0)
+        expect(head(view)).toBe(0)
+    })
+})

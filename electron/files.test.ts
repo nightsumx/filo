@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile } from 'node:f
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { decodeText, FolderWatch, listDir, readText, writeText } from './files'
+import { decodeText, FolderWatch, listDir, MAX_PROJECT_SOURCES, projectSources, readText, realPathOf, writeText } from './files'
 
 let dir: string
 beforeEach(async () => {
@@ -32,6 +32,42 @@ describe('listDir', () => {
     it('ignores nothing outside a repository', async () => {
         await writeFile(path.join(dir, 'x.log'), '')
         expect((await listDir(dir)).entries).toEqual([{ name: 'x.log', dir: false, ignored: false }])
+    })
+})
+
+describe('projectSources', () => {
+    const touch = async (rel: string) => {
+        await mkdir(path.dirname(path.join(dir, rel)), { recursive: true })
+        await writeFile(path.join(dir, rel), '')
+    }
+
+    it('lists source files git knows, tracked or not, without ignored ones and node_modules', async () => {
+        execFileSync('git', ['init', '-q'], { cwd: dir })
+        await writeFile(path.join(dir, '.gitignore'), 'gen/\n')
+        for (const f of ['src/a.ts', 'src/b.tsx', 'src/c.mts', 'src/d.js', 'src/readme.md', 'gen/x.ts', 'node_modules/p/i.ts', 'packages/q/node_modules/r/i.ts'])
+            await touch(f)
+        expect((await projectSources(dir)).map(f => path.relative(dir, f)).sort()).toEqual(['src/a.ts', 'src/b.tsx', 'src/c.mts', 'src/d.js'])
+    })
+
+    it('walks the folder outside a repository, skipping dependencies, build output and dot folders', async () => {
+        for (const f of ['src/a.ts', 'src/deep/b.ts', 'node_modules/p/i.ts', 'dist/o.js', '.cache/c.ts', 'src/readme.md'])
+            await touch(f)
+        expect((await projectSources(dir)).map(f => path.relative(dir, f))).toEqual(['src/a.ts', 'src/deep/b.ts'])
+    })
+
+    it('stops at the cap', async () => {
+        await mkdir(path.join(dir, 'many'))
+        await Promise.all(Array.from({ length: MAX_PROJECT_SOURCES + 50 }, (_, i) => writeFile(path.join(dir, 'many', `f${i}.ts`), '')))
+        expect((await projectSources(dir)).length).toBe(MAX_PROJECT_SOURCES)
+    }, 60_000)
+})
+
+describe('realPathOf', () => {
+    it('follows a link, and gives a path that is not there back as it came', async () => {
+        await mkdir(path.join(dir, 'real'))
+        await symlink(path.join(dir, 'real'), path.join(dir, 'link'))
+        expect(await realPathOf(path.join(dir, 'link'))).toBe(await realPathOf(path.join(dir, 'real')))
+        expect(await realPathOf(path.join(dir, 'nothing'))).toBe(path.join(dir, 'nothing'))
     })
 })
 

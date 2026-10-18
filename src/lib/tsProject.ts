@@ -120,21 +120,30 @@ function globToRegExp(dir: string, pattern: string): RegExp {
 interface RawConfig {
     dir: string
     options: TS.CompilerOptions
-    include?: string[]
-    exclude?: string[]
-    files?: string[]
+    /** `include`, `exclude` and `files` are relative to the config that wrote them, which an `extends` may not be. */
+    include?: Scoped
+    exclude?: Scoped
+    files?: Scoped
     references: string[]
+}
+
+interface Scoped {
+    dir: string
+    list: string[]
 }
 
 export async function loadConfig(ts: TsModule, fs: ProjectFs, file: string, fallbackDir: string): Promise<Config> {
     const cache = new Map<string, Promise<RawConfig | null>>()
 
-    const rawConfig = (path: string, depth = 0): Promise<RawConfig | null> => {
+    const rawConfig = (path: string, chain: string[] = []): Promise<RawConfig | null> => {
+        // A config that extends itself, through others or not, has nothing to inherit from there.
+        if (chain.includes(path))
+            return Promise.resolve(null)
         let hit = cache.get(path)
         if (!hit) {
             hit = (async () => {
                 const read = await fs.read(path).catch(() => null)
-                if (read?.kind !== 'text' || depth > 8)
+                if (read?.kind !== 'text' || chain.length > 8)
                     return null
                 const parsed = ts.parseConfigFileTextToJson(path, read.text)
                 const json = parsed.config
@@ -147,12 +156,12 @@ export async function loadConfig(ts: TsModule, fs: ProjectFs, file: string, fall
                 const parents: RawConfig[] = []
                 for (const spec of [json.extends].flat().filter((s): s is string => typeof s === 'string')) {
                     const parent = await extendsTarget(spec, dir)
-                    const loaded = parent ? await rawConfig(parent, depth + 1) : null
+                    const loaded = parent ? await rawConfig(parent, [...chain, path]) : null
                     if (loaded)
                         parents.push(loaded)
                 }
                 const merged = Object.assign({}, ...parents.map(p => p.options), own) as TS.CompilerOptions
-                const inherit = <K extends 'include' | 'exclude' | 'files'>(key: K): RawConfig[K] => Array.isArray(json[key]) ? json[key] : parents.map(p => p[key]).findLast(v => v)
+                const inherit = <K extends 'include' | 'exclude' | 'files'>(key: K): RawConfig[K] => Array.isArray(json[key]) ? { dir, list: json[key] } : parents.map(p => p[key]).findLast(v => v)
                 return {
                     dir,
                     options: merged,
@@ -187,11 +196,11 @@ export async function loadConfig(ts: TsModule, fs: ProjectFs, file: string, fall
     }
 
     const coverage = (raw: RawConfig): ((f: string) => boolean) => {
-        const excluded = raw.exclude ?? ['node_modules', 'bower_components', 'jspm_packages', ...(raw.options.outDir ? [raw.options.outDir] : [])]
-        const files = raw.files?.map(f => slashed(join(raw.dir, f)))
-        const includes = raw.include ?? (files ? [] : ['**/*'])
-        const inc = includes.map(p => globToRegExp(raw.dir, p))
-        const exc = excluded.map(p => globToRegExp(raw.dir, p))
+        const excluded = raw.exclude ?? { dir: raw.dir, list: ['node_modules', 'bower_components', 'jspm_packages', ...(raw.options.outDir ? [raw.options.outDir] : [])] }
+        const files = raw.files?.list.map(f => slashed(join(raw.files!.dir, f)))
+        const includes = raw.include ?? { dir: raw.dir, list: files ? [] : ['**/*'] }
+        const inc = includes.list.map(p => globToRegExp(includes.dir, p))
+        const exc = excluded.list.map(p => globToRegExp(excluded.dir, p))
         return f => files?.includes(f) || (inc.some(r => r.test(f)) && !exc.some(r => r.test(f)))
     }
 
@@ -289,6 +298,12 @@ export class Project {
     private readonly wanted = new Set<string>()
     private readonly wantedReal = new Set<string>()
     private readonly pendingShims = new Map<string, string>()
+    private get rootFile() {
+        return `${this.config.dir}/__root__.ts`
+    }
+
+    private readonly variants = new Map<string, Map<string, string>>()
+    private readonly renames = new Map<string, Map<string, string>>()
     private readonly dottedCache = new Map<string, { from: string, to: string }>()
     private touched = false
     private bytes = 0
@@ -439,8 +454,12 @@ export class Project {
             const named = new Map<string, Map<string, string[]>>()
             for (const file of batch) {
                 const info = this.ts.preProcessFile(file.text, true, true)
-                for (const i of info.importedFiles)
+                for (const i of info.importedFiles) {
                     modules.push({ spec: i.fileName, from: file.path })
+                    // What the project itself gets for the same name, to tell a package's own copy from the project's.
+                    if (isNodeModules(file.path) && !i.fileName.startsWith('.'))
+                        modules.push({ spec: i.fileName, from: this.rootFile })
+                }
                 for (const r of info.referencedFiles)
                     refs.push({ spec: r.fileName, from: file.path })
                 for (const t of info.typeReferenceDirectives)
@@ -450,6 +469,7 @@ export class Project {
                     modules.push({ spec: runtime, from: file.path })
                 named.set(file.path, namedImports(file.text))
                 this.edges.set(file.path, new Set())
+                this.renames.delete(file.path)
             }
 
             const unique = (list: Request[]) => [...new Map(list.map(r => [keyOf(r), r])).values()]
@@ -488,7 +508,7 @@ export class Project {
                     continue
                 }
                 if (!relativeSpec)
-                    this.pendingShims.set(r.spec, target)
+                    this.pendingShims.set(this.shimSpec(r.spec, target, r.from, resolvedModules.get(keyOf({ spec: r.spec, from: this.rootFile }))?.resolvedFileName), target)
                 link(r.from, target)
             }
 
@@ -500,6 +520,42 @@ export class Project {
             }
             await this.makeShims()
         }
+    }
+
+    /**
+     * The name a package import is filed under for the service, which finds `x` only at /node_modules/x:
+     * one place for the whole project. Two versions of `x` (a plugin's own copy of `vite`, say) cannot both live
+     * there, so the second gets a name of its own, and the importing file is told it in `output()`.
+     */
+    private shimSpec(spec: string, target: string, from: string, atRoot: string | undefined): string {
+        const known = this.variants.get(spec) ?? new Map<string, string>()
+        this.variants.set(spec, known)
+        // The project's own resolution holds the plain name, whoever asks first.
+        if (atRoot && !known.size)
+            known.set(slashed(atRoot), spec)
+        let name = known.get(target)
+        if (!name) {
+            // The project's files cannot be renamed (the editor holds their text), a package's can.
+            name = isNodeModules(from) && known.size ? `${spec}/__v${known.size + 1}` : spec
+            known.set(target, name)
+        }
+        if (name !== spec) {
+            const renames = this.renames.get(from) ?? new Map<string, string>()
+            renames.set(spec, name)
+            this.renames.set(from, renames)
+        }
+        return name
+    }
+
+    /** The importing file's text with the names `shimSpec` chose. */
+    private renamed(path: string, text: string): string {
+        const renames = this.renames.get(path)
+        if (!renames)
+            return text
+        let out = text
+        for (const [spec, name] of renames)
+            out = out.replace(new RegExp(String.raw`(\b(?:from|import|require)\s*\(?)(['"])${spec.replace(/[$()*+.?[\\\]^{|}]/g, String.raw`\$&`)}\2`, 'g'), `$1$2${name}$2`)
+        return out
     }
 
     private async makeShims() {
@@ -664,7 +720,7 @@ export class Project {
         for (const [k, names] of this.stubs)
             out[vpath(k)] = anyModule(names)
         for (const [k, v] of this.files)
-            out[vpath(k)] = isNodeModules(k) ? this.dotted(k, v) : v
+            out[vpath(k)] = isNodeModules(k) ? this.dotted(k, this.renamed(k, v)) : v
         // The service looks for `./x.mjs` as x.ts / x.d.ts only: ESM-only files (x.mts, x.d.mts) also go under those names, where free.
         for (const [k, v] of this.files) {
             const alias = k.replace(/\.d\.[cm]ts$/, '.d.ts').replace(/(?<!\.d)\.[cm]ts$/, '.ts')

@@ -121,7 +121,7 @@ export interface EditorKit {
 }
 
 /** A link that works from the start and is wired to the real one when it arrives (or let go of at once if it was released first). */
-function lazyLink(attached: Promise<ProjectLink | null>): ProjectLink {
+export function lazyLink(attached: Promise<ProjectLink | null>): ProjectLink {
     let real: ProjectLink | null = null
     let released = false
     void attached.then((link) => {

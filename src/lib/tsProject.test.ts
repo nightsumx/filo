@@ -1,11 +1,10 @@
-import type { FileRead } from '@shared/ipc'
-import type { ProjectFs } from './tsProject'
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { clearTSServiceCache, getTSService, setTsCompilerOptions, setTsFiles, setTsLibLoader } from 'lite-monaco'
 import ts from 'typescript'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { nodeProjectFs } from '../../test/projectFs'
 import { checkOptions, loadConfig, namedImports, Project } from './tsProject'
 
 const root = realpathSync(mkdtempSync(join(tmpdir(), 'ts-project-')))
@@ -14,43 +13,7 @@ const put = (rel: string, text: string) => {
     writeFileSync(join(root, rel), text)
 }
 
-const fs: ProjectFs = {
-    read: async (path): Promise<FileRead> => {
-        try {
-            if (statSync(path).isDirectory())
-                return { kind: 'missing' }
-            const text = readFileSync(path, 'utf8')
-            return { kind: 'text', text, bom: false, size: text.length }
-        }
-        catch {
-            return { kind: 'missing' }
-        }
-    },
-    realPath: async path => realpathSync(path),
-    sources: async (dir) => {
-        const out: string[] = []
-        const walk = (d: string) => {
-            for (const e of readdirSync(d, { withFileTypes: true })) {
-                if (e.name === 'node_modules')
-                    continue
-                if (e.isDirectory())
-                    walk(join(d, e.name))
-                else if (/\.[cm]?[jt]sx?$/.test(e.name))
-                    out.push(join(d, e.name))
-            }
-        }
-        walk(dir)
-        return out
-    },
-    folders: async (dir) => {
-        try {
-            return readdirSync(dir, { withFileTypes: true }).filter(e => e.isDirectory()).map(e => e.name)
-        }
-        catch {
-            return []
-        }
-    },
-}
+const fs = nodeProjectFs
 
 beforeAll(() => {
     put('tsconfig.json', '{ "files": [], "references": [{ "path": "./tsconfig.app.json" }, { "path": "./tsconfig.node.json" }] }')
@@ -94,6 +57,13 @@ beforeAll(() => {
     put('node_modules/tsext/dist/index.d.ts', 'import type { Cb } from "./cb.ts"\nexport declare function on(cb: Cb): void\nexport interface Opts { a: 1 }\n')
     put('node_modules/tsext/dist/sub.d.ts', 'export type { Opts } from "."\n')
     put('node_modules/tsext/dist/cb.d.ts', 'export type Cb = (n: number) => void\n')
+    // Two versions of one package: the project's and a dependency's own copy.
+    put('node_modules/shared/package.json', '{ "name": "shared", "types": "index.d.ts" }')
+    put('node_modules/shared/index.d.ts', 'export declare const v: 1\n')
+    put('node_modules/host/package.json', '{ "name": "host", "types": "index.d.ts" }')
+    put('node_modules/host/index.d.ts', 'import { v } from "shared"\nexport declare const w: typeof v\n')
+    put('node_modules/host/node_modules/shared/package.json', '{ "name": "shared", "types": "index.d.ts" }')
+    put('node_modules/host/node_modules/shared/index.d.ts', 'export declare const v: 2\n')
     symlinkSync(join(root, 'node_modules/.store/linked@1/node_modules/linked'), join(root, 'node_modules/linked'))
     const libs = join(process.cwd(), 'node_modules/typescript/lib')
     setTsLibLoader(async () => new Map(readdirSync(libs).filter(f => /^lib\..*\.d\.ts$/.test(f)).map(f => [f, readFileSync(join(libs, f), 'utf8')] as const)))
@@ -135,6 +105,47 @@ describe('loadConfig', () => {
         const node = await loadConfig(ts, fs, join(root, 'electron/main.ts'), root)
         expect(node.path).toBe(join(root, 'tsconfig.node.json'))
         expect(node.options.strict).toBe(false)
+    })
+    it('follows `extends` (relative and from a package), the child winning, and `paths` stay relative to their own file', async () => {
+        put('cfg/base.json', '{ "compilerOptions": { "strict": true, "noUnusedLocals": true, "baseUrl": ".", "paths": { "@b/*": ["./lib/*"] } }, "include": ["base-src"] }')
+        put('node_modules/@scope/tsconfig/tsconfig.json', '{ "compilerOptions": { "target": "es2020", "noImplicitAny": false } }')
+        put('cfg/app/tsconfig.json', '{ "extends": ["@scope/tsconfig", "../base.json"], "compilerOptions": { "noUnusedLocals": false } }')
+        put('cfg/app/a.ts', 'export {}\n')
+        const config = await loadConfig(ts, fs, join(root, 'cfg/app/a.ts'), root)
+        expect(config.path).toBe(join(root, 'cfg/app/tsconfig.json'))
+        expect(config.options.strict).toBe(true)
+        expect(config.options.noUnusedLocals).toBe(false)
+        expect(config.options.target).toBe(ts.ScriptTarget.ES2020)
+        expect(config.options.pathsBasePath).toBe(join(root, 'cfg'))
+        // `include` comes from the parent when the child has none; the parent's folder is what it is relative to
+        expect(config.covers(join(root, 'cfg/base-src/x.ts'))).toBe(true)
+        expect(config.covers(join(root, 'cfg/app/a.ts'))).toBe(false)
+    })
+    it('uses a jsconfig where there is no tsconfig', async () => {
+        put('js/jsconfig.json', '{ "compilerOptions": { "checkJs": true } }')
+        put('js/a.js', 'export {}\n')
+        const config = await loadConfig(ts, fs, join(root, 'js/a.js'), root)
+        expect(config.path).toBe(join(root, 'js/jsconfig.json'))
+        expect(config.options.checkJs).toBe(true)
+    })
+    it('`include` and `exclude` decide what the project covers', async () => {
+        put('inc/tsconfig.json', '{ "include": ["src/**/*", "extra.ts"], "exclude": ["src/gen", "**/*.spec.ts"] }')
+        put('inc/src/a.ts', 'export {}\n')
+        const config = await loadConfig(ts, fs, join(root, 'inc/src/a.ts'), root)
+        for (const [rel, covered] of [['src/a.ts', true], ['src/deep/b.tsx', true], ['extra.ts', true], ['src/gen/c.ts', false], ['src/a.spec.ts', false], ['other.ts', false], ['node_modules/p/i.ts', false]] as const)
+            expect([rel, config.covers(join(root, 'inc', rel))]).toEqual([rel, covered])
+    })
+    it('survives a config it cannot read, an `extends` loop and one that does not exist', async () => {
+        put('bad/tsconfig.json', '{ "extends": "./loop.json", "compilerOptions": { "strict": true } }')
+        put('bad/loop.json', '{ "extends": "./tsconfig.json" }')
+        put('bad/a.ts', 'export {}\n')
+        expect((await loadConfig(ts, fs, join(root, 'bad/a.ts'), root)).options.strict).toBe(true)
+        put('bad2/tsconfig.json', '{ "extends": "./nope.json", "compilerOptions": { "strict": true } }')
+        put('bad2/a.ts', 'export {}\n')
+        expect((await loadConfig(ts, fs, join(root, 'bad2/a.ts'), root)).options.strict).toBe(true)
+        put('bad3/tsconfig.json', '{ not json')
+        put('bad3/a.ts', 'export {}\n')
+        await expect(loadConfig(ts, fs, join(root, 'bad3/a.ts'), root)).resolves.toBeDefined()
     })
     it('falls back without a tsconfig', async () => {
         const config = await loadConfig(ts, fs, '/nonexistent-dir/a.ts', '/nonexistent-dir')
@@ -180,6 +191,12 @@ describe('Project', () => {
     })
     it('resolves `from "."` and `from ".."` in the project\'s own files', async () => {
         expect(await diagnose('src/lib/a.ts', 'import { os } from "."\nexport const a: string = os\n')).toHaveLength(0)
+    })
+    it('keeps a dependency\'s own copy of a package apart from the project\'s', async () => {
+        // Imported in either order: the project's `shared` is 1, host's is 2.
+        expect(await diagnose('src/lib/a.ts', 'import { v } from "shared"\nimport { w } from "host"\nexport const a: 1 = v\nexport const b: 2 = w\n')).toEqual([])
+        expect(await diagnose('src/lib/a.ts', 'import { w } from "host"\nimport { v } from "shared"\nexport const a: 1 = v\nexport const b: 2 = w\n')).toEqual([])
+        expect(await diagnose('src/lib/a.ts', 'import { w } from "host"\nimport { v } from "shared"\nexport const a: 2 = v\nexport const b: 1 = w\n')).toHaveLength(2)
     })
     it('finds the dependencies of a linked package next to its real folder', async () => {
         expect(await diagnose('src/lib/a.ts', 'import { linked } from "linked"\nexport const n: 42 = linked\n')).toEqual([])
