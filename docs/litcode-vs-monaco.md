@@ -1,0 +1,113 @@
+# litcode（lite-monaco）对比 Monaco
+
+日期：2026-10-18。对象：`../text-suite/litcode`（包名 `lite-monaco` 0.3.0，最新提交 `4b9143d`，2026-10-12）对 `monaco-editor` 0.52.2。
+
+## 结论
+
+**在“嵌入一个编辑框”这个场景，日常编辑已经接近 Monaco；作为 Monaco 的替代品，还差平台能力和跨浏览器验证。** Filo 要的是前者（打开文件、改、保存、TS 补全和跳转），所以够用；不是 drop-in，也不打算是。
+
+证据分三档，下面表里用标记区分：
+
+- ✅ 我这次自己量的或跑的
+- 📄 仓库文档自述，我没复核
+- ❓ 没有证据，不知道
+
+## 1. 体积和部署
+
+| 项 | litcode | Monaco 0.52.2 | 来源 |
+|---|---|---|---|
+| 主包 | `dist/index.js` 1.5 MB，gzip 401 KB | `editor.main.js` 3.77 MB，gzip 954 KB，另有 `editor.main.css` gzip 21 KB | ✅ |
+| TS 语言服务 | 不含，用宿主已有的 `typescript`，跑在主线程 | `tsWorker.js` 5.75 MB，gzip 1.29 MB，跑在 worker | ✅ |
+| worker | 0 个 | 至少 editor worker 加各语言 worker（`workerMain.js` 376 KB） | ✅ |
+| 语法高亮 | Shiki（peer，按需加载语言） | 内置 Monarch，`basic-languages` 640 KB | ✅ |
+
+读这张表要注意：
+- litcode 自己的 README 写主包约 700 KB，实测已经是 1.5 MB，文档过时了。
+- Monaco 的 3.77 MB 是整包。按需裁剪语言和功能的 ESM 构建会小一些，我没量裁剪后的数字。
+- litcode 不含 Shiki 和 TypeScript，这两样 Filo 本来就要装，所以对 Filo 是净省；单独用 litcode 的项目要把它们算进去。
+
+对 Electron 的实际好处是不用配 worker：不用处理 `MonacoEnvironment.getWorkerUrl`、打包器的 worker 入口和 CSP。
+
+## 2. 编辑功能
+
+下表“litcode”一栏：有 = 仓库里有实现；括号是我没验证的限制。
+
+| 功能 | Monaco | litcode | 来源 |
+|---|---|---|---|
+| 多光标、列选、选下一处 | 有 | 有（Alt 拖选 📄 标注“未完整产品化”，后续在 ROADMAP 里标已完成） | 📄 |
+| 查找替换（大小写、全词、正则、选区内） | 有 | 有，Monaco 风格面板 | 📄 |
+| 折叠（缩进、区域、按层级、递归） | 有 | 有，键位照 Monaco | 📄 |
+| minimap、概览尺、sticky scroll、缩进线、括号配对着色 | 有 | 有 | 📄 |
+| 自动补全 | 有 | 有，移植了 VS Code 的 fuzzyScore，列表虚拟渲染 | 📄 |
+| TS 补全、hover、签名、诊断、跳转、引用、重命名、格式化、quick fix、peek、inlay hints | 有（worker） | 有（主线程） | 📄，我们的 `tsProject.test.ts` 用到了其中一部分 |
+| 命令面板（F1）、右键菜单、Go to Line | 有 | 有 | 📄 |
+| 并排 Diff | 有，含 inline、moved blocks、无障碍视图 | 只有并排，用 Monaco 的 diff 算法 | 📄 |
+| 键位对照 | 本体 | 平台各自对齐 Monaco，CHANGELOG 称 436 条按键回放对 Monaco 差异 130 → 0 | 📄 |
+| 自动换行 | 有 | 有，默认关 | 📄 |
+| IME（拼音）组字 | 成熟 | 有专门的保护和修复记录 | 📄，真机 ❓ |
+| 无障碍（屏幕阅读器） | 完整 | 有 role、live region，行号播报 | 📄，VoiceOver/NVDA ❓ |
+
+## 3. litcode 没有的（Monaco 有）
+
+| 缺什么 | 影响 |
+|---|---|
+| `monaco.languages.*` 的 provider 生态、contribution、完整 `monaco.editor` API | 想接别的语言服务要自己接内核的扩展点，没有现成的注册入口。README 写“永久不做” |
+| 多 model 服务（URI、跨文件模型） | 多 tab 由宿主自己管。Filo 现在就是这么做的：切走时存 `state`，切回传回 |
+| 非 TS 语言的智能 | 只有 css/html/json 的大纲，没有补全和诊断 |
+| 语义 token、code lens、行内补全（ghost text）、颜色装饰器 | 我在源码里搜这些关键词没搜到，应该没有；没逐个功能确认 |
+| Diff 的 inline 模式、moved blocks | 文档自述未做 |
+| worker 里跑 TS | 见下一节 |
+| 配置面 | 用 `features` 布尔开关，没有 Monaco 那一百多项 `editor.*` |
+
+## 4. 性能
+
+| 项 | 数字 | 来源 |
+|---|---|---|
+| 10k 行（49 万字符）文件，普通编辑和光标操作 | 多数 p50 在 0.3 到 25 ms（最慢的是随机跳转滚动 25 ms） | 📄 2026-08-14 的表，修复后 find / fold 降到 2 到 24 ms |
+| 同一文件整篇载入 | 3.7 秒 | 📄 同一张表 |
+| 语义诊断（主线程） | 10k 行约 200 ms；超过 2 万行自动只做语法诊断 | 📄 |
+| 格式化整个文件 | 105 ms | 📄 |
+| 粘贴 2 万行 | 约 130 ms（CHANGELOG 后来的数字） | 📄 |
+| 同一场景 Monaco 的数字 | 没有 | ❓ |
+
+要点：
+- 仓库自己的数字都没有对着 Monaco 在同一台机器上测过，所以“快不快于 Monaco”这件事没有证据。
+- TS 在主线程是真实的结构性短板：Monaco 把它放 worker，大文件不卡输入；litcode 靠“按行数分档降级”来躲（S/M/L/XL），降级就意味着大文件里功能变少。
+- 整篇载入 3.7 秒那一项是 8 月的数字，之后改过不少，我没重跑。
+
+## 5. 稳定性和验证
+
+| 项 | 状态 | 来源 |
+|---|---|---|
+| 自动测试 | 203 个测试文件，3410 条，3409 通过 | ✅ 我跑了 |
+| 那 1 条失败 | `dombridge-index-fix.test.ts` 的耗时断言（要求 < 150 ms，实测 192 ms），机器有别的任务在跑时的计时波动，不是逻辑错 | ✅ |
+| Chrome 桌面 | 验收过 | 📄 |
+| Firefox、Safari、iOS、Android | 没人手测，文档里标 ⏳ | 📄 |
+| 代码量 | `src` 约 4.4 万行 TS，2026-06-30 起 103 次提交 | ✅ |
+| API 稳定性 | 0.x，`litcode`、`DiffEditor`、`core` 标 stable，但 0.x 允许 breaking | 📄 |
+
+Filo 是 Electron，只跑 Chromium，所以跨浏览器那一行对我们基本不构成风险。
+
+## 6. litcode 的优势（对 Filo）
+
+1. **主题按实例，不是全局。** Monaco 的 `setTheme` 是全局的，同页一暗一亮会互相影响；litcode 的颜色是每个编辑器上的 `--lc-*` 变量。Filo 里同时开暗色和亮色的编辑器时不会互相影响（我没专门测这个场景）。📄
+2. **状态可以整个存取。** `litcode({ state })` 恢复撤销历史、选区、折叠；多 tab 切换不丢。Monaco 要自己管 model 和 view state。Filo 的 `fileTab.ts` 已经在用。
+3. **和 VS Code 同一份语法和主题。** 用 Shiki 的 TextMate 语法和 `dark-plus`，颜色就是 VS Code 的（今天刚换，已截图核对）。
+4. **没有 worker、CSP 简单，体积小一半以上。** 见第 1 节。
+5. **可监测。** `view.introspect()`、`state.snapshot()`、`onTransaction`。我们的 e2e 直接读 `window.__app.activeFile.view`，不用靠 DOM 猜。
+6. **源码在手。** 出问题能直接改，和 Filo 一起迭代。Monaco 的内部基本改不了。
+7. **多编辑器互不串。** token 缓存按 view 分开，同语言的实例共享一个 TS 项目。📄
+
+## 7. litcode 的风险
+
+1. **一个人维护的 0.x 库。** 出问题没有社区兜底；这也是上一点“源码在手”的另一面。
+2. **主线程 TS。** 大文件会降级，或者在语义诊断时有感知的停顿。
+3. **文档落后于代码。** README 的体积数字、`CAPABILITIES.md`（2026-07-13）和 CHANGELOG 对不上，查事实要以代码和测试为准。
+4. **Filo 打包用的是 `vendor/lite-monaco-0.3.0-r8.tgz`（2026-10-11 14:38），开发模式用的是 `../text-suite/litcode` 的工作区源码。** 最新提交比 tgz 晚一天；两者内容差多少我没比对，所以你在 dev 里看到的编辑器，不一定和打出来的包一样。每次发版前要重新打 tgz。
+5. **真机输入法和读屏没有验证记录**，Filo 用户里有中文输入，这块值得自己在真机上过一遍。
+
+## 8. 建议
+
+- 当前用法（单文件编辑、TS 补全、多 tab、分屏）：继续用 litcode，没必要换回 Monaco。
+- 换回 Monaco 才划算的情况：要接非 TS 语言服务（LSP）、要 inline diff / moved blocks、要稳定的无障碍。
+- 值得补的验证（我没做）：同一台机器上，同一个 1 万行文件，两边测载入、打字延迟、滚动，得到一张有 Monaco 对照的数字；中文输入法真机过一遍。
