@@ -53,6 +53,8 @@ export class FileTab {
     view: core.EditorView | null = null
     /** Scroll position to restore when a view shows it again. */
     scroll: { top: number, left: number } | null = null
+    /** Where the caret goes once a view shows the file (a jump from another file); 1-based. */
+    reveal: { line: number, col: number } | null = null
 
     /** Bumps on every user edit, so a save knows whether edits came in while it was writing. */
     private version = 0
@@ -69,6 +71,7 @@ export class FileTab {
             state: false,
             view: false,
             scroll: false,
+            reveal: false,
             version: false,
             timer: false,
             saving: false,
@@ -239,6 +242,26 @@ export class FileTab {
         // Typed while it was writing: those edits go out on the usual delay.
         if (this.dirty && !this.conflict && !this.deleted && !this.timer)
             this.schedule()
+    }
+
+    /** Puts the caret on a line and column, now if a view shows the file, else when one does. */
+    goto(line: number, col: number) {
+        this.reveal = { line, col }
+        this.applyReveal()
+    }
+
+    /** Moves the caret to where `goto` asked, once there is a view. */
+    applyReveal() {
+        const view = this.view
+        const target = this.reveal
+        if (!view || !target)
+            return
+        this.reveal = null
+        const doc = view.state.doc
+        const line = doc.line(Math.max(1, Math.min(target.line, doc.lines)))
+        const at = line.from + Math.max(0, Math.min(target.col - 1, line.length))
+        view.dispatch(view.state.update({ selection: core.EditorSelection.single(at), scrollIntoView: true, userEvent: 'select' }))
+        view.focus()
     }
 
     /** Saves pending edits now (tab closing, window losing focus). */

@@ -1,14 +1,19 @@
 // lite-monaco (litcode) for the editor tabs: one Shiki highlighter for the app, languages loaded as
 // files need them, colours from a VS Code theme with the app's own editor background, and the
 // TypeScript standard library bundled with the app instead of fetched from a CDN.
-import type { FileTab } from '@/store/fileTab'
+import type { EditorIntel } from '@shared/ipc'
 import type { Highlighter } from 'shiki'
-import type { ShikiLike, ThemeColors } from 'lite-monaco'
+import type { LitCodeFeatures, ShikiLike, ThemeColors } from 'lite-monaco'
+import type { FileTab } from '@/store/fileTab'
+import type { ProjectLink } from '@/store/codeIntel'
 import { core, litcode, setTsLibLoader } from 'lite-monaco'
 import { bundledLanguagesInfo, createHighlighter } from 'shiki'
 import { createJavaScriptRegexEngine } from 'shiki/engine/javascript'
 import { tr } from '@/lib/i18n'
 import { toLf } from '@/lib/textEdit'
+import { appStore } from '@/store/app'
+import { codeIntel } from '@/store/codeIntel'
+import { fileKey } from '@/store/fileTab'
 
 /** VS Code's own defaults, so a file reads the same here as in VS Code (the transcript's code blocks keep highlight.js's GitHub colours). */
 export const DARK_THEME = 'dark-plus'
@@ -90,26 +95,73 @@ export function languageOf(name: string): { id: string, name: string } | null {
     return byAlias.get(BY_EXT[ext] ?? ext) ?? null
 }
 
+const TS_LANGS = new Set(['typescript', 'tsx', 'javascript', 'jsx'])
+
+/** No TypeScript service at all: highlighting and editing only (Settings → Editor → Light). */
+const LIGHT_FEATURES: LitCodeFeatures = {
+    tsDiagnostics: false,
+    signatureHelp: false,
+    codeActions: false,
+    autocomplete: false,
+    hover: false,
+    stickyScroll: false,
+    inlayHints: false,
+    tsUnusedFade: false,
+}
+
 export interface EditorKit {
     hl: Highlighter
     /** Shiki id, loaded; 'text' when there is none. */
     lang: string
     /** For the status bar. */
     languageName: string
+    level: EditorIntel
+    /** What the TypeScript service gets of the project around the file; null when it gets none (light level, other languages). */
+    project: ProjectLink | null
+}
+
+/** A link that works from the start and is wired to the real one when it arrives (or let go of at once if it was released first). */
+function lazyLink(attached: Promise<ProjectLink | null>): ProjectLink {
+    let real: ProjectLink | null = null
+    let released = false
+    void attached.then((link) => {
+        if (!link)
+            return
+        if (released)
+            link.release()
+        else
+            real = link
+    })
+    return {
+        sync: async (text) => {
+            await (real ?? (await attached))?.sync(text)
+        },
+        release: () => {
+            released = true
+            real?.release()
+        },
+    }
 }
 
 /** The highlighter with the file's language in it (lite-monaco does not load languages itself). */
-export async function prepare(name: string): Promise<EditorKit> {
+export async function prepare(tab: FileTab, level: EditorIntel): Promise<EditorKit> {
     const hl = await highlighter()
-    const language = languageOf(name)
+    const language = languageOf(tab.name)
     if (language) {
         try {
             await hl.loadLanguage(language.id as Parameters<Highlighter['loadLanguage']>[0])
-            return { hl, lang: language.id, languageName: language.name }
+            let project: ProjectLink | null = null
+            if (level !== 'light' && TS_LANGS.has(language.id)) {
+                // Squiggles under every import would flash before the files arrive: wait a moment for them, not for the whole read.
+                const attached = codeIntel.attach(tab, language.id, level, tab.state?.doc.toString() ?? toLf(tab.base)).catch(() => null)
+                project = lazyLink(attached)
+                await Promise.race([attached, new Promise(resolve => setTimeout(resolve, 500))])
+            }
+            return { hl, lang: language.id, languageName: language.name, level, project }
         }
         catch {}
     }
-    return { hl, lang: 'text', languageName: tr('纯文本', 'Plain text') }
+    return { hl, lang: 'text', languageName: tr('纯文本', 'Plain text'), level, project: null }
 }
 
 /**
@@ -149,7 +201,23 @@ const APP_KEYS = ['Mod-t', 'Mod-Shift-[', 'Mod-Shift-]', 'Mod-Shift-{', 'Mod-Shi
  */
 export function mountEditor(parent: HTMLElement, tab: FileTab, kit: EditorKit, dark: boolean): core.EditorView {
     const theme = dark ? DARK_THEME : LIGHT_THEME
-    const view = litcode({
+    // Go to definition into another file opens that file in a tab; lite-monaco would show a preview only.
+    // Within the file it is lite-monaco's (this returns false and the key or click goes on to it).
+    const jumps = kit.level !== 'light' && TS_LANGS.has(kit.lang)
+    let view!: core.EditorView
+    const target = (pos: number) => jumps ? codeIntel.definitionElsewhere(tab, kit.lang, view.state.doc.toString(), pos) : null
+    const go = (to: NonNullable<ReturnType<typeof target>>) => {
+        appStore.openFile(to.path, tab.cwd)
+        appStore.files.get(fileKey(to.path))?.goto(to.line, to.col)
+    }
+    const jump = (pos: number): boolean => {
+        const to = target(pos)
+        if (!to)
+            return false
+        go(to)
+        return true
+    }
+    view = litcode({
         parent,
         // Shiki types `lang` as its bundled-language union; lite-monaco passes the string it was given.
         highlighter: kit.hl as unknown as ShikiLike,
@@ -157,9 +225,11 @@ export function mountEditor(parent: HTMLElement, tab: FileTab, kit: EditorKit, d
         theme,
         colors: colorsFor(kit.hl, theme),
         fileName: tab.path,
+        features: kit.level === 'light' ? LIGHT_FEATURES : undefined,
         state: tab.state ?? undefined,
         doc: toLf(tab.base),
         keymap: [
+            { key: 'F12', run: v => jump(v.state.selection.main.head) },
             { key: 'Mod-s', run: () => {
                 void tab.save('explicit')
                 return true
@@ -167,9 +237,32 @@ export function mountEditor(parent: HTMLElement, tab: FileTab, kit: EditorKit, d
             ...APP_KEYS.map(key => ({ key, run: () => true, preventDefault: false })),
         ],
     })
+    // The state carries the last level's squiggles along, and no session is left to take them away.
+    if (kit.level === 'light' && view.state.field(core.diagnosticsField, false)?.length)
+        view.dispatch(view.state.update({ effects: core.setDiagnostics.of([]) }))
     tab.state = null
     tab.view = view
     tab.setLanguage(kit.languageName)
+    requestAnimationFrame(() => tab.applyReveal())
+
+    // ⌘-click (Ctrl-click) on a name defined in another file.
+    const onMouseDown = (e: MouseEvent) => {
+        if (!jumps || e.button !== 0 || e.detail > 1 || e.shiftKey || e.altKey || !(core.browser.mac ? e.metaKey : e.ctrlKey))
+            return
+        const pos = view.posAtCoords({ x: e.clientX, y: e.clientY })
+        const to = pos == null ? null : target(pos)
+        if (!to)
+            return
+        e.preventDefault()
+        e.stopImmediatePropagation()
+        const up = (u: MouseEvent) => {
+            document.removeEventListener('mouseup', up, true)
+            if (Math.hypot(u.clientX - e.clientX, u.clientY - e.clientY) <= 4)
+                go(to)
+        }
+        document.addEventListener('mouseup', up, true)
+    }
+    view.dom.addEventListener('mousedown', onMouseDown, true)
 
     const report = (state: core.EditorState) => {
         const { main } = state.selection
@@ -184,6 +277,16 @@ export function mountEditor(parent: HTMLElement, tab: FileTab, kit: EditorKit, d
         if (t.docChanged || t.selection)
             report(view.state)
     })
+    // New imports typed in a while ago are picked up; one load at a time is enough for the pause between edits.
+    let resync: ReturnType<typeof setTimeout> | undefined
+    const stopSync = kit.project
+        ? view.onTransaction((t) => {
+            if (!t.docChanged)
+                return
+            clearTimeout(resync)
+            resync = setTimeout(() => void kit.project?.sync(view.state.doc.toString()), 1500)
+        })
+        : null
     const onFocusOut = () => void tab.flush()
     view.contentDOM.addEventListener('focusout', onFocusOut)
 
@@ -198,7 +301,10 @@ export function mountEditor(parent: HTMLElement, tab: FileTab, kit: EditorKit, d
     const destroy = view.destroy.bind(view)
     view.destroy = () => {
         stop()
+        stopSync?.()
+        clearTimeout(resync)
         view.contentDOM.removeEventListener('focusout', onFocusOut)
+        view.dom.removeEventListener('mousedown', onMouseDown, true)
         tab.scroll = { top: view.scrollDOM.scrollTop, left: view.scrollDOM.scrollLeft }
         tab.state = view.state
         if (tab.view === view)

@@ -90,14 +90,24 @@ const CodeView = observer(({ tab }: { tab: FileTab }) => {
     const [kit, setKit] = useState<EditorKit | null>(null)
     // Light and dark are different Shiki themes: the view is rebuilt on the same state.
     const dark = theme.dark
+    // Settings → Editor: a different level rebuilds the view (on the same state) with what that level has.
+    const level = appStore.editorIntel
 
     useEffect(() => {
         let live = true
-        void prepare(tab.name).then(k => live && setKit(k))
+        let made: EditorKit | null = null
+        void prepare(tab, level).then((k) => {
+            made = k
+            if (live)
+                setKit(k)
+            else
+                k.project?.release()
+        })
         return () => {
             live = false
+            made?.project?.release()
         }
-    }, [tab])
+    }, [tab, level])
 
     useEffect(() => {
         if (!host.current || !kit)

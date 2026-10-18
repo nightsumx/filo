@@ -1,12 +1,12 @@
 import type { AgentKind } from '@shared/agents'
 import type { CapabilityChoice, CapabilityId, Presence } from '@shared/capabilities'
 import type { LangPref } from '@shared/i18n'
-import type { AppState, CacheWarming, GlobalCompactionPatch, GlobalPrefs, OpenProject, PiEnvResult, PiPackageState, PiSettingsState, ProjectActivity, ProjectTransfer, RepoEdits, ReviewView, SearchResult, SessionSummary, StateSave, ThemePref, ThreadTransfer, TranscriptLang, WindowReport } from '@shared/ipc'
+import type { AppState, CacheWarming, EditorIntel, GlobalCompactionPatch, GlobalPrefs, OpenProject, PiEnvResult, PiPackageState, PiSettingsState, ProjectActivity, ProjectTransfer, RepoEdits, ReviewView, SearchResult, SessionSummary, StateSave, ThemePref, ThreadTransfer, TranscriptLang, WindowReport } from '@shared/ipc'
 import { acpAgent } from '@shared/agents'
 import { DEFAULT_BUDGET, normalizeCapabilities, presetOf, resolveCapabilities } from '@shared/capabilities'
 import { LANG_PREFS } from '@shared/i18n'
 import { SETUP_VERSION } from '@shared/setup'
-import { DEFAULT_THEME, GLOBAL_PREF_KEYS, REVIEW_VIEWS, THEME_PREFS, TRANSCRIPT_LANGS } from '@shared/ipc'
+import { DEFAULT_EDITOR_INTEL, DEFAULT_THEME, EDITOR_INTELS, GLOBAL_PREF_KEYS, REVIEW_VIEWS, THEME_PREFS, TRANSCRIPT_LANGS } from '@shared/ipc'
 import type { PiEvent, PiModel } from '@shared/pi'
 import type { RouteGroup, RoutedAgent, RoutesConfig, RoutesState } from '@shared/routes'
 import { pickableGroups } from '@shared/routes'
@@ -49,7 +49,7 @@ const IDLE_SWEEP_MS = 60_000
 export const MIN_PANE_WIDTH = 520
 export const MAX_PANES = 3
 
-export type SettingsPageId = 'appearance' | 'providers' | 'pi' | 'claude' | 'codex' | 'grok' | 'routes' | 'agents' | 'capabilities' | 'skills' | 'compaction' | 'trust' | 'shortcuts'
+export type SettingsPageId = 'appearance' | 'editor' | 'providers' | 'pi' | 'claude' | 'codex' | 'grok' | 'routes' | 'agents' | 'capabilities' | 'skills' | 'compaction' | 'trust' | 'shortcuts'
 
 export interface Project {
     cwd: string
@@ -118,6 +118,7 @@ class AppStore implements ThreadHost {
     transcriptLang: TranscriptLang = 'en'
     /** Changes panel layout, the same in every window. */
     reviewView: ReviewView = 'tree'
+    editorIntel: EditorIntel = DEFAULT_EDITOR_INTEL
     /** Capability extensions every pi process loads, the same for all projects. */
     capabilities: CapabilityId[] = resolveCapabilities(undefined).ids
     /** The preset the capabilities are, saved by id so its later changes apply; undefined: a custom set. */
@@ -624,6 +625,8 @@ class AppStore implements ThreadHost {
             this.transcriptLang = TRANSCRIPT_LANGS.includes(prefs.transcriptLang as TranscriptLang) ? prefs.transcriptLang! : 'en'
         if (has('reviewView'))
             this.reviewView = REVIEW_VIEWS.includes(prefs.reviewView as ReviewView) ? prefs.reviewView! : 'tree'
+        if (has('editorIntel'))
+            this.editorIntel = EDITOR_INTELS.includes(prefs.editorIntel as EditorIntel) ? prefs.editorIntel! : DEFAULT_EDITOR_INTEL
         if (has('defaultAgent'))
             this.defaultAgent = prefs.defaultAgent && (prefs.defaultAgent === 'pi' || acpAgent(prefs.defaultAgent)) ? prefs.defaultAgent : 'pi'
         if (has('setupDone'))
@@ -715,6 +718,7 @@ class AppStore implements ThreadHost {
             lang: this.langPref,
             transcriptLang: this.transcriptLang,
             reviewView: this.reviewView,
+            editorIntel: this.editorIntel === DEFAULT_EDITOR_INTEL ? undefined : this.editorIntel,
             defaultAgent: this.defaultAgent === 'pi' ? undefined : this.defaultAgent,
             setupDone: this.setupDone,
         }
@@ -1120,6 +1124,11 @@ class AppStore implements ThreadHost {
         this.langPref = pref
         applyLangPref(pref)
         void api().setLang(pref)
+        this.persist()
+    }
+
+    setEditorIntel(level: EditorIntel) {
+        this.editorIntel = level
         this.persist()
     }
 

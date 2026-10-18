@@ -9,6 +9,7 @@ import { fileMarks } from '@/lib/fileMarks'
 import { tr } from '@/lib/i18n'
 import { cn, shortPath } from '@/lib/utils'
 import { appStore } from '@/store/app'
+import { codeIntel } from '@/store/codeIntel'
 import { fileTreeStore } from '@/store/fileTree'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import copy from 'copy-to-clipboard'
@@ -54,6 +55,8 @@ function open(row: TreeRow) {
 const Row = observer(({ row, onMenu }: { row: TreeRow, onMenu: (row: TreeRow) => void }) => {
     const selected = fileTreeStore.selected === row.path
     const mark = fileTreeStore.marks.get(row.root)?.get(row.path)
+    // Errors the editor found in the project (Settings → Editor → Full) show red over the git colour.
+    const failing = codeIntel.hasProblem(row.path)
     const project = row.isRoot ? appStore.windowProjectList.find(p => p.cwd === row.root) : undefined
     if (row.more) {
         return (
@@ -111,7 +114,7 @@ const Row = observer(({ row, onMenu }: { row: TreeRow, onMenu: (row: TreeRow) =>
                             <span className="min-w-0 truncate text-[12px] text-gray-500">{shortPath(row.path)}</span>
                         </span>
                     )
-                : <span className={cn('min-w-0 flex-1 truncate', mark ? MARK_TEXT[mark] : row.ignored ? 'text-gray-400' : 'text-gray-900')}>{row.name}</span>}
+                : <span className={cn('min-w-0 flex-1 truncate', failing ? 'text-red-600 dark:text-red-400' : mark ? MARK_TEXT[mark] : row.ignored ? 'text-gray-400' : 'text-gray-900')} title={failing && !row.dir ? tr(`${codeIntel.problemCount(row.path)} 个错误`, `${codeIntel.problemCount(row.path)} error(s)`) : undefined}>{row.name}</span>}
             {row.link && <Link2 size={12} className="shrink-0 text-gray-400" aria-hidden />}
             {fileTreeStore.errors.has(row.path) && <span className="shrink-0 text-[11px] text-gray-400">{tr('无法读取', 'Unreadable')}</span>}
         </div>

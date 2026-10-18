@@ -4,7 +4,7 @@ import type { DirChange, DirEntry, DirListing, FileRead, FileWrite } from '@shar
 import type { Dirent, FSWatcher } from 'node:fs'
 import { execFile } from 'node:child_process'
 import { watch } from 'node:fs'
-import { open, readdir, readFile, stat } from 'node:fs/promises'
+import { open, readdir, readFile, realpath, stat } from 'node:fs/promises'
 import path from 'node:path'
 
 /** Bigger files open as "too large" rather than in the editor. */
@@ -72,6 +72,41 @@ export function decodeText(bytes: Uint8Array): { text: string, bom: boolean } | 
     }
     const bom = text.startsWith(BOM)
     return { text: bom ? text.slice(1) : text, bom }
+}
+
+export async function realPathOf(file: string): Promise<string> {
+    return realpath(file).catch(() => file)
+}
+
+/** Most files a project listing returns; a repository with more is not one an editor should read whole. */
+export const MAX_PROJECT_SOURCES = 6000
+const SOURCE = /\.(?:[cm]?[jt]s|[jt]sx)$/
+/** Folders a walk (outside git) never enters. */
+const NOT_SOURCE_DIRS = new Set(['node_modules', '.git', 'dist', 'build', 'out', 'release', 'coverage', '.next', '.nuxt', '.turbo', '.cache', '.venv', 'target', 'vendor'])
+
+/** Source files under `root`: what git lists (tracked and untracked, not ignored), else a bounded walk. */
+export async function projectSources(root: string): Promise<string[]> {
+    const listed = await new Promise<string[] | null>((resolve) => {
+        execFile('git', ['ls-files', '-z', '-co', '--exclude-standard'], { cwd: root, timeout: 15_000, maxBuffer: 64 * 1024 * 1024 }, (error, stdout) => {
+            resolve(error ? null : String(stdout).split('\0').filter(f => SOURCE.test(f)))
+        })
+    })
+    if (listed)
+        return listed.filter(f => !f.split('/').includes('node_modules')).slice(0, MAX_PROJECT_SOURCES).map(f => path.join(root, f))
+    const out: string[] = []
+    const walk = async (dir: string, depth: number): Promise<void> => {
+        if (out.length >= MAX_PROJECT_SOURCES || depth > 12)
+            return
+        const dirents = await readdir(dir, { withFileTypes: true }).catch(() => [])
+        await Promise.all(dirents.map(async (d) => {
+            if (d.isDirectory() && !NOT_SOURCE_DIRS.has(d.name) && !d.name.startsWith('.'))
+                await walk(path.join(dir, d.name), depth + 1)
+            else if (d.isFile() && SOURCE.test(d.name) && out.length < MAX_PROJECT_SOURCES)
+                out.push(path.join(dir, d.name))
+        }))
+    }
+    await walk(root, 0)
+    return out.sort()
 }
 
 export async function readText(file: string): Promise<FileRead> {

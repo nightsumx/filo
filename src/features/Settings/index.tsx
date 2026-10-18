@@ -1,6 +1,6 @@
 // Settings dialog (⌘,): pages listed on the left. Changes apply immediately, so there is no button bar.
 import type { LangPref, Localized } from '@shared/i18n'
-import type { ThemePref, TranscriptLang } from '@shared/ipc'
+import type { EditorIntel, ThemePref, TranscriptLang } from '@shared/ipc'
 import type { LucideIcon } from 'lucide-react'
 import type { SettingsPageId } from '@/store/app'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
@@ -9,7 +9,7 @@ import { systemLang, tr } from '@/lib/i18n'
 import { TRANSCRIPT_TEXT } from '@/lib/transcriptText'
 import { cn } from '@/lib/utils'
 import { appStore } from '@/store/app'
-import { Archive, Bot, Cpu, Keyboard, KeyRound, Palette, Puzzle, Rocket, Route, ShieldCheck, Sparkles, SquareTerminal, Terminal } from 'lucide-react'
+import { Archive, Bot, Code, Cpu, Keyboard, KeyRound, Palette, Puzzle, Rocket, Route, ShieldCheck, Sparkles, SquareTerminal, Terminal } from 'lucide-react'
 import { observer } from 'mobx-react-lite'
 import { AgentsPage } from './Agents'
 import { CapabilitiesPage } from './Capabilities'
@@ -119,8 +119,40 @@ const TranscriptLangRow = observer(() => (
         </SettingRow>
 ))
 
+const EDITOR_INTEL_OPTIONS: { value: EditorIntel, label: Localized, hint: Localized }[] = [
+    {
+        value: 'light',
+        label: { zh: '轻量', en: 'Light' },
+        hint: { zh: '只有语法高亮和编辑，不加载 TypeScript：没有补全、悬停提示和错误波浪线，打开最快、最省内存。', en: 'Highlighting and editing only. TypeScript is not loaded: no completion, hover or error squiggles. Fastest and lightest.' },
+    },
+    {
+        value: 'standard',
+        label: { zh: '标准', en: 'Standard' },
+        hint: { zh: '当前文件和它 import 的文件有类型、补全、跳转和错误提示，也会读 tsconfig 和 @types。', en: 'Types, completion, navigation and errors for the open file and what it imports. Reads tsconfig and @types.' },
+    },
+    {
+        value: 'full',
+        label: { zh: '完整', en: 'Full' },
+        hint: { zh: '像 IDE 一样读整个项目：查找引用和重命名覆盖所有文件（重命名会写回磁盘），没打开的文件有错误时在文件树里标红。大项目会多占一些 CPU 和内存。', en: 'Reads the whole project like an IDE: references and rename reach every file (rename writes to disk), and files with errors are marked red in the tree. Uses more CPU and memory on big projects.' },
+    },
+]
+
+const EditorPage = observer(() => {
+    const current = EDITOR_INTEL_OPTIONS.find(o => o.value === appStore.editorIntel) ?? EDITOR_INTEL_OPTIONS[1]
+    return (
+        <SettingsPage title={tr('编辑器', 'Editor')}>
+            <SettingRow
+                title={tr('代码智能', 'Code intelligence')}
+                description={`${tr(current.hint)}${tr('随时可以改，已打开的文件立即生效。', ' Change it any time; open files follow at once.')}`}
+                control={({ labelId }) => <Segmented labelledBy={labelId} value={appStore.editorIntel} options={EDITOR_INTEL_OPTIONS.map(o => ({ value: o.value, label: tr(o.label) }))} onChange={v => appStore.setEditorIntel(v)} />}
+            />
+        </SettingsPage>
+    )
+})
+
 const PAGES: { id: SettingsPageId, label: Localized, icon: LucideIcon, page: React.FC }[] = [
     { id: 'appearance', label: { zh: '外观', en: 'Appearance' }, icon: Palette, page: AppearancePage },
+    { id: 'editor', label: { zh: '编辑器', en: 'Editor' }, icon: Code, page: EditorPage },
     { id: 'providers', label: { zh: '供应商', en: 'Providers' }, icon: KeyRound, page: ProvidersPage },
     { id: 'pi', label: { zh: 'Pi', en: 'Pi' }, icon: Cpu, page: PiPage },
     { id: 'claude', label: { zh: 'Claude Code', en: 'Claude Code' }, icon: Terminal, page: ClaudeCodePage },

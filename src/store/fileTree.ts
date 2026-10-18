@@ -7,6 +7,7 @@ import { basename } from '@/lib/utils'
 import { comparer, makeAutoObservable, observable, reaction, runInAction } from 'mobx'
 import { insideOf, joinPath, parentPath, pathParts } from '@/platform'
 import { appStore } from './app'
+import { codeIntel } from './codeIntel'
 
 const EXPANDED_KEY = 'filo.tree.expanded'
 /** Remembered expanded folders, across projects. */
@@ -78,6 +79,7 @@ class FileTreeStore {
                 }
             }
             this.settleGit()
+            codeIntel.dirsChanged(changes)
         }))
         reaction(() => this.watchedDirs, dirs => window.pi.watchDirs(dirs), { fireImmediately: true, equals: comparer.structural })
         reaction(() => [...this.expanded], (list) => {
@@ -125,6 +127,9 @@ class FileTreeStore {
         const dirs = new Set(this.shown ? this.visibleDirs : [])
         for (const file of appStore.openFiles)
             dirs.add(parentPath(file.path))
+        // The folders of a project the editor follows (full level), so an agent's edit reaches the checks.
+        for (const dir of codeIntel.dirs.get())
+            dirs.add(dir)
         return [...dirs].sort()
     }
 

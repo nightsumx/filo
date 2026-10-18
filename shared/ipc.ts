@@ -196,13 +196,15 @@ export interface GlobalPrefs {
     transcriptLang?: TranscriptLang
     /** Changes panel: files in a folder tree (default) or a flat list. */
     reviewView?: ReviewView
+    /** How much the file editor knows about TypeScript/JavaScript projects; absent: standard. */
+    editorIntel?: EditorIntel
     /** The agent a new thread starts with; absent: pi. */
     defaultAgent?: AgentKind
     /** The setup assistant's version the user went through (shared/setup.ts SETUP_VERSION); absent: never. */
     setupDone?: number
 }
 
-export const GLOBAL_PREF_KEYS = ['projects', 'hiddenProjects', 'layout', 'theme', 'lang', 'transcriptLang', 'reviewView', 'defaultAgent', 'setupDone'] as const satisfies readonly (keyof GlobalPrefs)[]
+export const GLOBAL_PREF_KEYS = ['projects', 'hiddenProjects', 'layout', 'theme', 'lang', 'transcriptLang', 'reviewView', 'editorIntel', 'defaultAgent', 'setupDone'] as const satisfies readonly (keyof GlobalPrefs)[]
 
 /** settings.json as running pi processes see it (piSettings.ts). */
 export interface PiSettingsState {
@@ -345,6 +347,15 @@ export interface CompactionInfo {
     enabled: boolean
     reserveTokens: number
 }
+
+/**
+ * light: highlighting and editing only, no TypeScript service. standard: types, completion and errors for
+ * the open file and what it imports. full: the whole project is read, so references, rename and errors
+ * reach files that are not open.
+ */
+export type EditorIntel = 'light' | 'standard' | 'full'
+export const EDITOR_INTELS: readonly EditorIntel[] = ['light', 'standard', 'full']
+export const DEFAULT_EDITOR_INTEL: EditorIntel = 'standard'
 
 export type ReviewView = 'tree' | 'list'
 export const REVIEW_VIEWS: readonly ReviewView[] = ['tree', 'list']
@@ -781,6 +792,10 @@ export interface PiBridge {
     /** A folder of the file tree. */
     listDir: (dir: string) => Promise<DirListing>
     readFile: (file: string) => Promise<FileRead>
+    /** Where links lead (the file itself when there are none or it is gone); TypeScript needs it to find a package's own dependencies. */
+    realPath: (file: string) => Promise<string>
+    /** The TypeScript and JavaScript files under a folder, absolute: git's own list (ignored files left out) or a walk that skips node_modules and build output. Capped. */
+    projectSources: (root: string) => Promise<string[]>
     /** See FileWrite; `expected` null overwrites whatever is on disk. */
     writeFile: (file: string, text: string, options: { expected: string | null, bom: boolean }) => Promise<FileWrite>
     /** The folders this window watches (tree folders, folders of open files); replaces the last set. */
@@ -960,6 +975,8 @@ export const IPC = {
     revealPath: 'shell:reveal-path',
     listDir: 'fs:list-dir',
     readFile: 'fs:read-file',
+    realPath: 'fs:real-path',
+    projectSources: 'fs:project-sources',
     writeFile: 'fs:write-file',
     watchDirs: 'fs:watch-dirs',
     dirsChanged: 'fs:dirs-changed',

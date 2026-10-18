@@ -28,6 +28,7 @@
         "e2e:tool-output": "bun --tsconfig-override=tsconfig.node.json test/tool-output-e2e.ts",
         "e2e:review": "bun --tsconfig-override=tsconfig.node.json test/review-e2e.ts",
         "e2e:files": "bun --tsconfig-override=tsconfig.node.json test/files-e2e.ts",
+        "e2e:code-intel": "bun --tsconfig-override=tsconfig.node.json test/code-intel-e2e.ts",
         "e2e:providers": "bun --tsconfig-override=tsconfig.node.json test/providers-e2e.ts",
         "e2e:routes": "bun --tsconfig-override=tsconfig.node.json test/routes-e2e.ts",
         "e2e:cli-sessions": "bun --tsconfig-override=tsconfig.node.json test/cli-sessions-e2e.ts",

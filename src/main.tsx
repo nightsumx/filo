@@ -4,6 +4,7 @@ import { createRoot } from 'react-dom/client'
 import { App } from './App'
 import { initTheme } from './lib/theme'
 import { appStore } from './store/app'
+import { codeIntel } from './store/codeIntel'
 import { fileTreeStore } from './store/fileTree'
 import { terminalStore } from './store/terminals'
 import { existingView } from './features/Terminal/views'
@@ -25,4 +26,4 @@ fileTreeStore.init()
 
 // Handle for inspecting state from DevTools (dev builds) and for end-to-end scripts (PI_GUI_TEST).
 if (import.meta.env.DEV || new URLSearchParams(location.search).has('test'))
-    Object.assign(window, { __app: appStore, __terminals: terminalStore, __terminalView: existingView, __files: fileTreeStore })
+    Object.assign(window, { __app: appStore, __terminals: terminalStore, __terminalView: existingView, __files: fileTreeStore, __codeIntel: codeIntel })
