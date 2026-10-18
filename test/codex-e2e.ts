@@ -370,7 +370,7 @@ async function main() {
             await until('installed', () => js<boolean>(`!!${plugin}?.querySelector('[role="switch"]')`))
             check(await js<boolean>(`${plugin}.querySelector('[role="switch"]').getAttribute('aria-checked') === 'true' && !!${buttonOf('Uninstall')}`), 'Install runs plugin/install: it shows as enabled, with Uninstall')
             await js(`(() => { ${plugin}.querySelector('[role="switch"]').click(); return true })()`)
-            await until('plugins.hello@local-test disabled in config.toml', async () => /hello@local-test[^\n]*\]\s*\n\s*enabled = false/.test(await toml()))
+            await until('plugins.hello@local-test disabled in config.toml', async () => /hello@local-test[^\n]*\][ \t]*\n\s*enabled = false/.test(await toml()))
             await until('the switch off', () => js<boolean>(`${plugin}.querySelector('[role="switch"]').getAttribute('aria-checked') === 'false'`))
             check(true, 'its switch writes plugins.<id>.enabled in config.toml')
             if (SHOTS)

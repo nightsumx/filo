@@ -166,16 +166,16 @@ describe.skipIf(!codex)('Codex native adapter against codex app-server', () => {
         ].join('\n'))
     })
 
-    afterAll(async () => {
-        await Promise.all(agents.map(a => a.stop()))
-        server?.close()
-        await rm(home, { recursive: true, force: true })
-    })
-
     beforeEach(async () => {
         script = []
         requests = []
         work = await mkdtemp(path.join(os.tmpdir(), 'codex-work-'))
+    })
+
+    afterAll(async () => {
+        await Promise.all(agents.map(a => a.stop()))
+        server?.close()
+        await rm(home, { recursive: true, force: true })
     })
 
     it('runs a prompt: streams the answer, settles, and reports the session and its usage', async () => {

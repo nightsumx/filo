@@ -1,9 +1,8 @@
 import type { AcpConfigOption, AgentFeatures, AgentKind } from '@shared/agents'
-import type { ApprovalChoice, ApprovalMode, ApprovalRequest, AskResponse, AutopilotAnswer, AutopilotCard, AutopilotStatus, CapabilityId, GuiCommands, PlanDecision, ReviewApply, ReviewProgress, TodoDetails } from '@shared/capabilities'
+import type { ApprovalChoice, ApprovalMode, ApprovalRequest, AskResponse, AutopilotAnswer, AutopilotCard, AutopilotStatus, CapabilityId, GuiCommands, PlanDecision, ReviewApply, ReviewProgress, TodoDetails, Presence } from '@shared/capabilities'
 import type { AgentExitInfo } from '@shared/ipc'
 import type { AgentChannel, RouteGroup, RoutedAgent, ThreadRoute, ThreadRouteInfo } from '@shared/routes'
 import { isRoutedAgent, ROUTES_PROVIDER, TERMINAL_AGENTS } from '@shared/routes'
-import type { Presence } from '@shared/capabilities'
 import type {
     AgentMessage,
     AssistantMessage,
@@ -19,14 +18,13 @@ import type {
 } from '@shared/pi'
 import { modelKey } from '@shared/pi'
 import type { SubagentRun } from '@/lib/subagents'
-import type { ThreadActivity } from '@/lib/threadActivity'
+import type { ThreadActivity, WaitingKind } from '@/lib/threadActivity'
 import type { BlockTime, Step, TimelineMessage, ToolExecState, ToolResultView } from '@/lib/timeline'
 import { newThreadLabel, tr } from '@/lib/i18n'
 import { parsePartialJson } from '@/lib/partialJson'
 import { childToolCallIds, subagentsIn } from '@/lib/subagents'
 import { threadActivity } from '@/lib/threadActivity'
 import { blockTimeKey, buildTurns, contentImages, contentText, pendingCards } from '@/lib/timeline'
-import type { WaitingKind } from '@/lib/threadActivity'
 import { tuiTitle } from '@/lib/toolMeta'
 import { isAbsolutePath, joinPath, pathParts } from '@/platform'
 import { agentFeatures, agentLabel, agentOfKey } from '@shared/agents'

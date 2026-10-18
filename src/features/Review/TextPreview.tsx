@@ -109,7 +109,6 @@ interface NbCell {
 }
 
 const joined = (v: unknown): string => (Array.isArray(v) ? v.join('') : typeof v === 'string' ? v : '')
-// eslint-disable-next-line no-control-regex
 const ANSI = /\u001B\[[0-9;]*[A-Za-z]/g
 const outputText = 'whitespace-pre-wrap break-words px-1 font-mono text-[12px] leading-relaxed'
 

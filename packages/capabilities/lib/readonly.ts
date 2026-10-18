@@ -15,7 +15,7 @@ const PROGRAMS: Record<string, ((args: string[], raw: string) => boolean) | null
     fd: args => args.some(a => /^(-x|-X|--exec|--exec-batch)(=|$)/.test(a)),
     ls: null,
     eza: null,
-    tree: args => args.some(a => /^-o/.test(a)),
+    tree: args => args.some(a => a.startsWith('-o')),
     pwd: null,
     echo: null,
     printf: null,
@@ -54,7 +54,7 @@ const PROGRAMS: Record<string, ((args: string[], raw: string) => boolean) | null
     nl: null,
     true: null,
     // sed only prints with -n, and its w / W / e commands write or run.
-    sed: (args, raw) => args[0] !== '-n' || args.some(a => /^(-i|--in-place)/.test(a)) || /(^|[\s'";}/])\d*,?\d*\s*[wWe](\s|['"]|$)/.test(raw.replace(/^sed\s+-n/, '')),
+    sed: (args, raw) => args[0] !== '-n' || args.some(a => /^(-i|--in-place)/.test(a)) || /(^|[\s'";}/])\d*(?:,\d*)?\s*[wWe](\s|['"]|$)/.test(raw.replace(/^sed\s+-n/, '')),
 }
 
 const GIT_READ = new Set(['status', 'log', 'diff', 'show', 'blame', 'shortlog', 'describe', 'rev-parse', 'ls-files', 'ls-tree', 'cat-file'])

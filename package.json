@@ -17,6 +17,7 @@
         "postinstall": "node scripts/dev-app-name.mjs && node scripts/pty-helper.mjs",
         "build": "tsc -b && vite build",
         "typecheck": "tsc -b",
+        "lint": "eslint .",
         "test": "vitest run",
         "density": "bun --tsconfig-override=tsconfig.node.json test/density.ts",
         "e2e:windows": "bun --tsconfig-override=tsconfig.node.json test/windows.ts",
@@ -83,6 +84,7 @@
         "tailwind-merge": "3.2.0"
     },
     "devDependencies": {
+        "@antfu/eslint-config": "4.13.0",
         "@earendil-works/pi-coding-agent": "1.0.3",
         "@lobehub/icons-static-svg": "1.95.1",
         "@tailwindcss/typography": "0.5.16",
@@ -95,6 +97,7 @@
         "autoprefixer": "10.4.21",
         "electron": "37.10.3",
         "electron-builder": "26.15.3",
+        "eslint": "9.26.0",
         "node-pty": "1.1.0",
         "pi-capabilities": "workspace:*",
         "postcss": "8.5.3",

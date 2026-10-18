@@ -619,12 +619,8 @@ export class ProviderService {
      * or else the agent's; the first one on the agent's API is what the agent then uses.
      */
     async addChannel(save: ChannelSave): Promise<{ provider: string, model: string } | { listError: string }> {
-        try {
-            new URL(save.baseUrl.trim())
-        }
-        catch {
+        if (!URL.canParse(save.baseUrl.trim()))
             throw new Error(tr('地址不是有效的 URL', 'The address is not a valid URL'))
-        }
         const baseUrl = apiBaseUrl(save.baseUrl, save.api)
         const listed = save.model ? [{ id: save.model }] : await fetchEndpointModels(this.fetcher, baseUrl, save.api, save.apiKey).catch((error: Error) => error)
         if (listed instanceof Error || !listed.length)

@@ -30,7 +30,7 @@ describe('capability package files', () => {
     const files = ['extensions', 'tui', 'lib'].flatMap(d => existsSync(path.join(root, d)) ? readdirSync(path.join(root, d)).filter(f => f.endsWith('.ts')).map(f => `${d}/${f}`) : [])
     it.each(files)('%s imports only what pi provides at runtime', (file) => {
         const source = readFileSync(path.join(root, file), 'utf8')
-        const valueImports = [...source.matchAll(/^import\s+(?!type\s)[^'"]*?from\s+'([^']+)'/gm)].map(m => m[1])
+        const valueImports = [...source.matchAll(/^import(?!\s+type\s)[^'"]*?from\s+'([^']+)'/gm)].map(m => m[1])
         const outside = valueImports.filter(spec => spec.startsWith('.') && path.relative(root, path.resolve(root, path.dirname(file), spec)).startsWith('..'))
         expect(outside).toEqual([])
         expect(valueImports.filter(spec => !spec.startsWith('.') && !spec.startsWith('node:') && spec !== 'typebox' && !spec.startsWith('@earendil-works/'))).toEqual([])

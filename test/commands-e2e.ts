@@ -58,7 +58,6 @@ function modelServer() {
                     ev('message_delta', { delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 20 } })
                     ev('message_stop', {})
                     res.end()
-                    return
                 }
                 // Claude Code's /compact asks for a summary as the last message: real ones take many seconds.
                 const last = JSON.stringify(parsed.messages?.at(-1)?.content ?? '')

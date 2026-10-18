@@ -181,7 +181,7 @@ async function main() {
         await until('the prompt templates', () => js<boolean>(`${T}.commands.some(c => c.name === 'greet')`))
         check(await pickerButton(), 'the composer has a Skills button')
         await until('the picker', () => js<boolean>(`!!document.querySelector('#command-picker-list')`))
-        let listed = await options()
+        const listed = await options()
         check(listed.includes('greet') && listed.includes('added-later'), `the picker lists the prompt templates (${listed.join(', ')})`)
         const withControls = ['compact', 'model', 'thinking', 'tree', 'fork', 'clone', 'reload', 'name', 'autopilot', 'review']
         check(withControls.every(n => !listed.includes(n)), 'and none of the commands the app has a control for')

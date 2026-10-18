@@ -51,7 +51,7 @@ assistant.updateContent = function (message: any, ...rest: unknown[]) {
 const reason = (error: string) => {
 	if (/overload|\b529\b/i.test(error)) return "Overloaded";
 	if (/rate.?limit|\b429\b/i.test(error)) return "Rate limited";
-	if (/timed? ?out|timeout/i.test(error)) return "Request timed out";
+	if (/timed? ?out/i.test(error)) return "Request timed out";
 	if (/ECONN|socket|network|fetch failed|connection/i.test(error)) return "Connection error";
 	return truncateToWidth(error.split("\n")[0] || "Unknown error", 40, "…");
 };

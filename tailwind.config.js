@@ -12,7 +12,6 @@ import plugin from 'tailwindcss/plugin'
 const SHADES = [50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 950]
 const HUES = ['red', 'orange', 'amber', 'yellow', 'green', 'emerald', 'blue']
 const rgb = hex => [1, 3, 5].map(i => Number.parseInt(hex.slice(i, i + 2), 16)).join(' ')
-const gray = v => `${v} ${v} ${v}`
 /** JetBrains "Islands" dark neutrals (slightly cool), lightest last; tuned against the #1e1f22 editor. */
 const DARK_GRAY = { 50: '34 35 39', 100: '43 45 48', 200: '57 59 64', 300: '78 81 87', 400: '111 115 122', 500: '134 138 145', 600: '157 161 168', 700: '180 184 191', 800: '206 208 214', 900: '223 225 229', 950: '240 241 242' }
 /**

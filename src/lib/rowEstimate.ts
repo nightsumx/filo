@@ -70,7 +70,7 @@ export function markdownHeight(text: string, width: number): { height: number, l
         blank = false
         if (line.startsWith('|')) {
             // The |---| separator row draws nothing.
-            if (!/^\|[\s:|-]+\|?$/.test(line))
+            if (!/^\|[\s:|-]+$/.test(line))
                 height += TABLE_ROW
             continue
         }

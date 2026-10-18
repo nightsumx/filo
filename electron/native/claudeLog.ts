@@ -308,7 +308,6 @@ function commandOutput(r: ClaudeRecord): string {
     const content = r.message?.content ?? r.content
     const t = typeof content === 'string' ? content : blocksOf(r).filter(b => b?.type === 'text').map(b => str(b.text)).join('\n')
     const m = /^<local-command-(?:stdout|stderr)>([\s\S]*?)<\/local-command-(?:stdout|stderr)>$/.exec(t.trim())
-    // eslint-disable-next-line no-control-regex
     const plain = m ? m[1].replace(/\u001B\[[0-9;]*[A-Za-z]/g, '') : ''
     // Claude Code lists the hooks that ran ("PreCompact [<url>] completed successfully"): ours are not the user's to see.
     return plain.split('\n').filter(line => !line.includes('/claude-hook/')).join('\n')
