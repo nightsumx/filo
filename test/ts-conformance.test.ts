@@ -46,7 +46,7 @@ async function editorErrors(configPath: string, files: string[], base = root): P
     clearTSServiceCache()
     const first = files[0]
     const config = await loadConfig(ts, nodeProjectFs, first, base)
-    expect(config.path).toBe(configPath)
+    expect(config.path).toBe(slashed(configPath))
     const project = new Project(ts, nodeProjectFs, config, { files: 5000, bytes: 200 * 1024 * 1024 })
     await project.add([{ path: first, text: readFileSync(first, 'utf8') }])
     await project.loadAmbient()

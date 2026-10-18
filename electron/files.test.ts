@@ -46,13 +46,13 @@ describe('projectSources', () => {
         await writeFile(path.join(dir, '.gitignore'), 'gen/\n')
         for (const f of ['src/a.ts', 'src/b.tsx', 'src/c.mts', 'src/d.js', 'src/readme.md', 'gen/x.ts', 'node_modules/p/i.ts', 'packages/q/node_modules/r/i.ts'])
             await touch(f)
-        expect((await projectSources(dir)).map(f => path.relative(dir, f)).sort()).toEqual(['src/a.ts', 'src/b.tsx', 'src/c.mts', 'src/d.js'])
+        expect((await projectSources(dir)).map(f => path.relative(dir, f).replace(/\\/g, '/')).sort()).toEqual(['src/a.ts', 'src/b.tsx', 'src/c.mts', 'src/d.js'])
     })
 
     it('walks the folder outside a repository, skipping dependencies, build output and dot folders', async () => {
         for (const f of ['src/a.ts', 'src/deep/b.ts', 'node_modules/p/i.ts', 'dist/o.js', '.cache/c.ts', 'src/readme.md'])
             await touch(f)
-        expect((await projectSources(dir)).map(f => path.relative(dir, f))).toEqual(['src/a.ts', 'src/deep/b.ts'])
+        expect((await projectSources(dir)).map(f => path.relative(dir, f).replace(/\\/g, '/'))).toEqual(['src/a.ts', 'src/deep/b.ts'])
     })
 
     it('stops at the cap', async () => {

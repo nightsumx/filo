@@ -137,11 +137,12 @@ describe('importSession (pi\'s /import)', () => {
         return file
     }
 
-    it('names the folder as pi does: the cwd without its leading slash, separators as dashes', async () => {
+    // pi resolves '/Users/me/proj' against the current drive on Windows ('--D--Users-me-proj--'); these two use POSIX paths.
+    it.skipIf(path.sep === '\\')('names the folder as pi does: the cwd without its leading slash, separators as dashes', async () => {
         expect(await sessionDirFor('/Users/me/proj')).toBe(path.join(dir, 'sessions', '--Users-me-proj--'))
     })
 
-    it('copies the file into its own project\'s folder and keeps the original', async () => {
+    it.skipIf(path.sep === '\\')('copies the file into its own project\'s folder and keeps the original', async () => {
         const file = await write('a.jsonl', header, user('u1', null, 'hello'))
         const { summary, movedTo } = await importSession(file, '/other', ['/repo', '/other'])
         expect(movedTo).toBeUndefined()

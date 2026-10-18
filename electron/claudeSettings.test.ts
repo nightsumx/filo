@@ -52,8 +52,8 @@ describe('claudeMcpServers', () => {
     afterEach(() => rm(dir, { recursive: true, force: true }))
 
     it('puts .claude.json inside CLAUDE_CONFIG_DIR when it is set, else in the home folder', () => {
-        expect(claudeJsonPath({ CLAUDE_CONFIG_DIR: '/c' }, '/h')).toBe('/c/.claude.json')
-        expect(claudeJsonPath({}, '/h')).toBe('/h/.claude.json')
+        expect(claudeJsonPath({ CLAUDE_CONFIG_DIR: '/c' }, '/h')).toBe(path.join('/c', '.claude.json'))
+        expect(claudeJsonPath({}, '/h')).toBe(path.join('/h', '.claude.json'))
     })
 
     it('lists the project\'s own, the team\'s .mcp.json and the user\'s servers', async () => {
