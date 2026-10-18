@@ -354,6 +354,29 @@ async function main() {
             await js(`(() => { window.__app.setSettingsOpen(false); return true })()`)
         }
 
+        // Settings → Codex apps (/apps) and memories (/memories). Apps need a ChatGPT sign-in, so the list is empty here;
+        // the switch's write is Codex's own `apps.<id>.enabled`, checked through the app's IPC.
+        await js(`(() => { window.__app.openSettings('codex'); return true })()`)
+        await until('the Apps section', () => js<boolean>(`!!document.querySelector('[data-apps]')`))
+        check(await js<boolean>(`document.querySelector('[data-apps]').textContent.includes('No apps available')`), 'Apps lists what app/list returns: nothing without a ChatGPT sign-in, and says so')
+        await js(`(() => { void window.pi.setCodexApp('connector_demo', false); return true })()`)
+        await until('apps.connector_demo.enabled = false in config.toml', async () => /\[apps\.connector_demo\][\t\v\f\r \xa0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]*\n\s*enabled = false/.test(await readFile(path.join(home, 'config.toml'), 'utf8')))
+        check(true, 'the app switch writes apps.<id>.enabled')
+        await until('the memory status', () => js<boolean>(`!!document.querySelector('[data-memory-status]')`))
+        check(await js<boolean>(`document.querySelector('[data-memory-status]').textContent.includes('0 conversations consolidated')`), 'Memories shows memory/status')
+        await mkdir(path.join(home, 'memories'), { recursive: true })
+        await writeFile(path.join(home, 'memories', 'note.md'), 'remember this')
+        await js(`(() => { document.querySelector('[data-memory-reset]').click(); return true })()`)
+        await until('the confirmation', () => js<boolean>(`[...document.querySelectorAll('[role="alertdialog"] button, [role="dialog"] button')].some(b => b.textContent.trim() === 'Clear')`))
+        check(existsSync(path.join(home, 'memories', 'note.md')), 'nothing is deleted before the confirmation')
+        await js(`(() => { [...document.querySelectorAll('[role="alertdialog"] button, [role="dialog"] button')].find(b => b.textContent.trim() === 'Clear').click(); return true })()`)
+        await until('the memory file gone', async () => !existsSync(path.join(home, 'memories', 'note.md')))
+        check(true, 'Clear memories runs memory/reset: the files are gone')
+        await js(`(() => { document.querySelector('[data-memory-status]').scrollIntoView({ block: 'center' }); return true })()`)
+        if (SHOTS)
+            await page.screenshot(path.join(SHOTS, 'codex-apps-memory.png'))
+        await js(`(() => { window.__app.setSettingsOpen(false); return true })()`)
+
         // Settings → Codex plugins (/plugins): a marketplace in the project, installed, switched off and uninstalled.
         {
             const toml = () => readFile(path.join(home, 'config.toml'), 'utf8')
@@ -373,6 +396,7 @@ async function main() {
             await until('plugins.hello@local-test disabled in config.toml', async () => /hello@local-test[^\n]*\][ \t]*\n\s*enabled = false/.test(await toml()))
             await until('the switch off', () => js<boolean>(`${plugin}.querySelector('[role="switch"]').getAttribute('aria-checked') === 'false'`))
             check(true, 'its switch writes plugins.<id>.enabled in config.toml')
+            await js(`(() => { document.querySelector('[data-marketplace-form]').scrollIntoView({ block: 'center' }); return true })()`)
             if (SHOTS)
                 await page.screenshot(path.join(SHOTS, 'codex-plugins.png'))
             await js(`(() => { ${buttonOf('Uninstall')}.click(); return true })()`)

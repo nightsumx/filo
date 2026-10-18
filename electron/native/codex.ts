@@ -9,7 +9,7 @@
 // edit / delete per file with the unified diff as the edit's patch.
 
 import type { AcpAgentCaps, AcpAgentSpec, AcpConfigOption } from '@shared/agents'
-import type { CodexMarketplace, CodexPlugin, CodexPluginChange, CodexPlugins, SessionItem } from '@shared/ipc'
+import type { CodexApp, CodexMarketplace, CodexMemory, CodexPlugin, CodexPluginChange, CodexPlugins, SessionItem } from '@shared/ipc'
 import type { AgentMessage, ImageContent, PiEvent, PiModel, RpcResponse, ToolCall } from '@shared/pi'
 import type { ApprovalChoice, ApprovalRequest, AskAnswer, AskQuestion, AskResponse, PlanDecision, SubagentDetails } from '@shared/capabilities'
 import type { AgentAdapter, AgentAdapterCallbacks, AgentAdapterOptions } from '../acp/adapter'
@@ -2036,6 +2036,55 @@ export function codexFeatures(launch: CodexLaunch): Promise<CodexFeature[]> {
 export function setCodexFeature(launch: CodexLaunch, name: string, enabled: boolean): Promise<void> {
     return withAppServer(launch, async (rpc) => {
         await rpc('config/batchWrite', { edits: [{ keyPath: `features.${name}`, value: enabled, mergeStrategy: 'replace' }] })
+    })
+}
+
+// ---------------------------------------------------------------- apps (/apps) and memories (/memories)
+
+/** The apps (connectors) Codex lists; empty without a ChatGPT sign-in. */
+export function codexApps(launch: CodexLaunch): Promise<CodexApp[]> {
+    return withAppServer(launch, async (rpc) => {
+        const apps: CodexApp[] = []
+        let cursor: string | undefined
+        for (let page = 0; page < 10; page++) {
+            const result = await rpc('app/list', cursor ? { cursor } : {})
+            apps.push(...parseCodexApps(result?.data))
+            cursor = typeof result?.nextCursor === 'string' && result.nextCursor ? result.nextCursor : undefined
+            if (!cursor)
+                break
+        }
+        return apps
+    })
+}
+
+export function parseCodexApps(data: unknown): CodexApp[] {
+    return (Array.isArray(data) ? data : []).filter(isObject).filter(a => typeof a.id === 'string').map((a): CodexApp => ({
+        id: a.id,
+        name: typeof a.name === 'string' && a.name ? a.name : a.id,
+        description: typeof a.description === 'string' ? a.description : '',
+        accessible: a.isAccessible === true,
+        enabled: a.isEnabled !== false,
+    }))
+}
+
+/** `apps.<id>.enabled` in the user's config.toml, as Codex documents it. */
+export function setCodexApp(launch: CodexLaunch, id: string, enabled: boolean): Promise<void> {
+    return withAppServer(launch, async (rpc) => {
+        await rpc('config/batchWrite', { edits: [{ keyPath: `apps.${id}.enabled`, value: enabled, mergeStrategy: 'replace' }] })
+    })
+}
+
+export function codexMemory(launch: CodexLaunch): Promise<CodexMemory> {
+    return withAppServer(launch, async (rpc) => {
+        const status = await rpc('memory/status', {})
+        return { consolidated: typeof status?.v2ConsolidatedThreads === 'number' ? status.v2ConsolidatedThreads : 0, ready: status?.v2Ready === true }
+    })
+}
+
+/** Forget everything Codex remembered (its /memories reset): the files under CODEX_HOME's memories folders go. */
+export function resetCodexMemory(launch: CodexLaunch): Promise<void> {
+    return withAppServer(launch, async (rpc) => {
+        await rpc('memory/reset', undefined)
     })
 }
 

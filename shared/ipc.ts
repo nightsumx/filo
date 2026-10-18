@@ -497,6 +497,23 @@ export interface CodexFeature {
     enabled: boolean
 }
 
+/** An app (connector) Codex lists in its /apps; it needs a ChatGPT sign-in, so an API-key user sees none. */
+export interface CodexApp {
+    id: string
+    name: string
+    description: string
+    /** Whether the app can be used (it is installed and connected). */
+    accessible: boolean
+    /** `apps.<id>.enabled` in config.toml; on unless that says off. */
+    enabled: boolean
+}
+
+/** Codex's memories (its /memories): how many conversations it has consolidated, and whether that is enough to use them. */
+export interface CodexMemory {
+    consolidated: number
+    ready: boolean
+}
+
 /** Claude Code's memory (its /memory): the switch for auto memory, and the files it reads and writes. */
 export interface ClaudeMemory {
     enabled: boolean
@@ -703,6 +720,10 @@ export interface PiBridge {
     changeCodexPlugins: (cwd: string, change: CodexPluginChange) => Promise<CodexPlugins>
     codexFeatures: () => Promise<CodexFeature[]>
     setCodexFeature: (name: string, enabled: boolean) => Promise<CodexFeature[]>
+    codexApps: () => Promise<CodexApp[]>
+    setCodexApp: (id: string, enabled: boolean) => Promise<CodexApp[]>
+    codexMemory: () => Promise<CodexMemory>
+    resetCodexMemory: () => Promise<CodexMemory>
     claudeMemory: (cwd: string) => Promise<ClaudeMemory>
     /** autoMemoryEnabled in Claude Code's settings.json. */
     setClaudeAutoMemory: (enabled: boolean) => Promise<void>
@@ -906,6 +927,10 @@ export const IPC = {
     changeCodexPlugins: 'codex:plugins-change',
     codexFeatures: 'codex:features',
     setCodexFeature: 'codex:set-feature',
+    codexApps: 'codex:apps',
+    setCodexApp: 'codex:set-app',
+    codexMemory: 'codex:memory',
+    resetCodexMemory: 'codex:reset-memory',
     setClaudeAutoMemory: 'claude:set-auto-memory',
     addClaudeMcp: 'claude:mcp-add',
     removeClaudeMcp: 'claude:mcp-remove',

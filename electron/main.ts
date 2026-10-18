@@ -17,7 +17,7 @@ import { DEFAULT_THEME, IPC, THEME_PREFS } from '@shared/ipc'
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, net, Notification, shell } from 'electron'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { changeCodexPlugins, codexFeatures, codexPlugins, codexMcpServers, setCodexFeature, writeCodexMcp } from './native/codex'
+import { changeCodexPlugins, codexApps, codexFeatures, codexMemory, codexPlugins, codexMcpServers, resetCodexMemory, setCodexApp, setCodexFeature, writeCodexMcp } from './native/codex'
 import { AcpService } from './acp/service'
 import { claudeMcpServers, codexMcpTable, codexPluginChange, codexServerName, claudeMemory, setClaudeAutoMemory, mcpAddArgs, mcpRemoveArgs } from './claudeSettings'
 import { AgentManager } from './agents'
@@ -634,6 +634,20 @@ function registerIpc() {
         const launch = await codexLaunch()
         await setCodexFeature(launch, codexServerName(name), enabled)
         return codexFeatures(launch)
+    })
+    ipcMain.handle(IPC.codexApps, async () => codexApps(await codexLaunch()))
+    ipcMain.handle(IPC.setCodexApp, async (_e, id: unknown, enabled: unknown) => {
+        if (typeof enabled !== 'boolean')
+            throw new Error('expected true or false')
+        const launch = await codexLaunch()
+        await setCodexApp(launch, codexServerName(id), enabled)
+        return codexApps(launch)
+    })
+    ipcMain.handle(IPC.codexMemory, async () => codexMemory(await codexLaunch()))
+    ipcMain.handle(IPC.resetCodexMemory, async () => {
+        const launch = await codexLaunch()
+        await resetCodexMemory(launch)
+        return codexMemory(launch)
     })
     ipcMain.handle(IPC.claudeMemory, (_e, cwd: unknown) => claudeMemory(absolutePath(cwd)))
     ipcMain.handle(IPC.setClaudeAutoMemory, (_e, enabled: unknown) => setClaudeAutoMemory(enabled))

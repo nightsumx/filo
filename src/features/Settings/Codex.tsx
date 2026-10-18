@@ -1,7 +1,7 @@
 // Settings → Codex: what its terminal commands /mcp and /experimental do. Everything is Codex's own: the
 // servers and features are tables in its config.toml (written through its app-server's config/batchWrite),
 // so the terminal's `codex` sees the same. Nothing is kept here.
-import type { CodexFeature, CodexMcpServer, CodexPluginChange, CodexPlugins } from '@shared/ipc'
+import type { CodexApp, CodexFeature, CodexMcpServer, CodexMemory, CodexPluginChange, CodexPlugins } from '@shared/ipc'
 import { Button } from '@/components/ui/button'
 import { Comment, flatFieldClass, Segmented, SettingRow, SettingsPage, Switch } from '@/components/ui/form'
 import { confirm } from '@/lib/confirm'
@@ -246,7 +246,7 @@ const PluginsSection = observer(() => {
                     placeholder={tr('添加插件源：owner/repo、Git 地址或本地目录', 'Add a marketplace: owner/repo, a Git URL or a local folder')}
                     value={source}
                     onChange={e => setSource(e.target.value)}
-                    className={`${flatFieldClass} font-mono`}
+                    className={`${flatFieldClass} min-w-0 flex-1 font-mono`}
                 />
                 <Button
                     variant="outline"
@@ -261,10 +261,98 @@ const PluginsSection = observer(() => {
     )
 })
 
+const AppsSection = observer(() => {
+    const [apps, setApps] = useState<CodexApp[]>()
+    useEffect(() => {
+        void window.pi.codexApps().then(setApps, () => setApps([]))
+    }, [])
+    if (!apps)
+        return null
+    const toggle = async (app: CodexApp, enabled: boolean) => {
+        try {
+            setApps(await window.pi.setCodexApp(app.id, enabled))
+        }
+        catch (error: any) {
+            toast.error(tr('保存失败', 'Could not save'), { description: error.message })
+        }
+    }
+    return (
+        <SettingRow
+            title={tr('应用', 'Apps')}
+            description={tr(
+                '连接到 ChatGPT 账号的应用（Codex 的 /apps）。需要用 ChatGPT 登录，只用 API key 时这里是空的。新开的线程生效。',
+                'Apps connected to your ChatGPT account (Codex\'s /apps). They need a ChatGPT sign-in, so with only an API key this stays empty. New threads use them.',
+            )}
+            control={() => null}
+        >
+            <ul className="m-0 mt-2 flex list-none flex-col gap-1 p-0" data-apps>
+                {apps.length === 0 && <Comment>{tr('没有可用的应用。', 'No apps available.')}</Comment>}
+                {apps.map(app => (
+                    <li key={app.id} className="flex items-center gap-2 rounded-[6px] bg-[var(--jb-fill)] px-3 py-2 text-[13px]" data-app={app.id}>
+                        <Switch checked={app.enabled} labelledBy={`app-${app.id}`} onChange={v => void toggle(app, v)} />
+                        <span id={`app-${app.id}`} className="font-medium text-gray-900">{app.name}</span>
+                        {!app.accessible && <span className="text-[11px] text-[var(--jb-comment)]">{tr('未连接', 'Not connected')}</span>}
+                        {app.description && <span className="min-w-0 flex-1 truncate text-[12px] text-gray-600">{app.description}</span>}
+                    </li>
+                ))}
+            </ul>
+        </SettingRow>
+    )
+})
+
+const MemorySection = observer(() => {
+    const [memory, setMemory] = useState<CodexMemory>()
+    const [busy, setBusy] = useState(false)
+    useEffect(() => {
+        void window.pi.codexMemory().then(setMemory, () => setMemory(undefined))
+    }, [])
+    if (!memory)
+        return null
+    const reset = async () => {
+        if (!await confirm({
+            title: tr('清空 Codex 的记忆？', 'Clear Codex\'s memories?'),
+            description: tr('它从以往对话里记下的内容会被删除，终端里的 codex 也一样。这不能撤销。', 'What it remembered from past conversations is deleted, for the terminal\'s codex too. This cannot be undone.'),
+            confirmText: tr('清空', 'Clear'),
+        }))
+            return
+        setBusy(true)
+        try {
+            setMemory(await window.pi.resetCodexMemory())
+            toast.success(tr('已清空', 'Cleared'))
+        }
+        catch (error: any) {
+            toast.error(tr('清空失败', 'Could not clear'), { description: error.message })
+        }
+        finally {
+            setBusy(false)
+        }
+    }
+    return (
+        <SettingRow
+            title={tr('记忆', 'Memories')}
+            description={tr(
+                'Codex 从以往对话里整理出的记忆（它的 /memories）。开关在下面的实验功能里。',
+                'What Codex distilled from past conversations (its /memories). The switch is among the experimental features below.',
+            )}
+            control={() => <Button variant="outline" size="sm" disabled={busy} onClick={() => void reset()} data-memory-reset>{tr('清空记忆', 'Clear memories')}</Button>}
+        >
+            <Comment className="mt-2">
+                <span data-memory-status>
+                    {memory.ready
+                        ? tr(`已整理 ${memory.consolidated} 个对话，可以使用。`, `${memory.consolidated} conversations consolidated; ready to use.`)
+                        : tr(`已整理 ${memory.consolidated} 个对话，还不够使用。`, `${memory.consolidated} conversations consolidated; not enough to use yet.`)}
+                </span>
+            </Comment>
+        </SettingRow>
+    )
+})
+
 export const CodexPage = observer(() => (
     <SettingsPage title="Codex">
         <McpSection />
         <PluginsSection />
+        <AppsSection />
+        <MemorySection />
         <FeaturesSection />
     </SettingsPage>
 ))

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { elicitContent, elicitForm } from './codex'
+import { elicitContent, elicitForm, parseCodexApps } from './codex'
 
 describe('MCP elicitation forms', () => {
     const schema = {
@@ -33,5 +33,22 @@ describe('MCP elicitation forms', () => {
         // Left out: not sent.
         expect(elicitContent(fields, { size: { selected: ['Small'] } })).toEqual({ size: 's' })
         expect(elicitContent(fields, { ratio: { selected: [], text: 'half' } })).toBeUndefined()
+    })
+})
+
+describe('parseCodexApps', () => {
+    it('reads the apps app/list returns: off only when config says so, name falling back to the id', () => {
+        expect(parseCodexApps([
+            { id: 'connector_a', name: 'Calendar', description: 'Your events', isAccessible: true, isEnabled: true },
+            { id: 'connector_b', name: '', description: null, isAccessible: false, isEnabled: false },
+            { id: 'connector_c', name: 'Mail' },
+            { name: 'no id' },
+            'junk',
+        ])).toEqual([
+            { id: 'connector_a', name: 'Calendar', description: 'Your events', accessible: true, enabled: true },
+            { id: 'connector_b', name: 'connector_b', description: '', accessible: false, enabled: false },
+            { id: 'connector_c', name: 'Mail', description: '', accessible: false, enabled: true },
+        ])
+        expect(parseCodexApps(undefined)).toEqual([])
     })
 })
