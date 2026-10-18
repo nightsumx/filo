@@ -44,7 +44,7 @@ async function main() {
     const agentDir = path.join(WORK, 'agent')
     await Promise.all([path.join(repo, 'src'), path.join(repo, 'node_modules/dep'), userData, agentDir].map(d => mkdir(d, { recursive: true })))
     const main = path.join(repo, 'src/main.ts')
-    await writeFile(main, 'export function hello(name: string) {\n    return `hello ${name}`\n}\n')
+    await writeFile(main, '// A greeting\nimport { join } from \'node:path\'\n\nexport interface Greeting { text: string, times: number }\n\nexport function hello(name: string, times = 2): Greeting {\n    const text = `hello ${join(name)}`\n    return { text, times }\n}\n')
     await writeFile(path.join(repo, 'README.md'), '# repo\n')
     await writeFile(path.join(repo, '.gitignore'), 'node_modules\n')
     await writeFile(path.join(repo, 'node_modules/dep/index.js'), '\n')
@@ -95,6 +95,14 @@ async function main() {
         check(await page.evaluate<boolean>(`[...document.querySelectorAll('[role=tab]')].some(t => t.textContent.includes('main.ts'))`), 'double click opens the file in an editor tab')
         await until('syntax colours', () => page.evaluate<boolean>(`document.querySelectorAll('.cm-content span[style*="color"]').length > 3`), 5000)
         check(true, 'the editor colours the syntax')
+        if (SHOTS)
+            await page.screenshot(path.join(SHOTS, 'files-code-dark.png'))
+        await page.evaluate(`window.__app.setTheme('light')`)
+        await new Promise(r => setTimeout(r, 600))
+        if (SHOTS)
+            await page.screenshot(path.join(SHOTS, 'files-code-light.png'))
+        await page.evaluate(`window.__app.setTheme('dark')`)
+        await new Promise(r => setTimeout(r, 400))
 
         // Typing: autosaved shortly after.
         await click(page, '.cm-line')

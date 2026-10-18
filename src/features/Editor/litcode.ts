@@ -10,9 +10,9 @@ import { createJavaScriptRegexEngine } from 'shiki/engine/javascript'
 import { tr } from '@/lib/i18n'
 import { toLf } from '@/lib/textEdit'
 
-/** Same family as the code blocks in the transcript (highlight.js github-dark / GitHub light). */
-export const DARK_THEME = 'github-dark'
-export const LIGHT_THEME = 'github-light'
+/** VS Code's own defaults, so a file reads the same here as in VS Code (the transcript's code blocks keep highlight.js's GitHub colours). */
+export const DARK_THEME = 'dark-plus'
+export const LIGHT_THEME = 'light-plus'
 
 // TypeScript's lib.*.d.ts go into the bundle as lazy chunks: completions and hover work offline,
 // and the editor never reaches out to jsdelivr. A failed load throws, which keeps lite-monaco from
