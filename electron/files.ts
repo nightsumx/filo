@@ -80,33 +80,47 @@ export async function realPathOf(file: string): Promise<string> {
 
 /** Most files a project listing returns; a repository with more is not one an editor should read whole. */
 export const MAX_PROJECT_SOURCES = 6000
-const SOURCE = /\.(?:[cm]?[jt]s|[jt]sx)$/
+const SOURCE = /\.(?:[cm]?[jt]s|[jt]sx|vue)$/
 /** Folders a walk (outside git) never enters. */
 const NOT_SOURCE_DIRS = new Set(['node_modules', '.git', 'dist', 'build', 'out', 'release', 'coverage', '.next', '.nuxt', '.turbo', '.cache', '.venv', 'target', 'vendor'])
 
-/** Source files under `root`: what git lists (tracked and untracked, not ignored), else a bounded walk. */
-export async function projectSources(root: string): Promise<string[]> {
+/** Files under `root` whose names match: what git lists (tracked and untracked, not ignored), else a bounded walk. */
+async function projectFiles(root: string, wanted: RegExp, cap: number): Promise<string[]> {
     const listed = await new Promise<string[] | null>((resolve) => {
         execFile('git', ['ls-files', '-z', '-co', '--exclude-standard'], { cwd: root, timeout: 15_000, maxBuffer: 64 * 1024 * 1024 }, (error, stdout) => {
-            resolve(error ? null : String(stdout).split('\0').filter(f => SOURCE.test(f)))
+            resolve(error ? null : String(stdout).split('\0').filter(f => wanted.test(f.slice(f.lastIndexOf('/') + 1))))
         })
     })
     if (listed)
-        return listed.filter(f => !f.split('/').includes('node_modules')).slice(0, MAX_PROJECT_SOURCES).map(f => path.join(root, f))
+        return listed.filter(f => !f.split('/').includes('node_modules')).slice(0, cap).map(f => path.join(root, f))
     const out: string[] = []
     const walk = async (dir: string, depth: number): Promise<void> => {
-        if (out.length >= MAX_PROJECT_SOURCES || depth > 12)
+        if (out.length >= cap || depth > 12)
             return
         const dirents = await readdir(dir, { withFileTypes: true }).catch(() => [])
         await Promise.all(dirents.map(async (d) => {
             if (d.isDirectory() && !NOT_SOURCE_DIRS.has(d.name) && !d.name.startsWith('.'))
                 await walk(path.join(dir, d.name), depth + 1)
-            else if (d.isFile() && SOURCE.test(d.name) && out.length < MAX_PROJECT_SOURCES)
+            else if (d.isFile() && wanted.test(d.name) && out.length < cap)
                 out.push(path.join(dir, d.name))
         }))
     }
     await walk(root, 0)
     return out.sort()
+}
+
+/** Source files under `root` (git's list, else a walk). */
+export function projectSources(root: string): Promise<string[]> {
+    return projectFiles(root, SOURCE, MAX_PROJECT_SOURCES)
+}
+
+/** Most project configs a listing returns. */
+export const MAX_PROJECT_CONFIGS = 60
+const TS_CONFIG = /^[jt]sconfig\.json$/
+
+/** The tsconfig.json and jsconfig.json files under `root` (git's list, else a walk). */
+export function projectConfigs(root: string): Promise<string[]> {
+    return projectFiles(root, TS_CONFIG, MAX_PROJECT_CONFIGS)
 }
 
 export async function readText(file: string): Promise<FileRead> {

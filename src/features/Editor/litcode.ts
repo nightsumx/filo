@@ -1,16 +1,20 @@
 // lite-monaco (litcode) for the editor tabs: one Shiki highlighter for the app, languages loaded as
-// files need them, colours from a VS Code theme with the app's own editor background, and the
-// TypeScript standard library bundled with the app instead of fetched from a CDN.
+// files need them, colours from a VS Code theme with the app's own editor background, the
+// TypeScript standard library bundled with the app instead of fetched from a CDN (src/lib/tsLibs.ts),
+// and the squiggles computed in a worker (src/lib/tsCheck.ts).
 import type { EditorIntel } from '@shared/ipc'
 import type { Highlighter } from 'shiki'
 import type { LitCodeFeatures, ShikiLike, ThemeColors } from 'lite-monaco'
 import type { FileTab } from '@/store/fileTab'
 import type { ProjectLink } from '@/store/codeIntel'
-import { core, litcode, setTsLibLoader } from 'lite-monaco'
+import { core, litcode } from 'lite-monaco'
 import { bundledLanguagesInfo, createHighlighter } from 'shiki'
 import { createJavaScriptRegexEngine } from 'shiki/engine/javascript'
 import { tr } from '@/lib/i18n'
 import { toLf } from '@/lib/textEdit'
+import { installTsLibs } from '@/lib/tsLibs'
+import { embeddedLink, embeddedOf, installWebProviders, webExtensions, webKit, WEB_LANGS } from '@/lib/web/session'
+import type { WebKit } from '@/lib/web/session'
 import { appStore } from '@/store/app'
 import { codeIntel } from '@/store/codeIntel'
 import { fileKey } from '@/store/fileTab'
@@ -19,16 +23,8 @@ import { fileKey } from '@/store/fileTab'
 export const DARK_THEME = 'dark-plus'
 export const LIGHT_THEME = 'light-plus'
 
-// TypeScript's lib.*.d.ts go into the bundle as lazy chunks: completions and hover work offline,
-// and the editor never reaches out to jsdelivr. A failed load throws, which keeps lite-monaco from
-// falling back to the CDN.
-const tsLibs = import.meta.glob<string>('/node_modules/typescript/lib/lib.*.d.ts', { query: '?raw', import: 'default' })
-setTsLibLoader(async () => {
-    const entries = await Promise.all(Object.entries(tsLibs).map(async ([path, load]) => [path.slice(path.lastIndexOf('/') + 1), await load()] as const))
-    if (!entries.length)
-        throw new Error('TypeScript libs are not bundled')
-    return new Map(entries)
-})
+installTsLibs()
+installWebProviders()
 
 let shared: Promise<Highlighter> | null = null
 
@@ -136,6 +132,8 @@ export interface EditorKit {
     level: EditorIntel
     /** What the TypeScript service gets of the project around the file; null when it gets none (light level, other languages). */
     project: ProjectLink | null
+    /** CSS, HTML and Vue: completion, hover, squiggles and jumps (src/lib/web). */
+    web?: WebKit | null
 }
 
 /** A link that works from the start and is wired to the real one when it arrives (or let go of at once if it was released first). */
@@ -154,6 +152,7 @@ export function lazyLink(attached: Promise<ProjectLink | null>): ProjectLink {
         sync: async (text) => {
             await (real ?? (await attached))?.sync(text)
         },
+        check: async req => (await (real ?? (await attached)))?.check(req) ?? null,
         release: () => {
             released = true
             real?.release()
@@ -175,7 +174,19 @@ export async function prepare(tab: FileTab, level: EditorIntel): Promise<EditorK
                 project = lazyLink(attached)
                 await Promise.race([attached, new Promise(resolve => setTimeout(resolve, 500))])
             }
-            return { hl, lang: language.id, languageName: language.name, level, project }
+            let web: WebKit | null = null
+            if (level !== 'light' && WEB_LANGS.has(language.id)) {
+                // A component's script goes to the TypeScript service as a file of its own; a page's too.
+                const text = tab.state?.doc.toString() ?? toLf(tab.base)
+                // A stylesheet has no script, so no project.
+                const attached = embeddedOf(tab, language.id) ? embeddedLink(tab, language.id, level, text).catch(() => null) : null
+                if (attached) {
+                    project = lazyLink(attached)
+                    await Promise.race([attached, new Promise(resolve => setTimeout(resolve, 500))])
+                }
+                web = webKit(tab, language.id, project)
+            }
+            return { hl, lang: language.id, languageName: language.name, level, project, web }
         }
         catch {}
     }
@@ -221,9 +232,10 @@ export function mountEditor(parent: HTMLElement, tab: FileTab, kit: EditorKit, d
     const theme = dark ? DARK_THEME : LIGHT_THEME
     // Go to definition into another file opens that file in a tab; lite-monaco would show a preview only.
     // Within the file it is lite-monaco's (this returns false and the key or click goes on to it).
-    const jumps = kit.level !== 'light' && TS_LANGS.has(kit.lang)
+    const web = kit.level !== 'light' ? kit.web ?? null : null
+    const jumps = kit.level !== 'light' && (TS_LANGS.has(kit.lang) || web !== null)
     let view!: core.EditorView
-    const target = (pos: number) => jumps ? codeIntel.definitionElsewhere(tab, kit.lang, view.state.doc.toString(), pos) : null
+    const target = (pos: number) => web ? web.resolve(view.state.doc.toString(), pos)?.to ?? null : jumps ? codeIntel.definitionElsewhere(tab, kit.lang, view.state.doc.toString(), pos) : null
     const go = (to: NonNullable<ReturnType<typeof target>>) => {
         appStore.openFile(to.path, tab.cwd)
         appStore.files.get(fileKey(to.path))?.goto(to.line, to.col)
@@ -245,8 +257,10 @@ export function mountEditor(parent: HTMLElement, tab: FileTab, kit: EditorKit, d
         // The tab's size follows the pane; lite-monaco defaults to Monaco's false and expects layout() calls.
         options: { automaticLayout: true },
         fileName: tab.path,
+        // The type check runs in a worker, once the project is indexed; the squiggles come back from there.
+        tsDiagnosticsRemote: kit.project ? req => kit.project?.check(req) ?? Promise.resolve(null) : undefined,
         features: kit.level === 'light' ? LIGHT_FEATURES : undefined,
-        extensions: jumps ? [linkField, linkDecorations] : undefined,
+        extensions: jumps ? [linkField, linkDecorations, ...(web ? webExtensions(web) : [])] : undefined,
         state: tab.state ?? undefined,
         doc: toLf(tab.base),
         keymap: [
@@ -315,7 +329,8 @@ export function mountEditor(parent: HTMLElement, tab: FileTab, kit: EditorKit, d
         if (looked.state === view.state && looked.at === at)
             return
         looked = { state: view.state, at }
-        const span = codeIntel.definitionSpan(tab, kit.lang, view.state.doc.toString(), at)
+        const text = view.state.doc.toString()
+        const span = web ? web.resolve(text, at)?.span ?? null : codeIntel.definitionSpan(tab, kit.lang, text, at)
         show(span && at >= span.from && at < span.to ? span : null)
     }
     const schedule = () => {
@@ -354,6 +369,7 @@ export function mountEditor(parent: HTMLElement, tab: FileTab, kit: EditorKit, d
         tab.setCursor(line.number, main.head - line.from + 1, selected)
     }
     report(view.state)
+    const stopWeb = web?.start(view)
     const stop = view.onTransaction((t) => {
         if (t.docChanged && !t.annotation(core.Transaction.remote))
             tab.edited()
@@ -384,6 +400,7 @@ export function mountEditor(parent: HTMLElement, tab: FileTab, kit: EditorKit, d
     const destroy = view.destroy.bind(view)
     view.destroy = () => {
         stop()
+        stopWeb?.()
         stopSync?.()
         clearTimeout(resync)
         view.contentDOM.removeEventListener('focusout', onFocusOut)

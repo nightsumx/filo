@@ -1,6 +1,8 @@
 // The editor's TypeScript project in the built app (no model calls), per level of Settings → Editor:
-//   - standard: imports (relative, tsconfig paths, packages with types, assets) resolve; a missing
-//     module still shows an error; ⌘-click / F12 on a name from another file opens that file
+//   - standard: the whole project is read once and the type check runs in a worker; imports
+//     (relative, tsconfig paths, packages with types, assets) resolve; a missing module still shows
+//     an error; ⌘-click / F12 on a name from another file opens that file
+//   - a project is indexed when it is shown, every tsconfig of it (a second package too), with no file opened
 //   - full: errors in files that are not open mark them (and their folders) red in the tree, and a
 //     file changed on disk is checked again
 //   - light: no diagnostics at all
@@ -19,7 +21,7 @@ async function main() {
     const repo = path.join(WORK, 'repo')
     const userData = path.join(WORK, 'userdata')
     const agentDir = path.join(WORK, 'agent')
-    await Promise.all([path.join(repo, 'src/lib'), path.join(repo, 'node_modules/dep'), userData, agentDir].map(d => mkdir(d, { recursive: true })))
+    await Promise.all([path.join(repo, 'src/lib'), path.join(repo, 'packages/other/src'), path.join(repo, 'node_modules/dep'), userData, agentDir].map(d => mkdir(d, { recursive: true })))
     const w = (f: string, text: string) => writeFile(path.join(repo, f), text)
     await w('tsconfig.json', JSON.stringify({ compilerOptions: { strict: true, module: 'esnext', moduleResolution: 'bundler', baseUrl: '.', paths: { '@/*': ['src/*'] } }, include: ['src'] }))
     await w('node_modules/dep/package.json', JSON.stringify({ name: 'dep', version: '1.0.0', types: 'index.d.ts' }))
@@ -29,8 +31,16 @@ async function main() {
     await w('src/other.ts', 'export const fine = 1\n')
     const main = path.join(repo, 'src/main.ts')
     const util = path.join(repo, 'src/lib/util.ts')
-    await w('src/main.ts', 'import { depFn } from \'dep\'\nimport { double } from \'@/lib/util\'\nimport { fine } from \'./other\'\nimport css from \'./style.css\'\nimport nothing from \'./missing\'\n\nexport const out = depFn(double(fine)) + css + nothing\n')
+    await w('src/main.ts', 'import { depFn } from \'dep\'\nimport { double } from \'@/lib/util\'\nimport { fine } from \'./other\'\nimport css from \'./style.css\'\nimport App from \'./App.vue\'\nimport nothing from \'./missing\'\n\nexport const out = depFn(double(fine)) + css + nothing + String(App)\n')
     await w('src/style.css', 'a {}\n')
+    // CSS, HTML and Vue
+    await w('src/Comp.vue', '<template><i class="box">{{ label }}</i></template>\n<script setup lang="ts">\nconst label: string = \'x\'\n</script>\n')
+    await w('src/App.vue', '<template>\n  <section class="card">\n    <Comp />\n  </section>\n</template>\n\n<script setup lang="ts">\nimport Comp from \'./Comp.vue\'\nconst shown = Comp\n</script>\n\n<style scoped>\n.card { colour: red }\n</style>\n')
+    await w('site.css', '.hero { margin: 0 }\n')
+    await w('index.html', '<!doctype html>\n<html><head><link rel="stylesheet" href="./site.css"></head>\n<body class="hero"></body></html>\n')
+    // A second package with its own tsconfig, never opened
+    await w('packages/other/tsconfig.json', JSON.stringify({ compilerOptions: { strict: true, module: 'esnext', moduleResolution: 'bundler' }, include: ['src'] }))
+    await w('packages/other/src/p.ts', 'export const p: number = \'no\'\n')
 
     await writeFile(path.join(userData, 'state.json'), JSON.stringify({
         projects: [repo],
@@ -58,9 +68,13 @@ async function main() {
 
         // standard
         await page.evaluate(`window.__app.setEditorIntel('standard')`)
+        // The project is indexed as soon as it is shown: both tsconfigs, with no file opened yet
+        await until('both tsconfigs indexed with no file open', () => page.evaluate<boolean>(`window.__app.openFiles.length === 0 && [...window.__codeIntel.entries.values()].filter(e => e.project.files.size > 0).length === 2`), 20000)
+        check(await page.evaluate<boolean>(`window.__app.openFiles.length === 0 && window.__tsChecker.runsIn !== 'window'`), 'standard: showing the project indexes all its tsconfigs before any file is opened')
         await open(main)
         await until('only the missing module is reported', async () => (await squiggles()).length === 1, 15000)
         check((await squiggles())[0].includes('missing'), 'standard: package, alias, relative and css imports resolve; the missing module is the one error')
+        check(await page.evaluate<string>(`window.__tsChecker.runsIn`) === 'worker', 'the type check runs in a worker, not on the window\'s thread')
 
         // go to definition into another file
         const pos = await page.evaluate<number>(`window.__app.activeFile.view.state.doc.toString().indexOf('double(fine)')`)
@@ -114,10 +128,58 @@ async function main() {
         check(true, '⌘-click on a name from another file opens it')
         await page.evaluate(`window.__app.focus(${JSON.stringify(`file:${main}`)})`)
 
+        // A component is imported by its name (no "cannot find module" for it), and the file itself is read by the editor
+        await page.evaluate(`window.__app.focus(${JSON.stringify(`file:${main}`)})`)
+        await new Promise(r => setTimeout(r, 1500))
+        check((await squiggles()).length === 1, `standard: a .vue import resolves ${JSON.stringify(await squiggles())}`)
+        const app = path.join(repo, 'src/App.vue')
+        const comp = path.join(repo, 'src/Comp.vue')
+        await open(app)
+        await until('the CSS squiggle in the style block', () => page.evaluate<boolean>(`[...document.querySelectorAll('.cm-diagnostic-warning')].some(e => e.textContent === 'colour')`), 15000)
+        check(true, 'vue: an unknown property in <style> is reported')
+        const f12 = async () => {
+            await page.call('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'F12', code: 'F12', windowsVirtualKeyCode: 123 })
+            await page.call('Input.dispatchKeyEvent', { type: 'keyUp', key: 'F12', code: 'F12', windowsVirtualKeyCode: 123 })
+        }
+        await caret(await page.evaluate<number>(`window.__app.activeFile.view.state.doc.toString().indexOf('<Comp') + 2`))
+        await f12()
+        await until('F12 on a component tag opened it', () => page.evaluate<boolean>(`window.__app.activeKey === ${JSON.stringify(`file:${comp}`)}`), 8000)
+        check(true, 'vue: F12 on <Comp /> opens Comp.vue')
+        await page.evaluate(`window.__app.focus(${JSON.stringify(`file:${app}`)})`)
+        await until('back in App.vue', () => page.evaluate<boolean>(`window.__app.activeKey === ${JSON.stringify(`file:${app}`)} && !!document.querySelector('.cm-content')`))
+        await hover('<Comp', 2)
+        await until('the tag is a link', async () => (await linked()) === 'Comp', 5000)
+        check(true, 'vue: ⌘-hover on a component tag underlines it')
+        await hover('<Comp', 2, 0)
+        const html = path.join(repo, 'index.html')
+        const site = path.join(repo, 'site.css')
+        await open(html)
+        await caret(await page.evaluate<number>(`window.__app.activeFile.view.state.doc.toString().indexOf('hero') + 1`))
+        await f12()
+        await until('F12 on a class opened the stylesheet', () => page.evaluate<boolean>(`window.__app.activeKey === ${JSON.stringify(`file:${site}`)}`), 8000)
+        check(true, 'html: F12 on a class opens the rule in the linked stylesheet')
+        // completion in a stylesheet
+        await until('site.css has its editor', () => page.evaluate<boolean>(`!!window.__app.activeFile?.view`), 8000)
+        await page.evaluate(`(() => { const v = window.__app.activeFile.view; v.dispatch(v.state.update({ changes: { from: v.state.doc.length, insert: '.a { disp' }, selection: { anchor: v.state.doc.length + 9 } })); v.focus() })()`)
+        await page.call('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: ' ', code: 'Space', windowsVirtualKeyCode: 32, modifiers: 2 })
+        await page.call('Input.dispatchKeyEvent', { type: 'keyUp', key: ' ', code: 'Space', windowsVirtualKeyCode: 32, modifiers: 2 })
+        await until('the CSS service completes display', () => page.evaluate<boolean>(`[...document.querySelectorAll('[class*="completion"], [class*="suggest"]')].some(e => e.textContent.includes('display'))`), 8000)
+        check(true, 'css: ⌃Space completes a property from the CSS service')
+        // hover on a property
+        await page.evaluate(`(() => { const v = window.__app.activeFile.view; v.dispatch(v.state.update({ selection: { anchor: 0 } })) })()`)
+        await page.call('Input.dispatchMouseEvent', { type: 'mouseMoved', ...await where_('margin', 2), modifiers: 0 })
+        await until('the CSS service explains margin', () => page.evaluate<boolean>(`[...document.querySelectorAll('[class*="hover"], [class*="tooltip"]')].some(e => e.textContent.includes('margin') && e.textContent.length > 20)`), 8000)
+        if (SHOTS)
+            await page.screenshot(path.join(SHOTS, 'web-hover.png'))
+        check(true, 'css: hovering a property shows the CSS service\'s card')
+        await page.evaluate(`window.__app.focus(${JSON.stringify(`file:${main}`)})`)
+
         // full
         await page.evaluate(`window.__app.setEditorIntel('full')`)
         await until('broken.ts is marked', () => page.evaluate<boolean>(`window.__codeIntel.problemCount(${JSON.stringify(path.join(repo, 'src/broken.ts'))}) > 0`), 30000)
         check(await page.evaluate<boolean>(`window.__codeIntel.hasProblem(${JSON.stringify(path.join(repo, 'src'))})`), 'full: the project is checked; a file with an error is marked, and its folder')
+        await until('the other package is marked', () => page.evaluate<boolean>(`window.__codeIntel.problemCount(${JSON.stringify(path.join(repo, 'packages/other/src/p.ts'))}) > 0`), 30000)
+        check(true, 'full: a package with its own tsconfig that was never opened is indexed and checked too')
         if (SHOTS) {
             // The tree, with the failing file red and the folder above it
             await page.evaluate(`window.__app.showSidebarView('files')`)

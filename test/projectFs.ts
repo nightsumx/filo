@@ -25,7 +25,22 @@ export const nodeProjectFs: ProjectFs = {
                     continue
                 if (e.isDirectory())
                     walk(join(d, e.name))
-                else if (/\.[cm]?[jt]sx?$/.test(e.name))
+                else if (/\.(?:[cm]?[jt]sx?|vue)$/.test(e.name))
+                    out.push(join(d, e.name))
+            }
+        }
+        walk(dir)
+        return out
+    },
+    configs: async (dir) => {
+        const out: string[] = []
+        const walk = (d: string) => {
+            for (const e of readdirSync(d, { withFileTypes: true })) {
+                if (e.name === 'node_modules' || e.name === '.git' || e.name === 'dist')
+                    continue
+                if (e.isDirectory())
+                    walk(join(d, e.name))
+                else if (/^[jt]sconfig\.json$/.test(e.name))
                     out.push(join(d, e.name))
             }
         }

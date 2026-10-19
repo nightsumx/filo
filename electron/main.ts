@@ -24,7 +24,7 @@ import { AgentManager } from './agents'
 import { BACKGROUND, reveal } from './background'
 import { applySave, savedWindows, StateFile } from './appState'
 import { repoEdits } from './edits'
-import { FolderWatch, listDir, projectSources, readText, realPathOf, writeText } from './files'
+import { FolderWatch, listDir, projectConfigs, projectSources, readText, realPathOf, writeText } from './files'
 import { applyWorktree, createWorktree, gitBranch, gitCommit, gitDiscard, gitFileBytes, gitFileDiff, gitFileEntries, gitFileThumbs, gitStatus, removeWorktree, threadTask, worktreeParent } from './git'
 import { mainLang, setMainLang, tr } from './i18n'
 import { GROK_MCP_LIST, grokMcpAddArgs, grokMcpEnableArgs, grokMcpRemoveArgs, parseGrokMcp } from './grokSettings'
@@ -63,6 +63,7 @@ const store = new StateFile(() => path.join(app.getPath('userData'), 'state.json
 // pi loads capability extensions from real files, so packaged builds keep the pi-capabilities package
 // (extensions plus the helpers they import) outside the asar, as Resources/capabilities.
 /** The MCP server that gives the other agents the browser tools: a real file outside the asar, the agent runs it. */
+const browserMcpScript = app.isPackaged ? path.join(process.resourcesPath, 'capabilities', 'mcp', 'browser.mjs') : path.join(__dirname, '../../packages/capabilities/mcp/browser.mjs')
 const extensionsDir = app.isPackaged ? path.join(process.resourcesPath, 'capabilities', 'extensions') : path.join(__dirname, '../../packages/capabilities/extensions')
 
 const agents = new AgentManager({
@@ -746,6 +747,7 @@ function registerIpc() {
     ipcMain.handle(IPC.readFile, (_e, file: unknown) => readText(absolutePath(file)))
     ipcMain.handle(IPC.realPath, (_e, file: unknown) => realPathOf(absolutePath(file)))
     ipcMain.handle(IPC.projectSources, (_e, root: unknown) => projectSources(absolutePath(root)))
+    ipcMain.handle(IPC.projectConfigs, (_e, root: unknown) => projectConfigs(absolutePath(root)))
     ipcMain.handle(IPC.writeFile, (_e, file: unknown, text: unknown, options: { expected?: unknown, bom?: unknown } | undefined) => {
         if (typeof text !== 'string')
             throw new Error('expected text')

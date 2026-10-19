@@ -152,6 +152,7 @@ const bridge: PiBridge = {
     readFile: file => ipcRenderer.invoke(IPC.readFile, file),
     realPath: file => ipcRenderer.invoke(IPC.realPath, file),
     projectSources: root => ipcRenderer.invoke(IPC.projectSources, root),
+    projectConfigs: root => ipcRenderer.invoke(IPC.projectConfigs, root),
     writeFile: (file, text, options) => ipcRenderer.invoke(IPC.writeFile, file, text, options),
     watchDirs: dirs => ipcRenderer.send(IPC.watchDirs, dirs),
     onDirsChanged: listener => listen(IPC.dirsChanged, listener),

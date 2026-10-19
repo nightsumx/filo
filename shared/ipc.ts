@@ -833,6 +833,8 @@ export interface PiBridge {
     realPath: (file: string) => Promise<string>
     /** The TypeScript and JavaScript files under a folder, absolute: git's own list (ignored files left out) or a walk that skips node_modules and build output. Capped. */
     projectSources: (root: string) => Promise<string[]>
+    /** The tsconfig.json and jsconfig.json files under a folder, absolute, listed like projectSources. */
+    projectConfigs: (root: string) => Promise<string[]>
     /** See FileWrite; `expected` null overwrites whatever is on disk. */
     writeFile: (file: string, text: string, options: { expected: string | null, bom: boolean }) => Promise<FileWrite>
     /** The folders this window watches (tree folders, folders of open files); replaces the last set. */
@@ -1028,6 +1030,7 @@ export const IPC = {
     readFile: 'fs:read-file',
     realPath: 'fs:real-path',
     projectSources: 'fs:project-sources',
+    projectConfigs: 'fs:project-configs',
     writeFile: 'fs:write-file',
     watchDirs: 'fs:watch-dirs',
     dirsChanged: 'fs:dirs-changed',

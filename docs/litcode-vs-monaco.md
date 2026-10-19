@@ -17,7 +17,7 @@
 | 项 | litcode | Monaco 0.52.2 | 来源 |
 |---|---|---|---|
 | 主包 | `dist/index.js` 1.5 MB，gzip 401 KB | `editor.main.js` 3.77 MB，gzip 954 KB，另有 `editor.main.css` gzip 21 KB | ✅ |
-| TS 语言服务 | 不含，用宿主已有的 `typescript`，跑在主线程 | `tsWorker.js` 5.75 MB，gzip 1.29 MB，跑在 worker | ✅ |
+| TS 语言服务 | 不含，用宿主已有的 `typescript`，跑在主线程（诊断可交给宿主放进 worker，Filo 就这么做） | `tsWorker.js` 5.75 MB，gzip 1.29 MB，跑在 worker | ✅ |
 | worker | 0 个 | 至少 editor worker 加各语言 worker（`workerMain.js` 376 KB） | ✅ |
 | 语法高亮 | Shiki（peer，按需加载语言） | 内置 Monarch，`basic-languages` 640 KB | ✅ |
 
@@ -72,7 +72,7 @@
 
 要点：
 - 仓库自己的数字都没有对着 Monaco 在同一台机器上测过，所以“快不快于 Monaco”这件事没有证据。
-- TS 在主线程是真实的结构性短板：Monaco 把它放 worker，大文件不卡输入；litcode 靠“按行数分档降级”来躲（S/M/L/XL），降级就意味着大文件里功能变少。
+- TS 在主线程是真实的结构性短板：Monaco 把它放 worker，大文件不卡输入；litcode 靠“按行数分档降级”来躲（S/M/L/XL），降级就意味着大文件里功能变少。最重的一项，类型检查（诊断），现在可以交给宿主：`tsDiagnosticsRemote` 加 `computeTsDiagnostics`，Filo 把它放进 Web Worker（`src/workers/tsCheck.worker.ts`）。补全、悬停、跳转还在主线程。
 - 整篇载入 3.7 秒那一项是 8 月的数字，之后改过不少，我没重跑。
 
 ## 5. 稳定性和验证
@@ -101,9 +101,9 @@ Filo 是 Electron，只跑 Chromium，所以跨浏览器那一行对我们基本
 ## 7. litcode 的风险
 
 1. **一个人维护的 0.x 库。** 出问题没有社区兜底；这也是上一点“源码在手”的另一面。
-2. **主线程 TS。** 大文件会降级，或者在语义诊断时有感知的停顿。
+2. **主线程 TS。** 补全、悬停、跳转还在主线程，大文件上会有感知的停顿；诊断已经移到 worker。
 3. **文档落后于代码。** README 的体积数字、`CAPABILITIES.md`（2026-07-13）和 CHANGELOG 对不上，查事实要以代码和测试为准。
-4. **Filo 打包用的是 `vendor/lite-monaco-0.3.0-r11.tgz`，由 litcode 工作区源码（`npm run build` + `npm pack`）直接打出，开发模式用的是同一份工作区源码，两边一致。** 之后改了 litcode 源码，要重新打 tgz 再换进 `vendor/`；litcode 工作区的改动还没提交。
+4. **Filo 打包用的是 `vendor/lite-monaco-0.3.0-r12.tgz`，由 litcode 工作区源码（`npm run build` + `npm pack`）直接打出，开发模式用的是同一份工作区源码，两边一致。** 之后改了 litcode 源码，要重新打 tgz 再换进 `vendor/`；litcode 工作区的改动还没提交。
 5. **真机输入法和读屏没有验证记录**，Filo 用户里有中文输入，这块值得自己在真机上过一遍。
 
 ## 8. 建议

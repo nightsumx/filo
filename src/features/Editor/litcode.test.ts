@@ -11,6 +11,7 @@ function link() {
         sync: async (text) => {
             real.synced.push(text)
         },
+        check: async () => null,
         release: () => {
             real.released++
         },
@@ -69,7 +70,7 @@ describe('prepare', () => {
 
     it('standard and full attach a project for the TypeScript family', async () => {
         const released = vi.fn()
-        const attach = vi.spyOn(codeIntel, 'attach').mockResolvedValue({ sync: async () => {}, release: released })
+        const attach = vi.spyOn(codeIntel, 'attach').mockResolvedValue({ sync: async () => {}, check: async () => null, release: released })
         for (const [name, lang] of [['a.ts', 'typescript'], ['a.tsx', 'tsx'], ['a.js', 'javascript'], ['a.jsx', 'jsx']] as const) {
             for (const level of ['standard', 'full'] as const) {
                 const kit = await prepare(tabOf(name), level)

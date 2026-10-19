@@ -3,6 +3,7 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { App } from './App'
 import { initTheme } from './lib/theme'
+import { tsChecker } from './lib/tsCheckClient'
 import { appStore } from './store/app'
 import { codeIntel } from './store/codeIntel'
 import { browserStore } from './store/browser'
@@ -28,4 +29,4 @@ fileTreeStore.init()
 
 // Handle for inspecting state from DevTools (dev builds) and for end-to-end scripts (PI_GUI_TEST).
 if (import.meta.env.DEV || new URLSearchParams(location.search).has('test'))
-    Object.assign(window, { __app: appStore, __terminals: terminalStore, __browser: browserStore, __terminalView: existingView, __files: fileTreeStore, __codeIntel: codeIntel })
+    Object.assign(window, { __app: appStore, __terminals: terminalStore, __browser: browserStore, __terminalView: existingView, __files: fileTreeStore, __codeIntel: codeIntel, __tsChecker: tsChecker })

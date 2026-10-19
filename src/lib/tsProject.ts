@@ -8,9 +8,12 @@
 //    touches a file not read yet records it, the files are read, and the pass runs again until nothing is missing;
 //  - what a non-relative import resolves to is filed where the service looks for that name, as a one-line file
 //    re-exporting the real one;
-//  - global declarations (`@types/*`, the project's own .d.ts) go in as root files.
+//  - global declarations (`@types/*`, the project's own .d.ts) go in as root files;
+//  - a Vue component `X.vue` is read as `X.vue.ts` (its script blocks in place, the rest blanked: src/lib/vueSfc.ts),
+//    which is where TypeScript looks for the import `./X.vue`.
 import type { FileRead } from '@shared/ipc'
 import type * as TS from 'typescript'
+import { VUE_VIRTUAL, vueScript } from './vueSfc'
 
 export type TsModule = typeof TS
 
@@ -22,6 +25,8 @@ export interface ProjectFs {
     sources: (root: string) => Promise<string[]>
     /** Names of the folders in a folder; none when it does not exist. */
     folders: (dir: string) => Promise<string[]>
+    /** The tsconfig.json and jsconfig.json files under a folder (absolute paths). */
+    configs: (root: string) => Promise<string[]>
 }
 
 export interface Limits {
@@ -84,6 +89,8 @@ export interface Config {
     options: TS.CompilerOptions
     /** Whether the project's include/exclude/files list this file. */
     covers: (file: string) => boolean
+    /** The configs it points at (`references`), as paths of their files. */
+    references: string[]
 }
 
 function globToRegExp(dir: string, pattern: string): RegExp {
@@ -143,7 +150,11 @@ interface Scoped {
     list: string[]
 }
 
-export async function loadConfig(ts: TsModule, fs: ProjectFs, file: string, fallbackDir: string): Promise<Config> {
+/**
+ * The config that applies to `file`. With `only`, that config itself (a tsconfig of the project found by listing,
+ * not through a file): no search for the nearest one, and no hop to a referenced config.
+ */
+export async function loadConfig(ts: TsModule, fs: ProjectFs, file: string, fallbackDir: string, only?: string): Promise<Config> {
     const cache = new Map<string, Promise<RawConfig | null>>()
 
     const rawConfig = (path: string, chain: string[] = []): Promise<RawConfig | null> => {
@@ -215,8 +226,13 @@ export async function loadConfig(ts: TsModule, fs: ProjectFs, file: string, fall
         return f => files?.includes(f) || (inc.some(r => r.test(f)) && !exc.some(r => r.test(f)))
     }
 
-    let nearest: string | null = null
-    for (let dir = dirOf(file); ; dir = dirOf(dir)) {
+    const referenced = (raw: RawConfig) => raw.references.map((r) => {
+        const target = join(raw.dir, r)
+        return target.endsWith('.json') ? target : `${target}/tsconfig.json`
+    })
+
+    let nearest: string | null = only ?? null
+    for (let dir = dirOf(file); !only; dir = dirOf(dir)) {
         for (const name of ['tsconfig.json', 'jsconfig.json']) {
             if (!nearest && (await fs.read(`${dir}/${name}`).catch(() => null))?.kind === 'text')
                 nearest = `${dir}/${name}`
@@ -227,20 +243,18 @@ export async function loadConfig(ts: TsModule, fs: ProjectFs, file: string, fall
     const root = nearest ? await rawConfig(nearest) : null
     if (!nearest || !root)
         // Loose files: what an editor expects today, not what an old default would give.
-        return { path: null, dir: fallbackDir, options: { moduleResolution: ts.ModuleResolutionKind.Bundler, module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ESNext, allowJs: true }, covers: () => true }
+        return { path: null, dir: fallbackDir, options: { moduleResolution: ts.ModuleResolutionKind.Bundler, module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ESNext, allowJs: true }, covers: () => true, references: [] }
 
     // A solution-style tsconfig only points at the real ones: the one that lists this file applies.
     const own = coverage(root)
-    if (root.references.length && !own(file)) {
-        for (const ref of root.references) {
-            const target = join(root.dir, ref)
-            const path = target.endsWith('.json') ? target : `${target}/tsconfig.json`
+    if (!only && root.references.length && !own(file)) {
+        for (const path of referenced(root)) {
             const raw = await rawConfig(path)
             if (raw && coverage(raw)(file))
-                return { path, dir: raw.dir, options: raw.options, covers: coverage(raw) }
+                return { path, dir: raw.dir, options: raw.options, covers: coverage(raw), references: referenced(raw) }
         }
     }
-    return { path: nearest, dir: root.dir, options: root.options, covers: own }
+    return { path: nearest, dir: root.dir, options: root.options, covers: own, references: referenced(root) }
 }
 
 /** Options for lite-monaco's service: what changes the errors it shows, not where files are. */
@@ -399,8 +413,9 @@ export class Project {
     private entry(path: string): Promise<Entry> {
         let hit = this.reading.get(path)
         if (!hit) {
-            hit = this.fs.read(path).then<Entry, Entry>(
-                r => ({ exists: r.kind !== 'missing', text: r.kind === 'text' ? r.text : null }),
+            const virtual = VUE_VIRTUAL.test(path)
+            hit = this.fs.read(virtual ? path.slice(0, -3) : path).then<Entry, Entry>(
+                r => ({ exists: r.kind !== 'missing', text: r.kind === 'text' ? (virtual ? vueScript(r.text).code : r.text) : null }),
                 () => ({ exists: false, text: null }),
             ).then((e) => {
                 this.known.set(path, e)
@@ -693,7 +708,7 @@ export class Project {
 
     /** Source files of the project the tsconfig covers (git's list, else a walk). */
     projectFiles(): Promise<string[]> {
-        this.listing ??= this.fs.sources(this.config.dir).then(list => list.map(slashed).filter(f => !isNodeModules(f) && this.config.covers(f) && (this.config.options.allowJs || this.config.options.checkJs || !/\.[cm]?jsx?$/.test(f))), () => [])
+        this.listing ??= this.fs.sources(this.config.dir).then(list => list.map(slashed).filter(f => !isNodeModules(f) && this.config.covers(f) && (this.config.options.allowJs || this.config.options.checkJs || !/\.[cm]?jsx?$/.test(f))).map(f => f.endsWith('.vue') ? `${f}.ts` : f), () => [])
         return this.listing
     }
 
@@ -740,7 +755,8 @@ export class Project {
         return this.jsonModules.has(path)
     }
 
-    private async refreshNow(path: string): Promise<boolean> {
+    private async refreshNow(changed: string): Promise<boolean> {
+        const path = changed.endsWith('.vue') ? `${changed}.ts` : changed
         this.known.delete(path)
         this.reading.delete(path)
         const entry = await this.entry(path)

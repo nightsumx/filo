@@ -82,6 +82,13 @@ beforeAll(() => {
     put('ws/pkg/node_modules/ver/index.d.ts', 'export declare const v: 3\n')
     put('ws/app/a.ts', 'import { v } from "ver"\nexport const a: 4 = v\n')
     put('ws/pkg/b.ts', 'import { v } from "ver"\nexport const b: 3 = v\n')
+    // Vue components: read as TypeScript text, imported by their own name.
+    put('vue/tsconfig.json', '{ "compilerOptions": { "strict": true, "module": "esnext", "moduleResolution": "bundler", "baseUrl": ".", "paths": { "@/*": ["./src/*"] } }, "include": ["src"] }')
+    put('vue/node_modules/vue/package.json', '{ "name": "vue", "types": "index.d.ts" }')
+    put('vue/node_modules/vue/index.d.ts', 'export interface DefineComponent<P = {}, B = {}, D = {}> { readonly __component: P }\n')
+    put('vue/src/Comp.vue', '<template><div>{{ msg }}</div></template>\n<script setup lang="ts">\nimport { helper } from "./helper"\nconst props = defineProps<{ n: number }>()\nconst msg: string = helper(props.n)\nconst bad: number = "no"\n</script>\n<style scoped>\n.a { color: red }\n</style>\n')
+    put('vue/src/helper.ts', 'export function helper(n: number): string { return String(n) }\n')
+    put('vue/src/main.ts', 'import Comp from "./Comp.vue"\nimport Alias from "@/Comp.vue"\nexport const c: number = Comp\nexport const d: number = Alias\n')
     symlinkSync(join(root, 'node_modules/.store/linked@1/node_modules/linked'), join(root, 'node_modules/linked'))
     const libs = join(process.cwd(), 'node_modules/typescript/lib')
     setTsLibLoader(async () => new Map(readdirSync(libs).filter(f => /^lib\..*\.d\.ts$/.test(f)).map(f => [f, readFileSync(join(libs, f), 'utf8')] as const)))
@@ -109,6 +116,46 @@ async function diagnose(rel: string, text: string, mode: 'standard' | 'full' = '
     return [...service.getSyntacticDiagnostics(vpath(path)), ...service.getSemanticDiagnostics(vpath(path))].map(d => `${d.code}: ${compiler.flattenDiagnosticMessageText(d.messageText, ' ')}`)
 }
 
+describe('Vue components', () => {
+    it('are imported by their own name and typed as components', async () => {
+        const d = await diagnose('vue/src/main.ts', readFileSync(join(root, 'vue/src/main.ts'), 'utf8'))
+        // not "cannot find module": both the relative and the aliased import found the component
+        expect(d.some(m => m.startsWith('2307'))).toBe(false)
+        expect(d.filter(m => m.startsWith('2322')).length).toBe(2)
+    })
+
+    it('are read as their script, in place: an error in it is at its place in the component', async () => {
+        const vue = readFileSync(join(root, 'vue/src/Comp.vue'), 'utf8')
+        const config = await loadConfig(ts, fs, join(root, 'vue/src/main.ts'), root)
+        const project = new Project(ts, fs, config)
+        await project.loadAll()
+        const virtual = join(root, 'vue/src/Comp.vue.ts')
+        const code = project.files.get(virtual)!
+        expect(code).toBeDefined()
+        expect(code.length).toBeGreaterThan(vue.length)
+        expect(code.slice(vue.indexOf('const bad'), vue.indexOf('const bad') + 9)).toBe('const bad')
+        // the template and the style are blanks of the same shape
+        expect(code.slice(0, vue.length).split('\n').map(l => l.length)).toEqual(vue.split('\n').map(l => l.length))
+        clearTSServiceCache()
+        setTsCompilerOptions({ strict: false, ...checkOptions(config.options) }, { lang: 'typescript' })
+        setTsFiles(project.output())
+        setTsResolutions(project.resolutions())
+        const session = getTSService({ lang: 'typescript', fileName: virtual })
+        const service = await session.ensure()
+        const found = service.getSemanticDiagnostics(vpath(virtual))
+        const bad = found.find(x => x.code === 2322)
+        expect(bad && vue.slice(bad.start, bad.start! + bad.length!)).toBe('bad')
+        // the macro and the relative import are fine
+        expect(found.filter(x => x.start! < vue.length).length).toBe(1)
+    })
+
+    it('listed in the project, covered by the tsconfig', async () => {
+        const config = await loadConfig(ts, fs, join(root, 'vue/src/main.ts'), root)
+        const project = new Project(ts, fs, config)
+        expect(await project.projectFiles()).toContain(join(root, 'vue/src/Comp.vue.ts'))
+    })
+})
+
 describe('namedImports', () => {
     it('lists names without type modifiers and aliases', () => {
         expect(namedImports('import d, { a, type B, c as e } from "x"\nexport { f } from "y"')).toEqual(new Map([['x', ['a', 'B', 'c']], ['y', ['f']]]))
@@ -124,6 +171,19 @@ describe('loadConfig', () => {
         const node = await loadConfig(ts, fs, join(root, 'electron/main.ts'), root)
         expect(node.path).toBe(join(root, 'tsconfig.node.json'))
         expect(node.options.strict).toBe(false)
+    })
+    it('`only` takes that config itself and names the configs it points at', async () => {
+        const solution = await loadConfig(ts, fs, join(root, 'tsconfig.json'), root, join(root, 'tsconfig.json'))
+        expect(solution.path).toBe(join(root, 'tsconfig.json'))
+        expect(solution.references).toEqual([join(root, 'tsconfig.app.json'), join(root, 'tsconfig.node.json')])
+        // no hop to a referenced config, and a solution config lists no files of its own
+        expect(solution.covers(join(root, 'src/lib/util.ts'))).toBe(false)
+        const app = await loadConfig(ts, fs, join(root, 'tsconfig.app.json'), root, join(root, 'tsconfig.app.json'))
+        expect(app.path).toBe(join(root, 'tsconfig.app.json'))
+        expect(app.covers(join(root, 'src/lib/util.ts'))).toBe(true)
+        expect(app.references).toEqual([])
+        // a path that is no config falls back like a loose file
+        expect((await loadConfig(ts, fs, join(root, 'nope.json'), root, join(root, 'nope.json'))).path).toBeNull()
     })
     it('follows `extends` (relative and from a package), the child winning, and `paths` stay relative to their own file', async () => {
         put('cfg/base.json', '{ "compilerOptions": { "strict": true, "noUnusedLocals": true, "baseUrl": ".", "paths": { "@b/*": ["./lib/*"] } }, "include": ["base-src"] }')

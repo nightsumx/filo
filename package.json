@@ -73,7 +73,7 @@
         "diff": "8.0.4",
         "github-markdown-css": "5.8.1",
         "highlight.js": "11.11.1",
-        "lite-monaco": "./vendor/lite-monaco-0.3.0-r11.tgz",
+        "lite-monaco": "./vendor/lite-monaco-0.3.0-r12.tgz",
         "lucide-react": "0.503.0",
         "mobx": "6.13.7",
         "mobx-react-lite": "4.1.0",
@@ -83,7 +83,10 @@
         "remark-gfm": "4.0.1",
         "shiki": "4.5.0",
         "sonner": "2.0.5",
-        "tailwind-merge": "3.2.0"
+        "tailwind-merge": "3.2.0",
+        "vscode-css-languageservice": "6.3.10",
+        "vscode-html-languageservice": "5.6.2",
+        "vscode-languageserver-textdocument": "1.0.15"
     },
     "devDependencies": {
         "@antfu/eslint-config": "4.13.0",

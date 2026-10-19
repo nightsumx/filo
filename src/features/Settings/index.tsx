@@ -128,12 +128,12 @@ const EDITOR_INTEL_OPTIONS: { value: EditorIntel, label: Localized, hint: Locali
     {
         value: 'standard',
         label: { zh: '标准', en: 'Standard' },
-        hint: { zh: '当前文件和它 import 的文件有类型、补全、跳转和错误提示，也会读 tsconfig 和 @types。', en: 'Types, completion, navigation and errors for the open file and what it imports. Reads tsconfig and @types.' },
+        hint: { zh: '项目一显示就在后台把整个项目（包括 monorepo 里每个 tsconfig）读一遍、建好索引，不用等你打开文件。之后有类型、补全、跳转和错误提示；类型检查在后台线程跑，不卡界面。索引建好之前不显示错误波浪线。CSS / SCSS / Less、HTML、Vue 也有补全、悬停、检查和跳转（Vue 的 <script> 走同一个 TypeScript 项目，.vue 的 import 有类型）。', en: 'As soon as a project is shown, reads the whole project (every tsconfig in it, monorepo packages included) in the background, without waiting for a file to be opened. Then gives types, completion, navigation and errors. Type checking runs in a background thread, so the window stays responsive. No error squiggles until the index is built. CSS / SCSS / Less, HTML and Vue get completion, hover, checks and navigation too (a Vue <script> joins the same TypeScript project, and .vue imports are typed).' },
     },
     {
         value: 'full',
         label: { zh: '完整', en: 'Full' },
-        hint: { zh: '像 IDE 一样读整个项目：查找引用和重命名覆盖所有文件（重命名会写回磁盘），没打开的文件有错误时在文件树里标红。大项目会多占一些 CPU 和内存。', en: 'Reads the whole project like an IDE: references and rename reach every file (rename writes to disk), and files with errors are marked red in the tree. Uses more CPU and memory on big projects.' },
+        hint: { zh: '在标准的基础上检查整个项目：没打开的文件有错误时在文件树里标红。查找引用和重命名覆盖所有文件（重命名会写回磁盘）。大项目会多占一些 CPU 和内存。', en: 'Standard, plus a check of the whole project: files with errors are marked red in the tree, even if they are not open. References and rename reach every file (rename writes to disk). Uses more CPU and memory on big projects.' },
     },
 ]
 

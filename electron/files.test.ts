@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile } from 'node:f
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { decodeText, FolderWatch, listDir, MAX_PROJECT_SOURCES, projectSources, readText, realPathOf, writeText } from './files'
+import { decodeText, FolderWatch, listDir, MAX_PROJECT_SOURCES, projectConfigs, projectSources, readText, realPathOf, writeText } from './files'
 
 let dir: string
 beforeEach(async () => {
@@ -60,6 +60,27 @@ describe('projectSources', () => {
         await Promise.all(Array.from({ length: MAX_PROJECT_SOURCES + 50 }, (_, i) => writeFile(path.join(dir, 'many', `f${i}.ts`), '')))
         expect((await projectSources(dir)).length).toBe(MAX_PROJECT_SOURCES)
     }, 60_000)
+})
+
+describe('projectConfigs', () => {
+    const touch = async (rel: string) => {
+        await mkdir(path.dirname(path.join(dir, rel)), { recursive: true })
+        await writeFile(path.join(dir, rel), '{}')
+    }
+
+    it('lists the tsconfig.json and jsconfig.json files git knows, not those of dependencies or ignored folders', async () => {
+        execFileSync('git', ['init', '-q'], { cwd: dir })
+        await writeFile(path.join(dir, '.gitignore'), 'gen/\n')
+        for (const f of ['tsconfig.json', 'packages/a/tsconfig.json', 'packages/b/jsconfig.json', 'packages/a/tsconfig.app.json', 'gen/tsconfig.json', 'node_modules/p/tsconfig.json'])
+            await touch(f)
+        expect((await projectConfigs(dir)).map(f => path.relative(dir, f).replace(/\\/g, '/')).sort()).toEqual(['packages/a/tsconfig.json', 'packages/b/jsconfig.json', 'tsconfig.json'])
+    })
+
+    it('walks the folder outside a repository', async () => {
+        for (const f of ['tsconfig.json', 'web/tsconfig.json', 'node_modules/p/tsconfig.json', 'dist/tsconfig.json'])
+            await touch(f)
+        expect((await projectConfigs(dir)).map(f => path.relative(dir, f).replace(/\\/g, '/')).sort()).toEqual(['tsconfig.json', 'web/tsconfig.json'])
+    })
 })
 
 describe('realPathOf', () => {
