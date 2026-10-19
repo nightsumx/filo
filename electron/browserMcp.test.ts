@@ -10,6 +10,7 @@ import readline from 'node:readline'
 import { BROWSER_TOOLS } from 'pi-capabilities/lib/browserSpec.ts'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { browserMcpServers } from './browserMcp'
+import { platform } from './platform'
 import { ToolSocket } from './toolSocket'
 
 const script = path.join(import.meta.dirname, '../packages/capabilities/mcp/browser.mjs')
@@ -24,7 +25,7 @@ beforeEach(async () => {
     dir = await mkdtemp(path.join(os.tmpdir(), 'filo-mcp-'))
     seen = []
     answers = () => ({ ok: true, text: 'fine' })
-    socket = new ToolSocket(path.join(dir, 'b.sock'), async (request) => {
+    socket = new ToolSocket(platform.ipcPath(dir, 'b.sock'), async (request) => {
         seen.push(request)
         return answers(request)
     }, { socket: 'PI_KIT_BROWSER', token: 'PI_KIT_BROWSER_TOKEN' })

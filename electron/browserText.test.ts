@@ -1,4 +1,5 @@
 import type { AxNode } from './browserText'
+import { pathToFileURL } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { allowedScheme, consoleLevel, formatConsole, parseAddress, parseKey, renderOutline } from './browserText'
 
@@ -12,7 +13,8 @@ describe('parseAddress', () => {
     })
 
     it('opens file paths as file URLs', () => {
-        expect(parseAddress('/tmp/site/index.html')).toBe('file:///tmp/site/index.html')
+        // On Windows a rooted path gets its drive, as the platform's own conversion does.
+        expect(parseAddress('/tmp/site/index.html')).toBe(pathToFileURL('/tmp/site/index.html').href)
         expect(parseAddress('file:///tmp/a%20b.html')).toBe('file:///tmp/a%20b.html')
     })
 
