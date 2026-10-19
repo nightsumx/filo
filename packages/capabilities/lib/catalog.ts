@@ -17,7 +17,7 @@ export interface Capability {
     tools: string[]
     /** Approximate tokens added to every request (tool schema + prompt lines); checked by tests. */
     contextTokens: number
-    /** Needs the desktop app (its Terminal panel): pi in a terminal (pi-cc-tui) never loads it. */
+    /** Needs the desktop app (its Terminal or Browser panel): pi in a terminal (pi-cc-tui) never loads it. */
     appOnly?: true
 }
 
@@ -95,6 +95,15 @@ export const CAPABILITIES: readonly Capability[] = [
         contextTokens: 600,
         appOnly: true,
     },
+    {
+        id: 'browser',
+        label: { zh: '浏览器', en: 'Browser' },
+        description: { zh: 'Agent 能在右侧的浏览器面板里打开网页、读页面、点击、输入、截图、看控制台，用来验证它改的前端。你看得到，也能自己登录或接管。', en: 'The agent opens pages in the Browser panel on the right, reads them, clicks, types, takes screenshots and reads the console, to check the front end it changed. You can watch, log in yourself or take over.' },
+        entry: 'browser.ts',
+        tools: ['browser_navigate', 'browser_snapshot', 'browser_screenshot', 'browser_click', 'browser_type', 'browser_press', 'browser_select', 'browser_scroll', 'browser_wait', 'browser_eval', 'browser_console', 'browser_tabs'],
+        contextTokens: 1450,
+        appOnly: true,
+    },
 ]
 
 export interface CapabilityPreset {
@@ -107,7 +116,7 @@ export interface CapabilityPreset {
 export const PRESETS: readonly CapabilityPreset[] = [
     { id: 'lean', label: { zh: '精简', en: 'Lean' }, hint: { zh: '只用 pi 本身的能力，上下文最小。', en: 'Only what pi has built in; the smallest context.' }, capabilities: [] },
     { id: 'standard', label: { zh: '标准', en: 'Standard' }, hint: { zh: '适合日常开发。', en: 'For everyday development.' }, capabilities: ['todo', 'ask', 'approval', 'plan', 'review', 'autopilot', 'budget', 'terminal'] },
-    { id: 'full', label: { zh: '完整', en: 'Full' }, hint: { zh: '再加上子 Agent，适合大任务。', en: 'Adds subagents, for large tasks.' }, capabilities: ['todo', 'ask', 'approval', 'plan', 'subagent', 'review', 'autopilot', 'budget', 'terminal'] },
+    { id: 'full', label: { zh: '完整', en: 'Full' }, hint: { zh: '再加上子 Agent，适合大任务。', en: 'Adds subagents, for large tasks.' }, capabilities: ['todo', 'ask', 'approval', 'plan', 'subagent', 'review', 'autopilot', 'budget', 'terminal', 'browser'] },
 ]
 
 /** Nothing saved: the full set, which is what pi-cc-tui loaded before the choice was shared. */

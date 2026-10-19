@@ -54,6 +54,7 @@ export const SHORTCUTS = [
     { id: 'files', scope: 'app', keys: ['⌘⇧E'], label: { zh: '打开文件树', en: 'Open the file tree' }, match: e => command(e, 'e', true) },
     { id: 'search', scope: 'app', keys: ['⌘⇧F'], label: { zh: '搜索线程', en: 'Search threads' }, match: e => command(e, 'f', true) },
     { id: 'terminal', scope: 'app', keys: ['⌃`'], label: { zh: '打开 / 隐藏终端面板', en: 'Open / hide the terminal panel' }, match: e => e.ctrlKey && !e.metaKey && !e.altKey && e.code === 'Backquote' },
+    { id: 'browser', scope: 'app', keys: ['⌘⇧B'], label: { zh: '打开 / 隐藏浏览器面板', en: 'Open / hide the browser panel' }, match: e => command(e, 'b', true) },
     { id: 'commands', scope: 'app', keys: ['⌘/'], label: { zh: '技能与命令', en: 'Skills and commands' }, match: e => commandKey(e) && !e.shiftKey && e.key === '/' },
     { id: 'settings', scope: 'app', keys: ['⌘,'], label: { zh: '设置', en: 'Settings' } },
 

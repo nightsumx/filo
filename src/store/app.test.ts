@@ -138,7 +138,7 @@ describe('capabilities', () => {
         appStore.newThread('/p')
         const thread = appStore.active!
         let key = launchKey(thread)
-        expect(apply(state('full'))).toEqual(['todo', 'ask', 'approval', 'plan', 'subagent', 'review', 'autopilot', 'budget', 'terminal'])
+        expect(apply(state('full'))).toEqual(['todo', 'ask', 'approval', 'plan', 'subagent', 'review', 'autopilot', 'budget', 'terminal', 'browser'])
         expect(appStore.capabilityPreset).toBe('full')
         expect(launchKey(thread)).not.toBe(key)
         key = launchKey(thread)

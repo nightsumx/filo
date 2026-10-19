@@ -5,8 +5,9 @@ import { ActivityBadge } from '@/components/StatusIcons'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { cn, shortPath } from '@/lib/utils'
 import { appStore } from '@/store/app'
+import { browserStore } from '@/store/browser'
 import { terminalStore } from '@/store/terminals'
-import { ChevronDown, Columns3, FolderOpen, FolderPlus, GitBranch, Merge, PanelBottom, PanelLeft, PanelRight, Plus, Search, Square, X } from 'lucide-react'
+import { ChevronDown, Columns3, FolderOpen, FolderPlus, GitBranch, Globe, Merge, PanelBottom, PanelLeft, PanelRight, Plus, Search, Square, X } from 'lucide-react'
 import { observer } from 'mobx-react-lite'
 import { useEffect, useRef, useState } from 'react'
 import { useGitStatus } from '../Review/useGitStatus'
@@ -326,6 +327,26 @@ const TerminalToggle = observer(() => {
     )
 })
 
+/** Shows the Browser tool window; a dot while an agent works in one of the project's tabs. */
+const BrowserToggle = observer(() => {
+    const open = browserStore.open && browserStore.tabs.length > 0
+    const busy = appStore.activeProject ? browserStore.busyIn(appStore.activeProject) : 0
+    return (
+        <button
+            type="button"
+            aria-pressed={open}
+            aria-label={tr('浏览器', 'Browser')}
+            title={tr(`浏览器（${keys('⌘⇧B')}）`, `Browser (${keys('⌘⇧B')})`)}
+            disabled={!appStore.activeProject}
+            onClick={browserStore.toggle}
+            className={cn(iconBtn, 'relative', open && 'text-gray-900')}
+        >
+            <Globe size={16} />
+            {busy > 0 && <span className="absolute right-[3px] top-[3px] h-1.5 w-1.5 rounded-full bg-ide-accent" />}
+        </button>
+    )
+})
+
 export const MainToolbar = observer(() => {
     const split = appStore.layout === 'split'
     const project = appStore.project
@@ -353,6 +374,7 @@ export const MainToolbar = observer(() => {
                 <PanelLeft size={16} />
             </button>
             <TerminalToggle />
+            <BrowserToggle />
             <button type="button" aria-pressed={appStore.reviewOpen} aria-label={tr('改动面板', 'Changes panel')} title={tr('改动面板', 'Changes panel')} disabled={!appStore.active} onClick={appStore.toggleReview} className={cn(iconBtn, appStore.reviewOpen && 'text-gray-900')}>
                 <PanelRight size={16} />
             </button>

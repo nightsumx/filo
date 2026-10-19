@@ -17,6 +17,8 @@ Private workspace package. The app loads the selected ones with `-e` per thread;
 | `budget` | Nothing: a prompt whose cost passes the limit (`budget` under `pi-capabilities`, US dollars) stops before its next request. Subagents count their own | App and terminal: go on (asks again a limit later), don't ask again this prompt, or stop |
 | `autopilot` | While on: instructions for working unattended, no `ask`, risky calls held. After each run a read-only second pi checks it against the user's rulebook and calls `submit_decision`: a message in the user's place, cards, or done | Cards: `/gui-autopilot-answer` in the app, `/inbox` in the terminal (any session's). Switch: `/gui-autopilot on\|off`, `/autopilot` |
 
+`terminal` and `browser` exist only in the app (`appOnly` in the catalog): they talk over a unix socket (`PI_KIT_TERMINALS`, `PI_KIT_BROWSER`) to the app's Terminal and Browser panels and are not registered without it. `browser` gives twelve `browser_*` tools: navigate, snapshot (an outline of the page with refs), screenshot, click, type, press, select, scroll, wait, eval, console and tabs. Snapshot, screenshot, scroll, wait and console are read-only; the rest wait for approval in `ask` and `edits` modes. Each pi session works in its own tab; `test/browser-e2e.ts` drives it with a real page.
+
 Each file starts with a comment on its commands, events and rules.
 
 ## Layout

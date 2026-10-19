@@ -702,8 +702,8 @@ describe.runIf(process.env.PI_GUI_SKIP_E2E !== '1')('capability extensions (real
         // Tool schemas plus system prompt, in rough tokens (4 chars each).
         const size = (r: MockRequest) => (JSON.stringify(r.tools).length + r.system.length) / 4
         const measure = async (capabilities: CapabilityId[]) => {
-            // The terminal tools exist only where the app hands out its socket; none is contacted here.
-            const { llm, pi } = await setup(capabilities, script(), { hostEnv: { PI_KIT_TERMINALS: '/nonexistent.sock', PI_KIT_TERMINALS_TOKEN: 'x' } })
+            // The terminal and browser tools exist only where the app hands out its socket; none is contacted here.
+            const { llm, pi } = await setup(capabilities, script(), { hostEnv: { PI_KIT_TERMINALS: '/nonexistent.sock', PI_KIT_TERMINALS_TOKEN: 'x', PI_KIT_BROWSER: '/nonexistent.sock', PI_KIT_BROWSER_TOKEN: 'x' } })
             await pi.run('hi')
             return size(llm.requests[0])
         }

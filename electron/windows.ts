@@ -198,6 +198,11 @@ export class Windows {
         return best
     }
 
+    /** The window showing a project; of several, the one focused last. */
+    windowFor(cwd: string): BrowserWindow | undefined {
+        return this.ownerOf(cwd)?.win
+    }
+
     /** The window showing a session as a tab. */
     private holderOf(session: string): Entry | undefined {
         return [...this.entries.values()].find(e => e.projects.some(cwd => e.tabs[cwd]?.includes(session)))

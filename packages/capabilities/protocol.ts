@@ -5,7 +5,7 @@
 // to other extensions in the same pi as GUI_EVENTS on `pi.events`.
 // Extensions import these with `import type` only; the event names and env vars are repeated there.
 
-export type CapabilityId = 'todo' | 'ask' | 'approval' | 'plan' | 'subagent' | 'review' | 'autopilot' | 'budget' | 'terminal'
+export type CapabilityId = 'todo' | 'ask' | 'approval' | 'plan' | 'subagent' | 'review' | 'autopilot' | 'budget' | 'terminal' | 'browser'
 
 /** Hidden commands are filtered out of the slash menu. */
 export const GUI_COMMAND_PREFIX = 'gui-'
@@ -72,6 +72,10 @@ export const ENV = {
     terminals: 'PI_KIT_TERMINALS',
     /** Token every TerminalRequest carries. */
     terminalsToken: 'PI_KIT_TERMINALS_TOKEN',
+    /** The desktop app's browser socket (BrowserRequest lines); the browser tools exist only with it. */
+    browser: 'PI_KIT_BROWSER',
+    /** Token every BrowserRequest carries. */
+    browserToken: 'PI_KIT_BROWSER_TOKEN',
 } as const
 
 // ---------------------------------------------------------------- terminals
@@ -106,6 +110,51 @@ export type TerminalResponse =
 export interface TerminalDetails {
     kind: 'terminal'
     terminal?: TerminalSummary
+}
+
+// ---------------------------------------------------------------- browser
+
+/**
+ * The browser capability asks the desktop app, over the unix socket in ENV.browser, to drive a page in
+ * its Browser tool window, where the user watches and can step in (log in, solve a captcha). One JSON
+ * line each way per connection. `session` is the pi session: each one gets a tab of its own, and its
+ * calls land there (or in the tab it picked with `tabs`), never in a tab another session works in.
+ */
+export type BrowserBody =
+    | { method: 'navigate', url?: string, history?: 'back' | 'forward' | 'reload', timeoutMs?: number }
+    | { method: 'snapshot', ref?: string }
+    | { method: 'screenshot', ref?: string, fullPage?: boolean }
+    | { method: 'click', ref?: string, x?: number, y?: number, button?: 'left' | 'right' | 'middle', double?: boolean, hover?: boolean }
+    | { method: 'type', ref?: string, text: string, clear?: boolean, submit?: boolean }
+    | { method: 'press', key: string }
+    | { method: 'select', ref: string, values: string[] }
+    | { method: 'scroll', ref?: string, dx?: number, dy?: number }
+    | { method: 'wait', text?: string, textGone?: string, ms?: number, timeoutMs?: number }
+    | { method: 'eval', expression: string }
+    | { method: 'console' }
+    | { method: 'tabs', action: 'list' | 'select' | 'new' | 'close', id?: string, url?: string }
+
+export type BrowserCall = { cwd: string, session?: string } & BrowserBody
+
+export type BrowserRequest = { token: string } & BrowserCall
+
+export interface BrowserTabSummary {
+    id: string
+    url: string
+    title: string
+    by: 'user' | 'agent'
+    /** This session's tab (the one its calls land in). */
+    current?: boolean
+}
+
+export type BrowserResponse =
+    | { ok: true, tab?: BrowserTabSummary, tabs?: BrowserTabSummary[], text?: string, image?: { data: string, mimeType: string } }
+    | { ok: false, error: string }
+
+/** Details of browser_* results: the tab the call was about. */
+export interface BrowserDetails {
+    kind: 'browser'
+    tab?: BrowserTabSummary
 }
 
 // ---------------------------------------------------------------- presence

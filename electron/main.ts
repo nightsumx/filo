@@ -42,6 +42,9 @@ import { readLedger } from 'pi-capabilities/lib/ledger.ts'
 import { platform } from './platform'
 import { RoutesService } from './routes'
 import { windowPlatform } from './platform/window'
+import { parseAddress } from './browserText'
+import { BrowserTools } from './browserTools'
+import { Browsers } from './browsers'
 import { TerminalTools } from './terminalTools'
 import { Terminals } from './terminals'
 import { useTerminals } from './native/claudeTui'
@@ -67,7 +70,7 @@ const agents = new AgentManager({
         windows.deliver(agentId, IPC.agentEvent, event)
     },
     onExit: (agentId, info) => windows.deliver(agentId, IPC.agentExit, info),
-}, extensionsDir, () => terminalTools.env())
+}, extensionsDir, () => ({ ...terminalTools.env(), ...browserTools.env() }))
 
 // Sessions of ACP agents (Codex, …) started from the app; the agents keep the conversations.
 const acpMirrorDir = () => path.join(app.getPath('userData'), 'acp-transcripts')
@@ -89,6 +92,7 @@ const windows = new Windows({
     projectsShown: (cwds) => {
         shownProjects = cwds
         closeHiddenTerminals(cwds)
+        browsers.reconcile(cwds)
     },
 })
 
@@ -107,6 +111,14 @@ useTerminals(terminals, path.join(app.getPath('userData'), 'claude-tui.json'))
  * per app process, so a second instance (a test run, a dev build) has its own.
  */
 const terminalTools = new TerminalTools(terminals, platform.ipcPath(app.getPath('userData'), `terminals-${process.pid}.sock`), () => shownProjects)
+
+// The Browser tool window: pages in views over the window, driven by the browser capability.
+const browsers: Browsers = new Browsers({
+    windowOf: cwd => windows.windowFor(cwd),
+    onChange: list => windows.broadcast(null, IPC.browsersChanged, list),
+    onKey: (window, event) => window.webContents.send(IPC.browserKey, event),
+})
+const browserTools = new BrowserTools(browsers, platform.ipcPath(app.getPath('userData'), `browser-${process.pid}.sock`), () => shownProjects)
 
 /**
  * A project no window shows any more takes its terminals with it. Checked a moment later, so a
@@ -826,6 +838,25 @@ function registerIpc() {
     ipcMain.handle(IPC.terminalClose, (_e, tid: unknown) => terminals.close(terminalId(tid)))
     ipcMain.handle(IPC.terminalRestart, (_e, tid: unknown) => terminals.restart(terminalId(tid)))
     ipcMain.handle(IPC.terminalText, (_e, tid: unknown, lines: unknown) => terminals.text(terminalId(tid), typeof lines === 'number' ? lines : undefined))
+
+    ipcMain.handle(IPC.browsers, () => browsers.list())
+    ipcMain.handle(IPC.browserCreate, (_e, cwd: unknown, url: unknown) => {
+        const folder = absolutePath(cwd)
+        const tab = browsers.create(folder, 'user', 'user', typeof url === 'string' && url ? parseAddress(url, true) : undefined)
+        return browsers.list().find(t => t.id === tab.id)
+    })
+    ipcMain.handle(IPC.browserClose, (_e, tid: unknown) => browsers.close(tid))
+    ipcMain.handle(IPC.browserNavigate, (_e, tid: unknown, input: unknown) => browsers.navigate(tid, typeof input === 'string' ? input.slice(0, 4000) : ''))
+    ipcMain.on(IPC.browserGo, (_e, tid: unknown, action: unknown) => {
+        if (action === 'back' || action === 'forward' || action === 'reload' || action === 'stop')
+            browsers.go(tid, action)
+    })
+    ipcMain.on(IPC.browserShow, (e, tid: unknown, bounds: unknown) => {
+        const b = bounds as Record<string, unknown> | undefined
+        const valid = b && [b.x, b.y, b.width, b.height].every(n => typeof n === 'number' && Number.isFinite(n))
+        browsers.show(e.sender, typeof tid === 'string' ? tid : null, valid ? { x: b.x as number, y: b.y as number, width: b.width as number, height: b.height as number } : undefined)
+    })
+    ipcMain.on(IPC.browserDevTools, (_e, tid: unknown) => browsers.devTools(tid))
 }
 
 /** Windows that attached a terminal; each gets one cleanup when it goes away (or reloads its page). */
@@ -875,6 +906,7 @@ app.whenReady().then(async () => {
     registerIpc()
     // Before the first window, so the first threads' pi already gets the socket.
     await terminalTools.start().catch(error => console.error('terminal tools:', error))
+    await browserTools.start().catch(error => console.error('browser tools:', error))
     windows.restore(savedWindows(state))
     // Warm up env resolution so the first thread starts faster.
     void resolvePiEnv()
@@ -895,6 +927,8 @@ app.on('before-quit', (event) => {
     event.preventDefault()
     presence.stop()
     terminalTools.stop()
+    browserTools.stop()
+    browsers.closeAll()
     providers.channels.cancelAll()
     providers.service.helper.stop()
     void Promise.all([windows.prepareQuit(), agents.stopAll(), terminals.closeAll()]).finally(() => routes.shutdown().catch(() => {}).finally(() => app.quit()))

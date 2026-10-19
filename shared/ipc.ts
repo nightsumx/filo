@@ -610,6 +610,43 @@ export interface TerminalSnapshot {
     rows: number
 }
 
+/** A tab of the Browser tool window. Lives in main, per project. */
+export interface BrowserTabInfo {
+    id: string
+    cwd: string
+    /** The user's, or opened by an agent session (which then drives it). */
+    by: 'user' | 'agent'
+    /** Empty for a blank tab. */
+    url: string
+    title: string
+    loading: boolean
+    canGoBack: boolean
+    canGoForward: boolean
+    /** An agent call is running on it. */
+    busy: boolean
+    createdAt: number
+    /** The tab whose page opened this one. */
+    openedFrom?: string
+}
+
+/** Where the panel shows the page, in window coordinates (CSS pixels). */
+export interface BrowserBounds {
+    x: number
+    y: number
+    width: number
+    height: number
+}
+
+/** A shortcut pressed inside a page, handed to the app's window. */
+export interface BrowserKeyEvent {
+    key: string
+    code: string
+    ctrlKey: boolean
+    metaKey: boolean
+    altKey: boolean
+    shiftKey: boolean
+}
+
 /** The API preload exposes on window.pi. */
 export interface PiBridge {
     resolveEnv: () => Promise<PiEnvResult>
@@ -831,6 +868,20 @@ export interface PiBridge {
     /** Plain text of the last lines, for sending output to a thread. */
     terminalText: (id: string, lines?: number) => Promise<string>
 
+    /** Every browser tab (all projects); the list again on every change. */
+    browsers: () => Promise<BrowserTabInfo[]>
+    onBrowsers: (listener: (list: BrowserTabInfo[]) => void) => () => void
+    browserCreate: (cwd: string, url?: string) => Promise<BrowserTabInfo>
+    browserClose: (id: string) => Promise<void>
+    /** An address or a search; rejects with the reason when the page cannot be opened (a scheme the browser refuses). */
+    browserNavigate: (id: string, input: string) => Promise<void>
+    browserGo: (id: string, action: 'back' | 'forward' | 'reload' | 'stop') => void
+    /** This window's panel shows the tab at these bounds, or nothing (null). Sent whenever either changes. */
+    browserShow: (id: string | null, bounds?: BrowserBounds) => void
+    browserDevTools: (id: string) => void
+    /** A shortcut pressed inside a page. */
+    onBrowserKey: (listener: (event: BrowserKeyEvent) => void) => () => void
+
     /** Settings → 供应商: pi's providers and the models.json entries the page edits. */
     providers: () => Promise<ProvidersState>
     /** Starts a sign-in; its prompts and outcome arrive on onProviderLogin under the returned id. */
@@ -1044,6 +1095,15 @@ export const IPC = {
     terminalClose: 'terminal:close',
     terminalRestart: 'terminal:restart',
     terminalText: 'terminal:text',
+    browsers: 'browser:list',
+    browsersChanged: 'browser:changed',
+    browserCreate: 'browser:create',
+    browserClose: 'browser:close',
+    browserNavigate: 'browser:navigate',
+    browserGo: 'browser:go',
+    browserShow: 'browser:show',
+    browserDevTools: 'browser:devtools',
+    browserKey: 'browser:key',
     /** Renderer → main answer to a main → renderer request (export/import). */
     reply: 'window:reply',
 } as const

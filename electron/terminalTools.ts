@@ -8,13 +8,9 @@ import type { TerminalCall, TerminalRequest, TerminalResponse, TerminalSummary }
 import type { TerminalInfo } from '@shared/ipc'
 import { ENV } from '@shared/capabilities'
 import type { Terminals } from './terminals'
-import { randomBytes, timingSafeEqual } from 'node:crypto'
-import { realpathSync } from 'node:fs'
-import net from 'node:net'
 import path from 'node:path'
-import { platform } from './platform'
+import { projectOf, ToolSocket } from './toolSocket'
 
-const MAX_REQUEST = 64 * 1024
 const MAX_OUTPUT_CHARS = 12_000
 const POLL_MS = 200
 const MAX_TIMEOUT_MS = 10 * 60_000
@@ -44,109 +40,39 @@ function tail(text: string): string {
     return `[… earlier output cut]\n${nl === -1 ? cut : cut.slice(nl + 1)}`
 }
 
-function realpath(dir: string): string {
-    try {
-        return realpathSync(dir)
-    }
-    catch {
-        return dir
-    }
-}
-
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 
 const timeout = (ms: unknown, fallback: number) => typeof ms === 'number' && Number.isFinite(ms) && ms >= 0 ? Math.min(MAX_TIMEOUT_MS, ms) : fallback
 
 export class TerminalTools {
-    readonly token = randomBytes(24).toString('hex')
-    private server: net.Server | null = null
+    private socket: ToolSocket<TerminalRequest, TerminalResponse>
 
     /** `projects`: folders the windows show; a request's cwd is matched to one of them. */
-    constructor(private terminals: Terminals, readonly socketPath: string, private projects: () => Iterable<string> = () => []) {}
-
-    /**
-     * pi reports its cwd as the OS resolved it (/private/tmp/x for /tmp/x); terminals are filed under
-     * the project folder as the windows know it, so a request is mapped back to that.
-     */
-    private projectOf(cwd: string): string {
-        const real = realpath(cwd)
-        for (const project of this.projects()) {
-            if (project === cwd || realpath(project) === real)
-                return project
-        }
-        return cwd
+    constructor(private terminals: Terminals, readonly socketPath: string, private projects: () => Iterable<string> = () => []) {
+        this.socket = new ToolSocket(socketPath, request => this.handle(request), { socket: ENV.terminals, token: ENV.terminalsToken })
     }
 
-    async start() {
-        platform.clearIpc(this.socketPath)
-        const server = net.createServer(socket => this.connection(socket))
-        await new Promise<void>((resolve, reject) => {
-            server.once('error', reject)
-            server.listen(this.socketPath, () => {
-                server.off('error', reject)
-                resolve()
-            })
-        })
-        platform.restrict(this.socketPath)
-        this.server = server
+    get token() {
+        return this.socket.token
+    }
+
+    start() {
+        return this.socket.start()
     }
 
     /** What a pi the app starts gets, once the socket listens. */
-    env(): Record<string, string> {
-        return this.server ? { [ENV.terminals]: this.socketPath, [ENV.terminalsToken]: this.token } : {}
+    env() {
+        return this.socket.env()
     }
 
     stop() {
-        if (!this.server)
-            return
-        this.server.close()
-        this.server = null
-        platform.clearIpc(this.socketPath)
-    }
-
-    private connection(socket: net.Socket) {
-        let buffer = ''
-        socket.setEncoding('utf8')
-        socket.on('error', () => {})
-        socket.on('data', (chunk: string) => {
-            buffer += chunk
-            if (buffer.length > MAX_REQUEST) {
-                socket.destroy()
-                return
-            }
-            const nl = buffer.indexOf('\n')
-            if (nl === -1)
-                return
-            const line = buffer.slice(0, nl)
-            socket.removeAllListeners('data')
-            void this.answer(line).then(response => socket.end(`${JSON.stringify(response)}\n`))
-        })
-    }
-
-    private async answer(line: string): Promise<TerminalResponse> {
-        let request: TerminalRequest
-        try {
-            request = JSON.parse(line)
-        }
-        catch {
-            return { ok: false, error: 'bad request' }
-        }
-        const token = Buffer.from(typeof request?.token === 'string' ? request.token : '')
-        const expected = Buffer.from(this.token)
-        if (token.length !== expected.length || !timingSafeEqual(token, expected))
-            return { ok: false, error: 'not authorized' }
-        try {
-            return await this.handle(request)
-        }
-        catch (error: any) {
-            return { ok: false, error: String(error?.message ?? error) }
-        }
+        this.socket.stop()
     }
 
     async handle(request: TerminalCall): Promise<TerminalResponse> {
         if (typeof request.cwd !== 'string' || !path.isAbsolute(request.cwd))
             throw new Error('cwd must be an absolute path')
-        const cwd = this.projectOf(request.cwd)
+        const cwd = projectOf(request.cwd, this.projects())
         const ofProject = (id: unknown) => {
             const info = typeof id === 'string' ? this.terminals.get(id) : undefined
             if (!info || info.cwd !== cwd || info.by === 'setup')

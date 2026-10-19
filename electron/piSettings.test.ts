@@ -97,7 +97,7 @@ async function inAgentDir(body: (dir: string, file: string) => Promise<void>) {
     }
 }
 
-const FULL = ['todo', 'ask', 'approval', 'plan', 'subagent', 'review', 'autopilot', 'budget', 'terminal']
+const FULL = ['todo', 'ask', 'approval', 'plan', 'subagent', 'review', 'autopilot', 'budget', 'terminal', 'browser']
 
 describe('new-session defaults', () => {
     it('reads them as pi merges them for a project it trusts, and writes them as its TUI saves them', () => inAgentDir(async (dir, file) => {

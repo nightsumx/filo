@@ -205,6 +205,16 @@ const bridge: PiBridge = {
     terminalClose: id => ipcRenderer.invoke(IPC.terminalClose, id),
     terminalRestart: id => ipcRenderer.invoke(IPC.terminalRestart, id),
     terminalText: (id, lines) => ipcRenderer.invoke(IPC.terminalText, id, lines),
+
+    browsers: () => ipcRenderer.invoke(IPC.browsers),
+    onBrowsers: listener => listen(IPC.browsersChanged, listener),
+    browserCreate: (cwd, url) => ipcRenderer.invoke(IPC.browserCreate, cwd, url),
+    browserClose: id => ipcRenderer.invoke(IPC.browserClose, id),
+    browserNavigate: (id, input) => ipcRenderer.invoke(IPC.browserNavigate, id, input),
+    browserGo: (id, action) => ipcRenderer.send(IPC.browserGo, id, action),
+    browserShow: (id, bounds) => ipcRenderer.send(IPC.browserShow, id, bounds),
+    browserDevTools: id => ipcRenderer.send(IPC.browserDevTools, id),
+    onBrowserKey: listener => listen(IPC.browserKey, listener),
 }
 
 contextBridge.exposeInMainWorld('pi', bridge)

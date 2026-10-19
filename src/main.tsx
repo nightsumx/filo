@@ -5,6 +5,7 @@ import { App } from './App'
 import { initTheme } from './lib/theme'
 import { appStore } from './store/app'
 import { codeIntel } from './store/codeIntel'
+import { browserStore } from './store/browser'
 import { fileTreeStore } from './store/fileTree'
 import { terminalStore } from './store/terminals'
 import { existingView } from './features/Terminal/views'
@@ -22,8 +23,9 @@ createRoot(document.getElementById('root')!).render(
 
 void appStore.init()
 terminalStore.init()
+void browserStore.init()
 fileTreeStore.init()
 
 // Handle for inspecting state from DevTools (dev builds) and for end-to-end scripts (PI_GUI_TEST).
 if (import.meta.env.DEV || new URLSearchParams(location.search).has('test'))
-    Object.assign(window, { __app: appStore, __terminals: terminalStore, __terminalView: existingView, __files: fileTreeStore, __codeIntel: codeIntel })
+    Object.assign(window, { __app: appStore, __terminals: terminalStore, __browser: browserStore, __terminalView: existingView, __files: fileTreeStore, __codeIntel: codeIntel })

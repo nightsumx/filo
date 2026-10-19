@@ -2,11 +2,13 @@ import { Button } from '@/components/ui/button'
 import { Toaster } from '@/components/ui/sonner'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { appStore, isFileTab } from '@/store/app'
+import { browserStore } from '@/store/browser'
 import { terminalStore } from '@/store/terminals'
 import { AlertTriangle, FolderPlus, Loader2, Plus } from 'lucide-react'
 import { observer } from 'mobx-react-lite'
 import { Fragment, useEffect, useRef } from 'react'
 import { EditorPane } from './features/Editor'
+import { BrowserPanel, BrowserResizer } from './features/Browser'
 import { ReviewPanel } from './features/Review'
 import { SearchDialog } from './features/Search'
 import { SettingsDialog } from './features/Settings'
@@ -96,6 +98,7 @@ const Workspace = observer(() => {
     const column = useRef<HTMLDivElement>(null)
     const terminalOpen = terminalStore.open && terminalStore.tabs.length > 0
     useTerminalViews()
+    const browserOpen = browserStore.open && browserStore.tabs.length > 0
     return (
         <div className="flex min-h-0 flex-1 gap-[5px] px-[5px]">
             {appStore.sidebarOpen && <Sidebar />}
@@ -115,6 +118,14 @@ const Workspace = observer(() => {
                     </>
                 )}
             </div>
+            {browserOpen && (
+                <>
+                    <BrowserResizer maxWidth={() => (column.current?.parentElement?.clientWidth ?? 1200) - 420} />
+                    <div className="ide-island shrink-0" style={{ width: `min(${browserStore.width}px, 60%)` }}>
+                        <BrowserPanel />
+                    </div>
+                </>
+            )}
             {appStore.reviewOpen && active && (
                 <div className="ide-island w-[40%] min-w-[340px] max-w-[700px] shrink-0">
                     <ReviewPanel thread={active} onClose={appStore.toggleReview} />
@@ -142,6 +153,10 @@ function useShortcuts() {
                 case 'terminal':
                     e.preventDefault()
                     terminalStore.toggle(e.target instanceof Element && !!e.target.closest('.xterm'))
+                    break
+                case 'browser':
+                    e.preventDefault()
+                    browserStore.toggle()
                     break
                 case 'project': {
                     const project = appStore.projects[projectDigit(e) - 1]
