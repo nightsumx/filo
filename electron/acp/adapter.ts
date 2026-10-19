@@ -65,8 +65,18 @@ export interface AgentAdapterCallbacks {
 /**
  * Options every adapter needs when constructed.
  */
+/** A stdio MCP server the app hands to an agent for one thread (the browser's, see browserMcp.ts). */
+export interface McpServerConfig {
+    name: string
+    command: string
+    args: string[]
+    env: Record<string, string>
+}
+
 export interface AgentAdapterOptions {
     cwd: string
+    /** MCP servers this thread's agent gets besides its own configured ones. */
+    mcpServers?: McpServerConfig[]
     /** Resume this session (the adapter loads its history); otherwise start a new one. */
     sessionId?: string
     /** Only replay the session for reading, then stop: no events, no prompts. */

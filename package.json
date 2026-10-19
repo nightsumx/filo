@@ -141,6 +141,7 @@
                     "package.json",
                     "protocol.ts",
                     "extensions/**",
+                    "mcp/**",
                     "tui/**",
                     "lib/**"
                 ]

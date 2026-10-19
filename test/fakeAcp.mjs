@@ -124,6 +124,9 @@ function newSession(id, cwd) {
     return session
 }
 
+/** FAKE_ACP_PARAMS: a file that gets each session/new, session/load and session/fork request's params, one JSON line each. */
+const record = (method, params) => process.env.FAKE_ACP_PARAMS && appendFileSync(process.env.FAKE_ACP_PARAMS, `${JSON.stringify({ method, params })}\n`)
+
 const handlers = {
     initialize: () => ({
         protocolVersion: 1,
@@ -132,11 +135,13 @@ const handlers = {
         _meta: { steering: { supported: false } },
     }),
     'session/new': (params) => {
+        record('session/new', params)
         const session = newSession(`fake-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`, params.cwd)
         commandsSoon(session)
         return { sessionId: session.id, configOptions: configOptions(session) }
     },
     'session/load': (params) => {
+        record('session/load', params)
         const session = newSession(params.sessionId, params.cwd)
         const file = path.join(DIR, `${session.id}.jsonl`)
         if (!existsSync(file))

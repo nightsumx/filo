@@ -76,6 +76,9 @@ export const ENV = {
     browser: 'PI_KIT_BROWSER',
     /** Token every BrowserRequest carries. */
     browserToken: 'PI_KIT_BROWSER_TOKEN',
+    /** For the MCP server (mcp/browser.mjs): the project folder and who is calling. */
+    browserCwd: 'PI_KIT_BROWSER_CWD',
+    browserSession: 'PI_KIT_BROWSER_SESSION',
 } as const
 
 // ---------------------------------------------------------------- terminals
@@ -133,6 +136,9 @@ export type BrowserBody =
     | { method: 'eval', expression: string }
     | { method: 'console' }
     | { method: 'tabs', action: 'list' | 'select' | 'new' | 'close', id?: string, url?: string }
+    /** For the MCP server (mcp/browser.mjs): which tools there are, and a call by tool name and arguments. */
+    | { method: 'tools' }
+    | { method: 'tool', name: string, args?: unknown }
 
 export type BrowserCall = { cwd: string, session?: string } & BrowserBody
 
@@ -147,8 +153,17 @@ export interface BrowserTabSummary {
     current?: boolean
 }
 
+/** A tool as the MCP server lists it. */
+export interface BrowserToolInfo {
+    name: string
+    title: string
+    description: string
+    inputSchema: Record<string, unknown>
+    readOnly: boolean
+}
+
 export type BrowserResponse =
-    | { ok: true, tab?: BrowserTabSummary, tabs?: BrowserTabSummary[], text?: string, image?: { data: string, mimeType: string } }
+    | { ok: true, tab?: BrowserTabSummary, tabs?: BrowserTabSummary[], text?: string, image?: { data: string, mimeType: string }, tools?: BrowserToolInfo[], instructions?: string }
     | { ok: false, error: string }
 
 /** Details of browser_* results: the tab the call was about. */

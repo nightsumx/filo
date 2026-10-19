@@ -62,6 +62,8 @@ function reply(body: any): any[] {
             const question = (q: string, header: string, a: string, b: string) => ({ question: q, header, multiSelect: false, options: [{ label: a, description: a }, { label: b, description: b }] })
             return [{ type: 'tool_use', id: `toolu_ask_${n}`, name: 'AskUserQuestion', input: { questions: [question('Pick a colour?', 'Colour', 'Red', 'Blue'), question('Pick a size?', 'Size', 'Small', 'Large')] } }]
         }
+        if (/\bBROWSE\b/.test(text))
+            return [{ type: 'tool_use', id: `toolu_browse_${n}`, name: 'mcp__filo-browser__browser_tabs', input: { action: 'list' } }]
         if (/\bBASH\b/.test(text))
             return [{ type: 'text', text: 'Making the marker.' }, { type: 'tool_use', id: `toolu_bash_${n}`, name: 'Bash', input: { command: 'touch marker.txt && echo made', description: 'Make the marker' } }]
         if (/\bASK\b/.test(text))
@@ -368,6 +370,17 @@ async function main() {
             check(true, 'Remove runs claude mcp remove, and the list follows')
             await js(`(() => { window.__app.setSettingsOpen(false); return true })()`)
         }
+
+        // The browser tools arrive as the app's MCP server for this thread (--mcp-config), and a call goes to the app.
+        const mainTools = requests.find(r => Array.isArray(r.tools) && r.tools.length >= 5)?.tools.map((t: any) => t.name) ?? []
+        check(mainTools.includes('mcp__filo-browser__browser_navigate') && mainTools.includes('mcp__filo-browser__browser_snapshot'), `Claude Code lists the browser tools from the app's MCP server (${mainTools.filter((n: string) => n.startsWith('mcp__')).length} of them)`)
+        await send('BROWSE list the tabs')
+        await until('the approval card for the MCP tool', () => js<boolean>(`!!${T}.uiRequests[0]?.approval`), 30_000)
+        // The card comes with the hook; the dialog itself can still be drawing, and a key before it is lost.
+        await sleep(1000)
+        await click('Allow')
+        await settled('the browser tool ran', 'No tabs in this project')
+        check(true, 'a browser tool called by Claude Code reaches the app and answers')
 
         // A command: Claude Code's permission dialog, answered by the approval card.
         await send('BASH make the marker')

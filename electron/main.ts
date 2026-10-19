@@ -43,6 +43,7 @@ import { platform } from './platform'
 import { RoutesService } from './routes'
 import { windowPlatform } from './platform/window'
 import { parseAddress } from './browserText'
+import { browserMcpServers } from './browserMcp'
 import { BrowserTools } from './browserTools'
 import { Browsers } from './browsers'
 import { TerminalTools } from './terminalTools'
@@ -61,6 +62,7 @@ const store = new StateFile(() => path.join(app.getPath('userData'), 'state.json
 
 // pi loads capability extensions from real files, so packaged builds keep the pi-capabilities package
 // (extensions plus the helpers they import) outside the asar, as Resources/capabilities.
+/** The MCP server that gives the other agents the browser tools: a real file outside the asar, the agent runs it. */
 const extensionsDir = app.isPackaged ? path.join(process.resourcesPath, 'capabilities', 'extensions') : path.join(__dirname, '../../packages/capabilities/extensions')
 
 const agents = new AgentManager({
@@ -480,7 +482,7 @@ function registerIpc() {
         if (kind !== 'pi') {
             if (!(await isDirectory(options.cwd)))
                 throw new Error(tr(`项目目录不存在：${options.cwd}`, `Project folder not found: ${options.cwd}`))
-            const agentId = await agents.startAcp(acp, kind, options, (spec, launch) => routes.routeAcp(spec, launch, options.route))
+            const agentId = await agents.startAcp(acp, kind, options, (spec, launch) => routes.routeAcp(spec, launch, options.route), browserMcpServers({ script: browserMcpScript, env: () => browserTools.env() }, options.capabilities, options.cwd, kind))
             windows.addAgent(agentId, e.sender, options.cwd)
             return agentId
         }

@@ -4,6 +4,7 @@ import type { PiEvent, RpcResponse } from '@shared/pi'
 import type { ChildProcessWithoutNullStreams } from 'node:child_process'
 import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
+import type { McpServerConfig } from './acp/adapter'
 import type { AcpService, LaunchHook } from './acp/service'
 import { BridgeAgent } from './bridge'
 import { ENV } from '@shared/capabilities'
@@ -158,14 +159,14 @@ export class AgentManager {
     }
 
     /** An ACP agent for a thread; resolves once its process is spawned (the session opens after). */
-    async startAcp(service: AcpService, agent: AcpAgentId, options: AgentStartOptions, prepare?: LaunchHook): Promise<string> {
+    async startAcp(service: AcpService, agent: AcpAgentId, options: AgentStartOptions, prepare?: LaunchHook, mcpServers?: McpServerConfig[]): Promise<string> {
         const instance = await service.start(agent, options.cwd, options.sessionPath, {
             onEvent: this.callbacks.onEvent,
             onExit: (id, info) => {
                 this.agents.delete(id)
                 this.callbacks.onExit(id, info)
             },
-        }, prepare)
+        }, prepare, mcpServers)
         this.agents.set(instance.id, instance)
         return instance.id
     }

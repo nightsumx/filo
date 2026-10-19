@@ -245,6 +245,7 @@ export class ClaudeTuiAgent implements AgentAdapter {
     private dir: string
     private terminal = ''
     private settingsFile = ''
+    private mcpFile = ''
     private disposeHooks: (() => void) | null = null
     private exited = false
     private running = false
@@ -379,6 +380,13 @@ export class ClaudeTuiAgent implements AgentAdapter {
         this.askedAtStart = this.log.fold.asked
         writeFileSync(this.settingsFile, JSON.stringify(settings), { mode: 0o600 })
         const args = [...(resume ? ['--resume', this.session] : ['--session-id', this.session]), '--settings', this.settingsFile]
+        // The app's MCP servers for this thread, on top of the user's own (a file of this launch, like the settings).
+        const servers = this.options.mcpServers ?? []
+        if (servers.length) {
+            const file = this.mcpFile = path.join(tmp, `${this.id}-mcp.json`)
+            writeFileSync(file, JSON.stringify({ mcpServers: Object.fromEntries(servers.map(s => [s.name, { type: 'stdio', command: s.command, args: s.args, env: s.env }])) }), { mode: 0o600 })
+            args.push('--mcp-config', file)
+        }
         let id = ''
         id = terminals.run({ cwd: this.options.cwd, cols: 100, rows: 30, label: 'Claude Code' }, {
             file: this.launch.file,
@@ -1091,6 +1099,8 @@ export class ClaudeTuiAgent implements AgentAdapter {
         this.silenceTimer = null
         if (this.settingsFile)
             rmSync(this.settingsFile, { force: true })
+        if (this.mcpFile)
+            rmSync(this.mcpFile, { force: true })
         this.startedWaiters.splice(0)
     }
 

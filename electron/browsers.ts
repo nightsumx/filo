@@ -10,6 +10,7 @@ import type { BrowserBounds, BrowserKeyEvent, BrowserTabInfo } from '@shared/ipc
 import type { WebContents } from 'electron'
 import { randomUUID } from 'node:crypto'
 import { BrowserWindow, clipboard, Menu, session, WebContentsView } from 'electron'
+import { reveal } from './background'
 import { allowedScheme, parseAddress } from './browserText'
 import { PageDriver } from './browserDriver'
 import { tr } from './i18n'
@@ -166,8 +167,26 @@ export class Browsers {
             if (!allowedScheme(event.url))
                 event.preventDefault()
         })
-        // window.open and target=_blank become a tab of the same owner. (A login popup that talks back to its opener cannot work this way.)
-        wc.setWindowOpenHandler(({ url }) => {
+        // A popup a script opens (window.open with a size: "Sign in with Google") is a small window of its
+        // own, because it talks back to its opener (window.opener, postMessage) and a tab cannot. It has
+        // the same locked-down page settings and cookie jar, and closes with its tab. Links with
+        // target=_blank, and window.open without a size, become a tab of the same owner.
+        wc.setWindowOpenHandler(({ url, disposition, features }) => {
+            if (disposition === 'new-window' && features && allowedScheme(url)) {
+                return {
+                    action: 'allow',
+                    overrideBrowserWindowOptions: {
+                        parent: tab.window,
+                        show: false,
+                        width: 500,
+                        height: 700,
+                        autoHideMenuBar: true,
+                        fullscreenable: false,
+                        backgroundColor: '#ffffff',
+                        webPreferences: { partition: PARTITION, sandbox: true, contextIsolation: true, nodeIntegration: false },
+                    },
+                }
+            }
             if (allowedScheme(url) && url !== 'about:blank') {
                 try {
                     this.create(tab.cwd, tab.by, tab.owner, url, tab.id)
@@ -175,6 +194,13 @@ export class Browsers {
                 catch {}
             }
             return { action: 'deny' }
+        })
+        wc.on('did-create-window', (popup) => {
+            this.guardPopup(popup)
+            wc.once('destroyed', () => {
+                if (!popup.isDestroyed())
+                    popup.close()
+            })
         })
         wc.on('before-input-event', (_event, input) => {
             if (input.type === 'keyDown' && (input.control || input.meta))
@@ -203,6 +229,20 @@ export class Browsers {
             )
             Menu.buildFromTemplate(items).popup({ window: tab.window })
         })
+    }
+
+    /** A popup follows the same rules as a page: only web schemes, and no popups of its own beyond a tab. */
+    private guardPopup(popup: BrowserWindow) {
+        const wc = popup.webContents
+        const refuse = (event: Electron.Event, url: string) => {
+            if (!allowedScheme(url))
+                event.preventDefault()
+        }
+        wc.on('will-navigate', (event) => refuse(event, event.url))
+        wc.on('will-redirect', (event) => refuse(event, event.url))
+        wc.setWindowOpenHandler(() => ({ action: 'deny' }))
+        popup.setMenu(null)
+        reveal(popup, true)
     }
 
     close(id: unknown) {

@@ -213,6 +213,11 @@ export class AcpAgent implements AgentAdapter {
         return this.stderr.trim().split('\n').slice(-5).join('\n')
     }
 
+    /** ACP's stdio servers: the environment is a list of name and value. */
+    private mcpServers() {
+        return (this.options.mcpServers ?? []).map(s => ({ name: s.name, command: s.command, args: s.args, env: Object.entries(s.env).map(([name, value]) => ({ name, value })) }))
+    }
+
     private async open() {
         this.initResult = await this.connection.request('initialize', {
             protocolVersion: ACP_PROTOCOL_VERSION,
@@ -229,10 +234,10 @@ export class AcpAgent implements AgentAdapter {
                     throw new Error(tr(`${this.spec.label} 不支持打开旧会话`, `${this.spec.label} cannot reopen sessions`))
                 // History arrives as updates before the response; it fills the transcript silently.
                 this.sessionId = this.options.sessionId
-                result = await this.signedIn(() => this.connection.request('session/load', { sessionId: this.sessionId, cwd, mcpServers: [] }))
+                result = await this.signedIn(() => this.connection.request('session/load', { sessionId: this.sessionId, cwd, mcpServers: this.mcpServers() }))
             }
             else {
-                result = await this.signedIn(() => this.connection.request('session/new', { cwd, mcpServers: [] }))
+                result = await this.signedIn(() => this.connection.request('session/new', { cwd, mcpServers: this.mcpServers() }))
                 this.sessionId = String(result?.sessionId ?? '')
             }
         }
@@ -818,7 +823,7 @@ export class AcpAgent implements AgentAdapter {
                     const cwd = this.sessionCwd || this.options.cwd
                     const result: any = this.caps.xai
                         ? await this.connection.request('_x.ai/session/fork', { sourceSessionId: this.sessionId, sourceCwd: cwd, newCwd: cwd })
-                        : await this.connection.request('session/fork', { sessionId: this.sessionId, cwd, mcpServers: [] })
+                        : await this.connection.request('session/fork', { sessionId: this.sessionId, cwd, mcpServers: this.mcpServers() })
                     const forked = String(result?.newSessionId ?? result?.sessionId ?? '')
                     if (!forked)
                         throw new Error(tr('分叉没有返回会话', 'The fork returned no session'))

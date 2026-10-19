@@ -98,7 +98,7 @@ export const CAPABILITIES: readonly Capability[] = [
     {
         id: 'browser',
         label: { zh: '浏览器', en: 'Browser' },
-        description: { zh: 'Agent 能在右侧的浏览器面板里打开网页、读页面、点击、输入、截图、看控制台，用来验证它改的前端。你看得到，也能自己登录或接管。', en: 'The agent opens pages in the Browser panel on the right, reads them, clicks, types, takes screenshots and reads the console, to check the front end it changed. You can watch, log in yourself or take over.' },
+        description: { zh: 'Agent 能在右侧的浏览器面板里打开网页、读页面、点击、输入、截图、看控制台，用来验证它改的前端。你看得到，也能自己登录或接管。Codex、Claude Code 等线程通过 MCP 拿到同样的工具（新开的线程生效）。', en: 'The agent opens pages in the Browser panel on the right, reads them, clicks, types, takes screenshots and reads the console, to check the front end it changed. You can watch, log in yourself or take over. Codex, Claude Code and other agents get the same tools through MCP (new threads).' },
         entry: 'browser.ts',
         tools: ['browser_navigate', 'browser_snapshot', 'browser_screenshot', 'browser_click', 'browser_type', 'browser_press', 'browser_select', 'browser_scroll', 'browser_wait', 'browser_eval', 'browser_console', 'browser_tabs'],
         contextTokens: 1450,

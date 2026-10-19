@@ -4,6 +4,7 @@
 //
 // Only pi processes the app starts get the socket path and token (ENV.browser / browserToken).
 import type { BrowserCall, BrowserRequest, BrowserResponse, BrowserTabSummary } from '@shared/capabilities'
+import { BROWSER_GUIDELINES, BROWSER_SNIPPET, BROWSER_TOOLS, bodyOf } from 'pi-capabilities/lib/browserSpec.ts'
 import type { Browsers, Tab } from './browsers'
 import { ENV } from '@shared/capabilities'
 import path from 'node:path'
@@ -56,6 +57,16 @@ export class BrowserTools {
         const cwd = projectOf(call.cwd, this.projects())
         const session = text(call.session, 200) || 'unknown'
         const { browsers } = this
+
+        // The MCP server's two calls: what there is, and a call by name.
+        if (call.method === 'tools')
+            return { ok: true, tools: BROWSER_TOOLS.map(t => ({ name: t.name, title: t.label, description: t.description, inputSchema: t.parameters, readOnly: t.readOnly === true })), instructions: `${BROWSER_SNIPPET}.\n${BROWSER_GUIDELINES.map(g => `- ${g}`).join('\n')}` }
+        if (call.method === 'tool') {
+            const body = bodyOf(text(call.name, 100), call.args)
+            if (!body || body.method === 'tool' || body.method === 'tools')
+                throw new Error(`unknown tool ${text(call.name, 100)}`)
+            return this.handle({ cwd: call.cwd, session: call.session, ...body })
+        }
 
         if (call.method === 'tabs')
             return this.tabs(cwd, session, call)
@@ -131,8 +142,11 @@ export class BrowserTools {
             const tab = browsers.get(info.id)
             return tab ? [this.summary(tab, browsers.isCurrent(cwd, session, tab))] : []
         })
-        if (call.action === 'list')
-            return { ok: true, tabs: summaries() }
+        if (call.action === 'list') {
+            const tabs = summaries()
+            const lines = tabs.map(t => `${t.id}  ${t.title || '(untitled)'} — ${t.url || 'blank'}${t.by === 'user' ? '  [opened by the user]' : ''}${t.current ? '  [your calls land here]' : ''}`)
+            return { ok: true, tabs, text: lines.length ? `Tabs in this project:\n${lines.join('\n')}` : 'No tabs in this project.' }
+        }
 
         if (call.action === 'new') {
             const tab = browsers.open(cwd, session)

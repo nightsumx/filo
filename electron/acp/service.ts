@@ -4,7 +4,7 @@
 
 import type { AcpAgentCaps, AcpAgentId, AcpAgentSpec, AgentAvailability } from '@shared/agents'
 import type { SessionItem, SessionSnapshot, SessionSummary } from '@shared/ipc'
-import type { AgentAdapter, AgentAdapterCallbacks } from '../acp/adapter'
+import type { AgentAdapter, AgentAdapterCallbacks, McpServerConfig } from '../acp/adapter'
 import type { AcpLaunch } from './agent'
 import type { ListedSession, SessionList } from './list'
 import { ACP_AGENTS, acpAgent, acpSessionKey, parseAcpSessionKey } from '@shared/agents'
@@ -244,7 +244,7 @@ export class AcpService {
      * Starts an agent process for a thread; `sessionKey` resumes that session. `prepare` can change
      * the launch (routing points the agent at the app's gateway) and hear the process's id and end.
      */
-    async start(agent: AcpAgentId, cwd: string, sessionKey: string | undefined, callbacks: AgentAdapterCallbacks, prepare?: LaunchHook): Promise<AgentAdapter> {
+    async start(agent: AcpAgentId, cwd: string, sessionKey: string | undefined, callbacks: AgentAdapterCallbacks, prepare?: LaunchHook, mcpServers?: McpServerConfig[]): Promise<AgentAdapter> {
         const spec = acpAgent(agent)
         if (!spec)
             throw new Error(`Unknown agent: ${agent}`)
@@ -256,7 +256,7 @@ export class AcpService {
         const launch = prepared?.launch ?? await this.launchOf(spec)
 
         const AdapterClass = adapterClass(spec)
-        const instance = new AdapterClass(spec, launch, { cwd, sessionId: resume?.sessionId, replayTime: record?.updatedAt }, {
+        const instance = new AdapterClass(spec, launch, { cwd, sessionId: resume?.sessionId, replayTime: record?.updatedAt, mcpServers }, {
             onEvent: (id, event) => {
                 callbacks.onEvent(id, event)
                 if (event.type === 'message_end')

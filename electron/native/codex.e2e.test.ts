@@ -3,7 +3,8 @@
 // touches the user's Codex history or account.
 import type { AddressInfo } from 'node:net'
 import type { PiEvent } from '@shared/pi'
-import type { AgentAdapterCallbacks } from '../acp/adapter'
+import type { BrowserRequest, BrowserResponse } from '@shared/capabilities'
+import type { AgentAdapterCallbacks, McpServerConfig } from '../acp/adapter'
 import { execFileSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
@@ -13,6 +14,8 @@ import path from 'node:path'
 import { acpAgent } from '@shared/agents'
 import { APPROVAL_TITLE_PREFIX } from '@shared/capabilities'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { BROWSER_TOOLS } from 'pi-capabilities/lib/browserSpec.ts'
+import { ToolSocket } from '../toolSocket'
 import { CodexAgent, deleteCodexThread, displayCommand, listCodexThreads } from './codex'
 
 function findCodex(): string | undefined {
@@ -75,7 +78,7 @@ interface Started {
 
 const agents: CodexAgent[] = []
 
-async function start(sessionId?: string, readOnly = false): Promise<Started> {
+async function start(sessionId?: string, readOnly = false, mcpServers?: McpServerConfig[]): Promise<Started> {
     const events: PiEvent[] = []
     const waiters: { match: (e: any) => boolean, from: number, resolve: (e: any) => void }[] = []
     const callbacks: AgentAdapterCallbacks = {
@@ -91,7 +94,7 @@ async function start(sessionId?: string, readOnly = false): Promise<Started> {
         onExit: () => {},
         onFork: (_a, id) => `acp:codex:${id}`,
     }
-    const agent = new CodexAgent(spec, launch(), { cwd: work, sessionId, readOnly }, callbacks)
+    const agent = new CodexAgent(spec, launch(), { cwd: work, sessionId, readOnly, mcpServers }, callbacks)
     agents.push(agent)
     await agent.ready
     const next = (match: (e: any) => boolean, from = 0) => {
@@ -481,6 +484,39 @@ describe.skipIf(!codex)('Codex native adapter against codex app-server', () => {
         const result = replayed.find(i => i.message.role === 'toolResult' && i.message.toolName === 'subagent')!.message as any
         expect(result.details).toMatchObject({ kind: 'subagent', status: 'done', title: done.title })
         expect(childOutline(result.details)).toEqual(['user', '<bash>', 'toolResult', 'child says 3 files'])
+    }, 40_000)
+
+    it('gets the app\'s browser tools as an MCP server for this thread only, and a call reaches the app', async () => {
+        const seen: BrowserRequest[] = []
+        const socket = new ToolSocket<BrowserRequest, BrowserResponse>(path.join(work, 'browser.sock'), async (request) => {
+            seen.push(request)
+            return request.method === 'tools'
+                ? { ok: true, instructions: 'Use refs.', tools: BROWSER_TOOLS.map(t => ({ name: t.name, title: t.label, description: t.description, inputSchema: t.parameters, readOnly: t.readOnly === true })) }
+                : { ok: true, text: 'Page: Fake page\n- button "Go" [ref=e1]' }
+        }, { socket: 'PI_KIT_BROWSER', token: 'PI_KIT_BROWSER_TOKEN' })
+        await socket.start()
+        try {
+            const { agent, next, settled } = await start(undefined, false, [{
+                name: 'filo-browser',
+                command: process.execPath,
+                args: [path.resolve('packages/capabilities/mcp/browser.mjs')],
+                env: { ...socket.env(), PI_KIT_BROWSER_CWD: work, PI_KIT_BROWSER_SESSION: 'codex-test' },
+            }])
+            script = [{ call: { name: 'browser_snapshot', namespace: 'mcp__filo_browser', args: {} } }, { text: 'saw it' }]
+            await ok(agent, { type: 'prompt', message: 'look at the page' })
+            const ask = await Promise.race([next(e => e.type === 'extension_ui_request'), settled()])
+            if (ask.type === 'extension_ui_request')
+                agent.write({ type: 'extension_ui_response', id: ask.id, value: 'allow' })
+            await settled()
+            expect(latestInput()).toContain('Fake page')
+            expect(seen.find(r => r.method === 'tool')).toMatchObject({ name: 'browser_snapshot', cwd: work, session: 'codex-test', token: socket.token })
+            // The tool list in the model's request names the server's tools.
+            expect(JSON.stringify(requests[0])).toContain('browser_navigate')
+            expect(outline(agent)).toContain('result filo-browser.browser_snapshot')
+        }
+        finally {
+            socket.stop()
+        }
     }, 40_000)
 
     it('asks before an MCP tool runs: allow calls it, allow for the session stops asking, deny rejects it', async () => {

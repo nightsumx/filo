@@ -692,6 +692,15 @@ export class CodexAgent implements AgentAdapter {
         return message
     }
 
+    /**
+     * The app's MCP servers for this thread, as config overrides of the one thread: nothing is written to
+     * config.toml, so `codex` in a terminal and the user's other servers are left as they are.
+     */
+    private configOverrides() {
+        const servers = this.options.mcpServers ?? []
+        return servers.length ? { config: { mcp_servers: Object.fromEntries(servers.map(s => [s.name, { command: s.command, args: s.args, env: s.env }])) } } : {}
+    }
+
     private async open() {
         await this.rpc('initialize', { clientInfo: CLIENT_INFO, capabilities: { experimentalApi: true } })
         this.connection.notify('initialized', undefined)
@@ -706,7 +715,7 @@ export class CodexAgent implements AgentAdapter {
             // The turns come from thread/turns/list, page by page. Another process writing the thread
             // (the tab forked from, the Codex TUI) leaves this one reading it until it is free:
             // forking works meanwhile, a prompt takes the thread over then (takeOver).
-            info = await this.rpc('thread/resume', { threadId: this.options.sessionId, excludeTurns: true }).catch(async (error) => {
+            info = await this.rpc('thread/resume', { threadId: this.options.sessionId, excludeTurns: true, ...this.configOverrides() }).catch(async (error) => {
                 if (!isActiveWriter(String(error?.message ?? error)))
                     throw new Error(this.explain(error))
                 this.detached = true
@@ -716,7 +725,7 @@ export class CodexAgent implements AgentAdapter {
             await this.loadHistory()
         }
         else {
-            info = await this.rpc('thread/start', { cwd: this.options.cwd })
+            info = await this.rpc('thread/start', { cwd: this.options.cwd, ...this.configOverrides() })
             this.threadId = String(info?.thread?.id ?? '')
             if (!this.threadId)
                 throw new Error(tr(`${this.spec.label} 没有返回线程`, `${this.spec.label} returned no thread`))
